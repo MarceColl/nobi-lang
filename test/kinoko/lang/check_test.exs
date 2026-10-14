@@ -809,6 +809,7 @@ defmodule Kinoko.Lang.CheckTest do
     "def A.f() : Int do\n  x0 = 1\n" <> Enum.join(lines) <> "  1\nend"
   end
 
+  @tag :perf
   test "a type that doubles at every line stops the check at once" do
     for {map?, quoted} <- [{false, "(x12, x12)"}, {true, "%{x12 => x12}"}] do
       decls = parse(doubling(30, map?))
@@ -850,6 +851,7 @@ defmodule Kinoko.Lang.CheckTest do
   end
 
   @tag timeout: 120_000
+  @tag :perf
   test "a deep failing nest is quoted cheaply" do
     inner = "[" <> Enum.join(List.duplicate("1", 1_000_000), ", ") <> "]"
     nest = Enum.reduce(1..250, inner, fn _, n -> ~S|["s", | <> n <> "]" end)
@@ -1447,6 +1449,7 @@ defmodule Kinoko.Lang.CheckTest do
         do: {name, Enum.map(errs, & &1.code)}
   end
 
+  @tag :perf
   test "a deftype that never repeats an instantiation checks quickly" do
     chain = Enum.map_join(1..40, fn i -> "deftype T.A#{i}<K> do A(T.A#{i - 1}<(K, K)>) end\n" end)
 
@@ -1468,6 +1471,7 @@ defmodule Kinoko.Lang.CheckTest do
 
   defp pad(i), do: String.pad_leading(Integer.to_string(i), 5, "0")
 
+  @tag :perf
   test "a long chain of deftypes checks quickly" do
     chain =
       Enum.map_join(0..1998, fn i -> "deftype T.C#{pad(i)}<K> do A(T.C#{pad(i + 1)}<K>) end\n" end) <>
@@ -1483,6 +1487,7 @@ defmodule Kinoko.Lang.CheckTest do
     assert checked["T.g"].deps == MapSet.new(["T.C00000"])
   end
 
+  @tag :perf
   test "a ring of deftypes checks quickly" do
     length = 2000
 
@@ -1502,6 +1507,7 @@ defmodule Kinoko.Lang.CheckTest do
     assert checked["T.g"].deps == MapSet.new(["T.R01000"])
   end
 
+  @tag :perf
   test "a wide fan of deftypes checks quickly" do
     leaves = 10_000
 
@@ -1523,6 +1529,7 @@ defmodule Kinoko.Lang.CheckTest do
     assert MapSet.size(checked["T.g"].deps) == leaves + 1
   end
 
+  @tag :perf
   test "a dense group of deftypes checks quickly" do
     size = 500
     name = &"T.D#{String.pad_leading(Integer.to_string(&1), 3, "0")}"

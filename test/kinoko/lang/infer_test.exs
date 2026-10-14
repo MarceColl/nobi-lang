@@ -42,6 +42,7 @@ defmodule Kinoko.Lang.InferTest do
       assert Infer.resolve(st, a) == {:tuple, [b]}
     end
 
+    @tag :perf
     test "20_000 mismatching unifications stay fast" do
       st = Infer.allow(Infer.new(), 1_000_000)
 

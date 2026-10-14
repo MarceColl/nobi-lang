@@ -53,7 +53,13 @@ defmodule Kinoko.Lang.Lexer do
 
   @doc "A cursor at the start of `src` (CRLF is normalised to LF)."
   @spec new(String.t()) :: t
-  def new(src), do: %__MODULE__{rest: String.replace(src, "\r\n", "\n")}
+  def new(src) do
+    # No copy of a source without CRLF (the common case).
+    src =
+      if :binary.match(src, "\r\n") == :nomatch, do: src, else: String.replace(src, "\r\n", "\n")
+
+    %__MODULE__{rest: src}
+  end
 
   @doc "Where the cursor is, as `{line, col}`."
   @spec position(t) :: {pos_integer, pos_integer}
@@ -165,7 +171,9 @@ defmodule Kinoko.Lang.Lexer do
     do: {:error, error(l, c, "newline in string literal")}
 
   defp string(%{rest: <<?", rest::binary>>} = lx, l, c, acc),
-    do: {:ok, {:str, acc |> Enum.reverse() |> IO.iodata_to_binary(), l, c}, advance(lx, ?", rest)}
+    do:
+      {:ok, {:str, acc |> Enum.reverse() |> IO.iodata_to_binary() |> :binary.copy(), l, c},
+       advance(lx, ?", rest)}
 
   defp string(%{rest: <<?\\, rest::binary>>} = lx, l, c, acc) do
     lx = advance(lx, ?\\, rest)
@@ -181,13 +189,34 @@ defmodule Kinoko.Lang.Lexer do
 
         case escape(e) do
           {:ok, ch} -> string(lx, l, c, [ch | acc])
-          :error -> {:error, error(lx.line, lx.col, "unknown escape \\" <> <<e::utf8>>)}
+          :error -> {:error, error(lx.line, lx.col, "unknown escape \\" <> shown(e))}
         end
     end
   end
 
-  defp string(%{rest: <<ch::utf8, rest::binary>>} = lx, l, c, acc),
-    do: string(advance(lx, ch, rest), l, c, [<<ch::utf8>> | acc])
+  # A run of plain characters at once: one chunk and one cursor update,
+  # not one of each per character.
+  defp string(%{rest: rest, col: col} = lx, l, c, acc) do
+    case plain_run(rest, 0, 0) do
+      {0, _} ->
+        # Not valid UTF-8 here: never, `tokens/1` checks it first.
+        {:error, error(lx.line, col, "source is not valid UTF-8")}
+
+      {bytes, chars} ->
+        <<chunk::binary-size(bytes), rest::binary>> = rest
+        string(%{lx | rest: rest, col: col + chars}, l, c, [chunk | acc])
+    end
+  end
+
+  # Bytes and characters of the longest run of characters that are none of
+  # `"`, `\\`, newline (a string's plain text; also stops at invalid UTF-8).
+  defp plain_run(<<c, _::binary>>, b, n) when c in [?", ?\\, ?\n], do: {b, n}
+  defp plain_run(<<c, rest::binary>>, b, n) when c < 0x80, do: plain_run(rest, b + 1, n + 1)
+
+  defp plain_run(<<ch::utf8, rest::binary>>, b, n),
+    do: plain_run(rest, b + byte_size(<<ch::utf8>>), n + 1)
+
+  defp plain_run(_, b, n), do: {b, n}
 
   defp escape(?"), do: {:ok, "\""}
   defp escape(?\\), do: {:ok, "\\"}
@@ -235,7 +264,7 @@ defmodule Kinoko.Lang.Lexer do
   end
 
   defp punct(%{rest: <<ch::utf8, _::binary>>, line: l, col: c}),
-    do: {:error, error(l, c, "unexpected character '" <> <<ch::utf8>> <> "'")}
+    do: {:error, error(l, c, "unexpected character " <> quoted(ch))}
 
   # ---------- JSX raw mode ----------
 
@@ -246,10 +275,30 @@ defmodule Kinoko.Lang.Lexer do
   defp jsx_text(%{rest: ""}, l, c, _acc), do: {:error, error(l, c, "unterminated JSX element")}
 
   defp jsx_text(%{rest: <<ch, _::binary>>} = lx, _l, _c, acc) when ch in [?<, ?{],
-    do: {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary(), lx}
+    do: {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary() |> :binary.copy(), lx}
 
-  defp jsx_text(%{rest: <<ch::utf8, rest::binary>>} = lx, l, c, acc),
-    do: jsx_text(advance(lx, ch, rest), l, c, [<<ch::utf8>> | acc])
+  defp jsx_text(%{rest: <<?\n, rest::binary>>} = lx, l, c, acc),
+    do: jsx_text(advance(lx, ?\n, rest), l, c, ["\n" | acc])
+
+  defp jsx_text(%{rest: rest, col: col} = lx, l, c, acc) do
+    case text_run(rest, 0, 0) do
+      {0, _} ->
+        {:error, error(lx.line, col, "source is not valid UTF-8")}
+
+      {bytes, chars} ->
+        <<chunk::binary-size(bytes), rest::binary>> = rest
+        jsx_text(%{lx | rest: rest, col: col + chars}, l, c, [chunk | acc])
+    end
+  end
+
+  # `plain_run/3` for JSX text: stops at `<`, `{` and newline.
+  defp text_run(<<c, _::binary>>, b, n) when c in [?<, ?{, ?\n], do: {b, n}
+  defp text_run(<<c, rest::binary>>, b, n) when c < 0x80, do: text_run(rest, b + 1, n + 1)
+
+  defp text_run(<<ch::utf8, rest::binary>>, b, n),
+    do: text_run(rest, b + byte_size(<<ch::utf8>>), n + 1)
+
+  defp text_run(_, b, n), do: {b, n}
 
   @doc "Skip Unicode whitespace (including newlines)."
   @spec skip_raw_whitespace(t) :: t
@@ -309,6 +358,23 @@ defmodule Kinoko.Lang.Lexer do
   defp advance(%{col: c} = lx, _ch, rest), do: %{lx | rest: rest, col: c + 1}
 
   defp error(line, col, message), do: %{code: "parse", message: message, line: line, col: col}
+
+  # A character as a message shows it: quoted, or as `U+XXXX` when printing
+  # it raw would hide it or reorder the text around it (controls, bidi
+  # controls, zero-width and other format characters, separators).
+  defp quoted(ch), do: if(invisible?(ch), do: shown(ch), else: "'" <> <<ch::utf8>> <> "'")
+
+  defp shown(ch) do
+    if invisible?(ch),
+      do: "U+" <> String.pad_leading(Integer.to_string(ch, 16), 4, "0"),
+      else: <<ch::utf8>>
+  end
+
+  defp invisible?(ch),
+    do:
+      ch < 0x20 or ch in 0x7F..0x9F or ch == 0xAD or ch in 0x200B..0x200F or
+        ch in 0x2028..0x202E or ch in 0x2060..0x206F or ch == 0xFEFF or ch in 0xFFF9..0xFFFB or
+        ch == 0x061C or ch == 0x180E or (ch != 0x20 and whitespace?(ch))
 
   # Rust `char::is_whitespace`.
   defp whitespace?(c),

@@ -220,6 +220,7 @@ defmodule Kinoko.Lang.UniverseTest do
   # `Map` keyed by its parameter, stages as quickly as any patch, and a
   # function passed to its first deftype still reaches the last one's key.
   # Rust's debug bound, 1 s; staging measured here at ~65 ms.
+  @tag :perf
   test "a long chain of deftypes stages quickly" do
     staged = patch(chain(2000))
     {took, {u, v}} = seconds(fn -> stage(Universe.new(), "chain", staged) end)
@@ -239,6 +240,7 @@ defmodule Kinoko.Lang.UniverseTest do
   # that comes to be keyed by `V` is refused too: it would break the def.
   # Rust's debug bound, 10 s; staging measured here at ~1 s.
   @tag timeout: 120_000
+  @tag :perf
   test "a wide fan of deftypes stages quickly" do
     leaves = 10_000
     leaf = fn i -> "deftype T.L#{pad(i)}<K, V> do A(Map<K, V>) end\n" end
@@ -267,6 +269,7 @@ defmodule Kinoko.Lang.UniverseTest do
   # never scanned out of it. Rust's debug bound, 10 s; measured here at
   # ~0.4 s (25 s before sibling names were looked up in a sorted table).
   @tag timeout: 120_000
+  @tag :perf
   test "a patch of unbound references over a large table stages quickly" do
     committed = Enum.map_join(0..9_999, &"def M.d#{pad(&1)}() : Int do 1 end\n")
     {u, {:promoted, _}} = stage(Universe.new(), "base", patch(committed))
@@ -314,6 +317,7 @@ defmodule Kinoko.Lang.UniverseTest do
   # for breaking `M.c`. The attempts all define `M.f`, so they form a clique,
   # and no two of them merge: each stages in time linear in how many came
   # before, and so does an edit of `M.c`'s body after them, which promotes.
+  @tag :perf
   test "retrying one function under fresh ids stages quickly" do
     {u, _} =
       stage(
@@ -346,6 +350,7 @@ defmodule Kinoko.Lang.UniverseTest do
   # copies merge, being one patch, but each fails on its own over what no
   # other staged patch touches, so no set of them is tried. So does a fixed
   # version under the last copy's id, which promotes alone.
+  @tag :perf
   test "an identical patch resent under fresh ids stages quickly" do
     {took, u} =
       seconds(fn ->
@@ -370,6 +375,7 @@ defmodule Kinoko.Lang.UniverseTest do
   # Copies of one patch, each under its own id, wait for a name; once it is
   # staged, every copy promotes with it, in one round that applies the patch
   # once. The search tries the copies as one.
+  @tag :perf
   test "copies of a patch promote with their fix quickly" do
     copies = for i <- 0..17, do: "copy#{pad2(i)}"
     copy = patch("def M.g() : Int do M.missing() + 1 end")
@@ -392,6 +398,7 @@ defmodule Kinoko.Lang.UniverseTest do
   # A helper is staged broken, then callers of it, each in a patch of its
   # own: a star around the helper. Once the helper is fixed, under its own
   # id, everything promotes with it.
+  @tag :perf
   test "callers of a broken helper each in its own patch stage quickly" do
     callers = for i <- 0..17, do: "caller#{pad2(i)}"
 
@@ -427,6 +434,7 @@ defmodule Kinoko.Lang.UniverseTest do
   # stage around them. Then a root is staged whose second declaration fails
   # alone over what nothing else touches, so `alive` drops the root alone,
   # and the part ends at once.
+  @tag :perf
   test "a dead root beside live callers is refused quickly" do
     {u, {:staged, _}} =
       stage(Universe.new(), "huba", patch("def M.hub() : Int do M.missing_a() end"))

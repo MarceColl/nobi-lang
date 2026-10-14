@@ -146,6 +146,7 @@ defmodule Kinoko.Lang.FormatTest do
   end
 
   describe "not exponential in depth" do
+    @describetag :perf
     @long "averyveryverylongidentifiername"
 
     defp nest(0, _), do: "x"

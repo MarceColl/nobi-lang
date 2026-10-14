@@ -114,6 +114,21 @@ defmodule Kinoko.Lang.LexerTest do
     assert err("\"abc\\") == {"unknown escape \\", 1, 7}
   end
 
+  test "a string's position after it counts characters, not bytes" do
+    assert {:ok, [{:str, "ñ☃é", 1, 1}, {:name, "x", 1, 7}, _]} = Lexer.tokens(~s|"ñ☃é" x|)
+    assert {:ok, [{:str, "a\\tb", 1, 1}, {:name, "x", 1, 9}, _]} = Lexer.tokens(~S|"a\\tb" x|)
+  end
+
+  test "a message shows control, bidi and zero-width characters as code points" do
+    assert err("\u0007") == {"unexpected character U+0007", 1, 1}
+    assert err("\u202E") == {"unexpected character U+202E", 1, 1}
+    assert err("\u200B") == {"unexpected character U+200B", 1, 1}
+    assert err("\uFEFF") == {"unexpected character U+FEFF", 1, 1}
+    assert err("\u00A0") == {"unexpected character U+00A0", 1, 1}
+    assert err("\"\\\u2066\"") == {"unknown escape \\U+2066", 1, 4}
+    assert err("é") == {"unexpected character 'é'", 1, 1}
+  end
+
   test "no comments" do
     assert err("#") == {"unexpected character '#'", 1, 1}
     assert kinds("//") == [:op, :op, :eof]

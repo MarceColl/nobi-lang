@@ -2,6 +2,8 @@ defmodule Kinoko.Lang.ParserPerfTest do
   # Not async: the timing must not compete with other test modules.
   use ExUnit.Case, async: false
 
+  @moduletag :perf
+
   alias Kinoko.Lang.Parser
 
   test "a 5 MB source parses within 3 seconds" do

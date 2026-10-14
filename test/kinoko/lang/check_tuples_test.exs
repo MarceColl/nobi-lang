@@ -307,6 +307,7 @@ defmodule Kinoko.Lang.CheckTuplesTest do
   end
 
   @tag timeout: 120_000
+  @tag :perf
   test "a wide tuple of bools is checked exactly in bounded time" do
     t = "(" <> Enum.join(List.duplicate("Bool", 12), ", ") <> ")"
     arms = for bits <- 0..4095, do: "#{bools(bits)} -> #{bits}"
@@ -346,6 +347,7 @@ defmodule Kinoko.Lang.CheckTuplesTest do
   end
 
   @tag timeout: 120_000
+  @tag :perf
   test "a tuple case too complex to check is refused in bounded time" do
     {t, arms} = splitting(40)
 
