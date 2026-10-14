@@ -1,0 +1,276 @@
+[
+ {
+  "name": "List.map",
+  "examples": [
+   "List.map([1, 2, 3], fn (x : Int) -> x * 2 end) == [2, 4, 6]",
+   "List.map([\"a\"], fn (s : String) -> String.length(s) end) == [1]"
+  ]
+ },
+ {
+  "name": "List.filter",
+  "examples": [
+   "List.filter([1, 2, 3, 4], fn (x : Int) -> x > 2 end) == [3, 4]",
+   "List.filter([1], fn (x : Int) -> false end) == []"
+  ]
+ },
+ {
+  "name": "List.append",
+  "examples": [
+   "List.append([1, 2], 3) == [1, 2, 3]",
+   "List.append([], 1) == [1]"
+  ]
+ },
+ {
+  "name": "List.concat",
+  "examples": [
+   "List.concat([1], [2, 3]) == [1, 2, 3]",
+   "List.concat([], [1]) == [1]"
+  ]
+ },
+ {
+  "name": "List.length",
+  "examples": [
+   "List.length([1, 2, 3]) == 3",
+   "List.length([\"a\"]) == 1"
+  ]
+ },
+ {
+  "name": "List.is_empty",
+  "examples": [
+   "List.is_empty(List.filter([1], fn (x : Int) -> false end)) == true",
+   "List.is_empty([1]) == false"
+  ]
+ },
+ {
+  "name": "List.foldl",
+  "examples": [
+   "List.foldl([1, 2, 3], 0, fn (x : Int, acc : Int) -> acc + x end) == 6",
+   "List.foldl([], 7, fn (x : Int, acc : Int) -> acc + x end) == 7",
+   "List.foldl([\"a\", \"b\", \"c\"], \"\", fn (x : String, acc : String) -> acc ++ x end) == \"abc\""
+  ]
+ },
+ {
+  "name": "List.sum",
+  "examples": [
+   "List.sum([1, 2, 3]) == 6",
+   "List.sum([]) == 0",
+   "List.sum([0 - 2, 2]) == 0"
+  ]
+ },
+ {
+  "name": "List.maximum",
+  "examples": [
+   "List.maximum([1, 3, 2]) == Option.Some(3)",
+   "List.maximum([0 - 5]) == Option.Some(0 - 5)",
+   "List.maximum([]) == Option.None"
+  ]
+ },
+ {
+  "name": "List.minimum",
+  "examples": [
+   "List.minimum([3, 1, 2]) == Option.Some(1)",
+   "List.minimum([]) == Option.None"
+  ]
+ },
+ {
+  "name": "List.reverse",
+  "examples": [
+   "List.reverse([1, 2, 3]) == [3, 2, 1]",
+   "List.reverse([\"a\", \"b\"]) == [\"b\", \"a\"]"
+  ]
+ },
+ {
+  "name": "List.member",
+  "examples": [
+   "List.member([1, 2], 2) == true",
+   "List.member([1, 2], 3) == false",
+   "List.member([[1]], [1]) == true"
+  ]
+ },
+ {
+  "name": "List.all",
+  "examples": [
+   "List.all([2, 4], fn (x : Int) -> x > 1 end) == true",
+   "List.all([2, 0], fn (x : Int) -> x > 1 end) == false",
+   "List.all([], fn (x : Int) -> false end) == true"
+  ]
+ },
+ {
+  "name": "List.any",
+  "examples": [
+   "List.any([1, 5], fn (x : Int) -> x > 4 end) == true",
+   "List.any([], fn (x : Int) -> true end) == false"
+  ]
+ },
+ {
+  "name": "List.head",
+  "examples": [
+   "List.head([1, 2]) == Option.Some(1)",
+   "List.head([1]) == Option.Some(1)"
+  ]
+ },
+ {
+  "name": "List.take",
+  "examples": [
+   "List.take([1, 2, 3], 2) == [1, 2]",
+   "List.take([1], 9) == [1]",
+   "List.take([1], 0 - 1) == []"
+  ]
+ },
+ {
+  "name": "List.drop",
+  "examples": [
+   "List.drop([1, 2, 3], 2) == [3]",
+   "List.drop([1], 9) == []",
+   "List.drop([1], 0 - 1) == [1]"
+  ]
+ },
+ {
+  "name": "List.filter_map",
+  "examples": [
+   "List.filter_map([\"1\", \"x\", \"2\"], fn (s : String) -> String.to_int(s) end) == [1, 2]",
+   "List.filter_map([\"x\"], fn (s : String) -> String.to_int(s) end) == []"
+  ]
+ },
+ {
+  "name": "List.sort_by",
+  "examples": [
+   "List.sort_by([3, 1, 2], fn (x : Int) -> x end) == [1, 2, 3]",
+   "List.sort_by([1, 2, 3], fn (x : Int) -> 0 - x end) == [3, 2, 1]",
+   "List.sort_by([\"bb\", \"a\"], fn (s : String) -> String.length(s) end) == [\"a\", \"bb\"]",
+   "List.sort_by([], fn (x : Int) -> x end) == []"
+  ]
+ },
+ {
+  "name": "String.length",
+  "examples": [
+   "String.length(\"abc\") == 3",
+   "String.length(\"\") == 0",
+   "String.length(\"👋\") == 1"
+  ]
+ },
+ {
+  "name": "String.concat",
+  "examples": [
+   "String.concat(\"a\", \"b\") == \"ab\"",
+   "String.concat(\"\", \"a\") == \"a\""
+  ]
+ },
+ {
+  "name": "String.from_int",
+  "examples": [
+   "String.from_int(7) == \"7\"",
+   "String.from_int(0 - 7) == \"-7\"",
+   "String.from_int(0) == \"0\""
+  ]
+ },
+ {
+  "name": "String.to_int",
+  "examples": [
+   "String.to_int(\"12\") == Option.Some(12)",
+   "String.to_int(\"-12\") == Option.Some(0 - 12)",
+   "String.to_int(\"0\") == Option.Some(0)",
+   "String.to_int(\"1.5\") == Option.None",
+   "String.to_int(\"1e3\") == Option.None",
+   "String.to_int(\" 1\") == Option.None",
+   "String.to_int(\"\") == Option.None",
+   "String.to_int(\"abc\") == Option.None",
+   "String.to_int(\"9007199254740993\") == Option.None"
+  ]
+ },
+ {
+  "name": "String.is_empty",
+  "examples": [
+   "String.is_empty(\"\") == true",
+   "String.is_empty(\" \") == false"
+  ]
+ },
+ {
+  "name": "String.reverse",
+  "examples": [
+   "String.reverse(\"abc\") == \"cba\"",
+   "String.reverse(\"a👋\") == \"👋a\""
+  ]
+ },
+ {
+  "name": "String.trim",
+  "examples": [
+   "String.trim(\"  a  \") == \"a\"",
+   "String.trim(\"\") == \"\""
+  ]
+ },
+ {
+  "name": "String.to_upper",
+  "examples": [
+   "String.to_upper(\"aB\") == \"AB\"",
+   "String.to_upper(\"1\") == \"1\""
+  ]
+ },
+ {
+  "name": "String.to_lower",
+  "examples": [
+   "String.to_lower(\"Ab\") == \"ab\""
+  ]
+ },
+ {
+  "name": "String.contains",
+  "examples": [
+   "String.contains(\"abc\", \"b\") == true",
+   "String.contains(\"abc\", \"d\") == false",
+   "String.contains(\"a\", \"\") == true"
+  ]
+ },
+ {
+  "name": "String.starts_with",
+  "examples": [
+   "String.starts_with(\"abc\", \"ab\") == true",
+   "String.starts_with(\"abc\", \"b\") == false"
+  ]
+ },
+ {
+  "name": "String.split",
+  "examples": [
+   "String.split(\"a,b\", \",\") == [\"a\", \"b\"]",
+   "String.split(\"a\", \",\") == [\"a\"]",
+   "String.split(\"a👋\", \"\") == [\"a\", \"👋\"]"
+  ]
+ },
+ {
+  "name": "String.join",
+  "examples": [
+   "String.join([\"a\", \"b\"], \", \") == \"a, b\"",
+   "String.join([], \",\") == \"\"",
+   "String.join([\"a\"], \",\") == \"a\""
+  ]
+ },
+ {
+  "name": "String.slice",
+  "examples": [
+   "String.slice(\"abcd\", 1, 3) == \"bc\"",
+   "String.slice(\"abc\", 0, 9) == \"abc\"",
+   "String.slice(\"abc\", 2, 1) == \"\"",
+   "String.slice(\"a👋b\", 1, 2) == \"👋\""
+  ]
+ },
+ {
+  "name": "Option.with_default",
+  "examples": [
+   "Option.with_default(Option.Some(1), 9) == 1",
+   "Option.with_default(String.to_int(\"x\"), 0) == 0"
+  ]
+ },
+ {
+  "name": "Option.map",
+  "examples": [
+   "Option.map(Option.Some(2), fn (x : Int) -> x * 3 end) == Option.Some(6)",
+   "Option.map(String.to_int(\"x\"), fn (x : Int) -> x * 3 end) == Option.None"
+  ]
+ },
+ {
+  "name": "Option.and_then",
+  "examples": [
+   "Option.and_then(Option.Some(\"2\"), fn (s : String) -> String.to_int(s) end) == Option.Some(2)",
+   "Option.and_then(Option.Some(\"x\"), fn (s : String) -> String.to_int(s) end) == Option.None"
+  ]
+ }
+]
