@@ -160,6 +160,11 @@ defmodule Kinoko.Lang.Types.Check.Decl do
     "model field `#{field}` cannot hold `#{Quote.type(t)}` — #{what} not data to store"
   end
 
+  # Identifier limits: a name is a key in every table, message and URL it
+  # reaches, so it stays short enough to read and to store.
+  @max_segment 64
+  @max_name 200
+
   @stdlib_roots Stdlib.names() |> Enum.map(&hd(String.split(&1, "."))) |> Enum.uniq()
 
   # A namespace the compiler owns: a builtin type's, or the first segment of
@@ -174,7 +179,9 @@ defmodule Kinoko.Lang.Types.Check.Decl do
   reserved namespace; qualified by a module (an app's names its module);
   defs and tests end lowercase, models, types and apps capitalised; variants
   capitalised; every segment, parameter, field and variant a valid
-  identifier; and none of them named twice.
+  identifier of at most #{@max_segment} characters, a whole name (a
+  variant's with its type's) of at most #{@max_name}; and none of them
+  named twice.
   """
   def check_name_convention(ctx, {kind, _, args} = decl) do
     name = Ast.name(decl)
@@ -207,6 +214,7 @@ defmodule Kinoko.Lang.Types.Check.Decl do
       end
 
     ctx = name |> String.split(".") |> Enum.reduce(ctx, &Ctx.check_ident(&2, &1))
+    ctx = check_lengths(ctx, kind, name, args)
 
     ctx =
       case {kind, args} do
@@ -245,6 +253,49 @@ defmodule Kinoko.Lang.Types.Check.Decl do
       _ ->
         ctx
     end
+  end
+
+  # Every segment of the name, and every parameter, field and variant, at
+  # most `@max_segment` characters; the name, and each variant's full name,
+  # at most `@max_name`.
+  defp check_lengths(ctx, kind, name, args) do
+    own =
+      case {kind, args} do
+        {:def, [_, params, _, _]} -> Enum.map(params, &elem(&1, 0))
+        {:defmodel, [_, fields]} -> Enum.map(fields, &elem(&1, 0))
+        {:deftype, [_, _, variants]} -> Enum.map(variants, &elem(&1, 0))
+        _ -> []
+      end
+
+    wholes =
+      case {kind, args} do
+        {:deftype, [_, _, variants]} -> [name | Enum.map(variants, &"#{name}.#{elem(&1, 0)}")]
+        _ -> [name]
+      end
+
+    ctx =
+      (String.split(name, ".") ++ own)
+      |> Enum.filter(&(String.length(&1) > @max_segment))
+      |> Enum.uniq()
+      |> Enum.reduce(ctx, fn segment, ctx ->
+        Ctx.error(
+          ctx,
+          "bad-name",
+          "`#{Quote.cut(segment)}` is #{String.length(segment)} characters long — a name's segments, " <>
+            "parameters, fields and variants are at most #{@max_segment}"
+        )
+      end)
+
+    wholes
+    |> Enum.filter(&(String.length(&1) > @max_name))
+    |> Enum.reduce(ctx, fn whole, ctx ->
+      Ctx.error(
+        ctx,
+        "bad-name",
+        "`#{Quote.cut(whole)}` is #{String.length(whole)} characters long — a name is at most " <>
+          "#{@max_name}, its dots included"
+      )
+    end)
   end
 
   defp case_convention(ctx, kind, name, last) when kind in [:def, :deftest] do

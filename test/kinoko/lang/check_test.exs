@@ -202,6 +202,46 @@ defmodule Kinoko.Lang.CheckTest do
     assert first_error("def Cmd.none() : Int do 1 end").code == "bad-name"
   end
 
+  describe "identifier limits" do
+    # `segments` dotted segments of `width` characters, the last lowercase.
+    defp long_name(segments, width) do
+      heads =
+        for i <- 1..(segments - 1)//1, do: "M" <> String.duplicate("#{rem(i, 10)}", width - 1)
+
+      Enum.join(heads ++ ["f" <> String.duplicate("x", width - 1)], ".")
+    end
+
+    defp name_errors(src) do
+      for {_, %{result: {:error, errs}}} <- check_all(src),
+          %{code: "bad-name", message: m} <- errs,
+          do: m
+    end
+
+    test "a segment of 64 characters is a name; of 65 it is refused" do
+      assert name_errors("def #{long_name(2, 64)}() : Int do 1 end") == []
+      assert [message] = name_errors("def A.#{String.duplicate("f", 65)}() : Int do 1 end")
+      assert message =~ "is 65 characters long" and message =~ "at most 64"
+
+      assert name_errors("def A.f(#{String.duplicate("p", 64)} : Int) : Int do 1 end") == []
+      assert [_] = name_errors("def A.f(#{String.duplicate("p", 65)} : Int) : Int do 1 end")
+      assert [_] = name_errors("defmodel A.M do\n  #{String.duplicate("f", 65)} : Int\nend")
+      assert [_] = name_errors("deftype A.T do V#{String.duplicate("v", 64)} end")
+    end
+
+    test "a name of 200 characters is a name; of 201 it is refused" do
+      # four segments of 50 and three dots: 203; trim the last segment.
+      at = fn total ->
+        name = long_name(4, 50)
+        String.slice(name, 0, total)
+      end
+
+      assert String.length(at.(200)) == 200
+      assert name_errors("def #{at.(200)}() : Int do 1 end") == []
+      assert [message] = name_errors("def #{at.(201)}() : Int do 1 end")
+      assert message =~ "is 201 characters long" and message =~ "at most 200"
+    end
+  end
+
   test "same-scope rebinding is rejected" do
     assert first_error("def F.f() : Int do x = 1 \n x = 2 \n x end").code == "bad-name"
   end
