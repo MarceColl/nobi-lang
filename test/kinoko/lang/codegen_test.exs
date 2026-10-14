@@ -1,0 +1,423 @@
+defmodule Kinoko.Lang.CodegenTest do
+  # Loads modules into the VM: not async, so two tests never load or purge
+  # the same image at once.
+  use ExUnit.Case, async: false
+
+  alias Kinoko.Exec.Hooks
+  alias Kinoko.Lang
+  alias Kinoko.Lang.Codegen
+
+  @counter File.read!("test/fixtures/yabu/counter.yabu")
+  @split File.read!("test/fixtures/yabu/split.yabu")
+
+  defp universe(source) do
+    {u, r} = Lang.stage(Lang.new(), "p", source)
+    assert {:promoted, _} = r
+    u
+  end
+
+  # Loads an image (tests only: `Kinoko.Lang` never loads code).
+  defp load(%{module: mod, binary: bin}) do
+    {:module, ^mod} = :code.load_binary(mod, ~c"yabu", bin)
+
+    on_exit(fn ->
+      :code.purge(mod)
+      :code.delete(mod)
+      :code.purge(mod)
+    end)
+
+    mod
+  end
+
+  defp image!(source) do
+    {:ok, image} = source |> universe() |> Lang.image()
+    image
+  end
+
+  defp call(image, name, args) do
+    {fun, arity} = Map.fetch!(image.names, name)
+    ^arity = length(args)
+    apply(image.module, fun, args)
+  end
+
+  defp sources do
+    corpus = Enum.map(YabuGolden.corpus(), &{&1["file"], YabuOracle.corpus_source(&1["file"])})
+
+    generated =
+      YabuGolden.generated()
+      |> Enum.with_index()
+      |> Enum.map(fn {p, i} -> {"generated[#{i}]", p["source"]} end)
+
+    corpus ++ generated
+  end
+
+  describe "compiling" do
+    test "every corpus and generated program compiles without errors or warnings" do
+      for {label, source} <- sources() do
+        committed = source |> universe() |> Lang.committed()
+        {_mod, forms, _names, _tests} = Codegen.forms(committed)
+
+        case :compile.noenv_forms(forms, Codegen.compile_options()) do
+          {:ok, _mod, bin, warnings} when is_binary(bin) ->
+            assert warnings == [], "#{label}: #{inspect(warnings)}"
+
+          other ->
+            flunk("#{label}: #{inspect(other, limit: 20)}")
+        end
+      end
+    end
+
+    test "an image is deterministic, and named by its code alone" do
+      a = image!(@counter)
+      b = image!(@counter)
+      assert a.module == b.module
+      assert a.binary == b.binary
+      assert a.hash == Codegen.image_hash(Lang.committed(universe(@counter)))
+      assert Atom.to_string(a.module) == "yabu_img_" <> binary_part(a.hash, 0, 20)
+      assert a.hash =~ ~r/^[0-9a-f]{64}$/
+
+      c = image!(@counter <> "\ndef Counter.extra() : Int do\n  1\nend\n")
+      refute c.module == a.module
+    end
+
+    test "the image hash is sha256 of the sorted name\\0cid lines" do
+      committed = Lang.committed(universe(@counter))
+
+      lines =
+        committed
+        |> Enum.sort()
+        |> Enum.map_join(fn {name, %{cid: cid}} -> name <> "\0" <> cid <> "\n" end)
+
+      assert Codegen.image_hash(committed) ==
+               Base.encode16(:crypto.hash(:sha256, lines), case: :lower)
+    end
+
+    @allowed ~w(attribute module export function clause call remote var atom integer
+                string bin bin_element default utf8 integer tuple cons nil map
+                map_field_assoc match case fun clauses block op andalso orelse not
+                eof true false rec uuid cmd none batch effect names image models types tests
+                _ - =:= =/= < > =< >= named applied arrow maps from_list)a
+
+    test "no atom in the forms comes from user text" do
+      for {label, source} <- sources() do
+        committed = source |> universe() |> Lang.committed()
+        {mod, forms, _names, _tests} = Codegen.forms(committed)
+        modules = [Kinoko.Lang.Rt, Kinoko.Lang.Rt.Stdlib, Kinoko.Lang.Rt.Json, Kinoko.Exec.Hooks]
+
+        stdlib_funs =
+          for name <- Kinoko.Lang.Types.Stdlib.names(),
+              {_, f, _} <- [Kinoko.Lang.Rt.Stdlib.function_for(name)],
+              do: f
+
+        rt_funs = Enum.flat_map(modules, fn m -> Keyword.keys(m.__info__(:functions)) end)
+        allowed = MapSet.new(@allowed ++ modules ++ stdlib_funs ++ rt_funs ++ [:__yabu__, mod])
+
+        for atom <- atoms(forms), not MapSet.member?(allowed, atom) do
+          assert Atom.to_string(atom) =~ ~r/^(d\d+|V\d+)$/, "#{label}: #{inspect(atom)}"
+        end
+      end
+    end
+
+    test "a user name that looks like an atom stays a binary" do
+      src = """
+      deftype Erlang.Spawn do
+        Exit | Halt(Int)
+      end
+
+      def Erlang.halt(x : Int) : Erlang.Spawn do
+        case x do
+          0 -> Erlang.Spawn.Exit
+          n -> Erlang.Spawn.Halt(n)
+        end
+      end
+      """
+
+      {_mod, forms, _names, _tests} = Codegen.forms(Lang.committed(universe(src)))
+      refute :halt in atoms(forms)
+      refute :Exit in atoms(forms)
+    end
+  end
+
+  defp atoms(term) when is_atom(term), do: [term]
+  defp atoms(term) when is_list(term), do: Enum.flat_map(term, &atoms/1)
+  defp atoms(term) when is_tuple(term), do: term |> Tuple.to_list() |> atoms()
+
+  defp atoms(term) when is_map(term),
+    do: Enum.flat_map(term, fn {k, v} -> atoms(k) ++ atoms(v) end)
+
+  defp atoms(_), do: []
+
+  describe "the image module" do
+    test "__yabu__ answers names, image, models, types and tests" do
+      image = image!(@split)
+      mod = load(image)
+      committed = Lang.committed(universe(@split))
+
+      defs = for {n, %{signature: {:def, _, _}}} <- committed, do: n
+      assert Enum.sort(Map.keys(mod.__yabu__(:names))) == Enum.sort(defs)
+      assert mod.__yabu__(:names) == image.names
+      assert mod.__yabu__(:image) == image.hash
+
+      assert Map.keys(mod.__yabu__(:tests)) |> Enum.sort() ==
+               [
+                 "Split.handles_an_empty_trip",
+                 "Split.money_prints_cents",
+                 "Split.splits_what_was_paid"
+               ]
+
+      assert mod.__yabu__(:models)["Split.Share"] == [
+               {"who", {:named, "String"}},
+               {"owes", {:named, "Int"}}
+             ]
+
+      assert {[], [{"SetPayer", _} | _]} = mod.__yabu__(:types)["Split.Msg"]
+
+      for {_name, {fun, arity}} <- image.names do
+        assert function_exported?(mod, fun, arity)
+      end
+    end
+
+    test "the counter steps" do
+      image = image!(@counter)
+      load(image)
+      model = fn n -> {:rec, "Counter.Model", %{"count" => n}} end
+      msg = fn v, args -> {:var, "Counter.Msg", v, args} end
+
+      assert call(image, "Counter.init", []) == {model.(0), {:cmd, :none}}
+
+      assert call(image, "Counter.update", [msg.("Increment", []), model.(1)]) ==
+               {model.(2), {:cmd, :none}}
+
+      assert call(image, "Counter.update", [msg.("Add", [10]), model.(1)]) ==
+               {model.(11), {:cmd, :none}}
+
+      assert call(image, "Counter.update", [msg.("Add", [-10]), model.(1)]) ==
+               {model.(1), {:cmd, :none}}
+
+      assert {:var, "Html", "Element", ["div", [{"class", "counter"}], children]} =
+               call(image, "Counter.view", [model.(7)])
+
+      assert Enum.at(children, 0) ==
+               {:var, "Html", "Element",
+                ["button", [{"on-click", msg.("Decrement", [])}], [{:var, "Html", "Text", ["-"]}]]}
+
+      assert Enum.at(children, 1) ==
+               {:var, "Html", "Element", ["span", [], [{:var, "Html", "Text", ["7"]}]]}
+    end
+
+    test "a false always is recorded and evaluation goes on" do
+      image = image!(@counter)
+      load(image)
+      Hooks.take_failures()
+      bad = {:rec, "Counter.Model", %{"count" => -1}}
+
+      assert {{:rec, "Counter.Model", %{"count" => 0}}, {:cmd, :none}} =
+               call(image, "Counter.update", [{:var, "Counter.Msg", "Increment", []}, bad])
+
+      assert Hooks.take_failures() == ["always failed: model.count >= 0"]
+      assert Hooks.take_failures() == []
+    end
+
+    test "deftests run, each failing always recorded in order" do
+      src = """
+      def T.one() : Int do
+        1
+      end
+
+      deftest T.t do
+        always(T.one() == 2)
+        sometimes(T.one() == 1)
+        always(T.one() == 1)
+        always(T.one() == 3)
+      end
+      """
+
+      image = image!(src)
+      mod = load(image)
+      Hooks.take_failures()
+      fun = Map.fetch!(image.tests, "T.t")
+      assert apply(mod, fun, []) == {}
+
+      assert Hooks.take_failures() == [
+               "always failed: T.one() == 2",
+               "always failed: T.one() == 3"
+             ]
+    end
+
+    test "runtime errors are Rust's" do
+      src = """
+      def E.div(a : Int, b : Int) : Int do
+        a / b
+      end
+
+      def E.big(a : Int) : Int do
+        a * a
+      end
+      """
+
+      image = image!(src)
+      load(image)
+      assert call(image, "E.div", [7, -2]) == -3
+      assert catch_throw(call(image, "E.div", [1, 0])) == {:yabu_error, "division by zero"}
+
+      assert catch_throw(call(image, "E.big", [4_000_000_000])) ==
+               {:yabu_error, "integer overflow"}
+    end
+
+    test "arguments are evaluated left to right" do
+      src = """
+      def O.f(a : Int, b : Int) : Int do
+        a + b
+      end
+
+      def O.go(x : Int) : Int do
+        O.f(1 / x, 2 * 9223372036854775807)
+      end
+      """
+
+      image = image!(src)
+      load(image)
+      assert catch_throw(call(image, "O.go", [0])) == {:yabu_error, "division by zero"}
+    end
+
+    test "closures, defs and constructors as values, blocks, cases on tuples" do
+      src = """
+      deftype F.Box do
+        Box(Int) | Empty
+      end
+
+      def F.inc(x : Int) : Int do
+        x + 1
+      end
+
+      def F.adder(k : Int) : (Int -> Int) do
+        fn (x : Int) -> x + k end
+      end
+
+      def F.go(xs : List<Int>) : (List<Int>, List<F.Box>, Int) do
+        k = 100
+        ys = List.map(List.map(xs, F.adder(10)), F.inc)
+        boxes = List.map(xs, F.Box.Box)
+        n = case (List.length(xs), List.head(xs)) do
+          (0, _) -> 0
+          (_, Option.Some(h)) -> h + k
+          (_, Option.None) -> -1
+        end
+        (ys, boxes, n)
+      end
+
+      def F.words(s : String) : Int do
+        case s do
+          "héllo" -> 1
+          _ -> 2
+        end
+      end
+      """
+
+      image = image!(src)
+      load(image)
+
+      assert call(image, "F.go", [[1, 2]]) ==
+               {[12, 13], [{:var, "F.Box", "Box", [1]}, {:var, "F.Box", "Box", [2]}], 101}
+
+      assert call(image, "F.go", [[]]) == {[], [], 0}
+      assert call(image, "F.words", ["héllo"]) == 1
+      assert call(image, "F.words", ["hello"]) == 2
+    end
+
+    test "maps, records, updates, JSON with the model's field order, store reads" do
+      src = """
+      defmodel J.Row do
+        id : Uuid
+        zeta : Int
+        alpha : String
+      end
+
+      deftype J.Msg do
+        Got(List<J.Row>) | Text(Result<String, String>)
+      end
+
+      def J.go(n : Int) : (Map<String, Int>, J.Row, Result<String, String>, Result<J.Row, String>) do
+        m = %{"a" => 1, "b" => n, "a" => 3}
+        r = %J.Row{zeta: n, alpha: "x"}
+        r2 = %J.Row{r | alpha: "y"}
+        (m, r2, JSON.stringify(r2), (JSON.parse("{\\"id\\": \\"00000000-0000-0000-0000-000000000001\\", \\"zeta\\": 2, \\"alpha\\": \\"q\\"}") : Result<J.Row, String>))
+      end
+
+      def J.load() : Cmd<J.Msg> do
+        Cmd.store.list(fn (rows : List<J.Row>) -> J.Msg.Got(rows) end)
+      end
+
+      def J.as_value() : List<Result<String, String>> do
+        List.map([1, 2], JSON.stringify)
+      end
+      """
+
+      image = image!(src)
+      load(image)
+
+      row = {:rec, "J.Row", %{"zeta" => 5, "alpha" => "y"}}
+
+      assert {%{"a" => 3, "b" => 5}, ^row, ok, parsed} = call(image, "J.go", [5])
+      assert ok == {:var, "Result", "Ok", [~s({"zeta":5,"alpha":"y"})]}
+
+      assert parsed ==
+               {:var, "Result", "Ok",
+                [
+                  {:rec, "J.Row",
+                   %{
+                     "id" => {:uuid, "00000000-0000-0000-0000-000000000001"},
+                     "zeta" => 2,
+                     "alpha" => "q"
+                   }}
+                ]}
+
+      assert {:cmd, {:effect, "Cmd.store.list", "J.Row", [cb]}} = call(image, "J.load", [])
+      assert cb.([]) == {:var, "J.Msg", "Got", [[]]}
+
+      assert call(image, "J.as_value", []) == [
+               {:var, "Result", "Ok", ["1"]},
+               {:var, "Result", "Ok", ["2"]}
+             ]
+    end
+  end
+
+  describe "expressions against an image" do
+    test "check_expr types an expression against committed code" do
+      u = universe(@counter)
+
+      assert {:ok, typed, {:tuple, [{:named, "Counter.Model"}, _]}} =
+               Lang.check_expr(u, "Counter.init()")
+
+      assert {:call, _, ["Counter.init", []]} = typed
+
+      assert {:error, [%{code: "unbound"}]} = Lang.check_expr(u, "Counter.nope()")
+      assert {:error, [%{code: "parse"}]} = Lang.check_expr(u, "(")
+    end
+
+    test "expr_forms evaluate with :erl_eval, calling the image remotely" do
+      u = universe(@counter)
+      {:ok, image} = Lang.image(u)
+      load(image)
+
+      {:ok, typed, _} =
+        Lang.check_expr(u, "Counter.update(Counter.Msg.Add(5), %Counter.Model{count: 1})")
+
+      forms = Codegen.expr_forms(typed, image.names, image.module)
+      {:value, v, _} = :erl_eval.exprs(forms, :erl_eval.new_bindings())
+      assert v == {{:rec, "Counter.Model", %{"count" => 6}}, {:cmd, :none}}
+
+      {:ok, typed, _} =
+        Lang.check_expr(u, "List.map([1, 2], fn (x : Int) -> x * 2 end)")
+
+      forms = Codegen.expr_forms(typed, image.names, image.module)
+      assert {:value, [2, 4], _} = :erl_eval.exprs(forms, :erl_eval.new_bindings())
+
+      {:ok, typed, _} = Lang.check_expr(u, "Counter.view")
+      forms = Codegen.expr_forms(typed, image.names, image.module)
+      {:value, f, _} = :erl_eval.exprs(forms, :erl_eval.new_bindings())
+      {fun, 1} = image.names["Counter.view"]
+      assert f == Function.capture(image.module, fun, 1)
+    end
+  end
+end

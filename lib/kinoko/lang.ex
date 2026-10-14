@@ -44,8 +44,8 @@ defmodule Kinoko.Lang do
   (a fault of the checker or universe, the universe left as it was).
   """
 
-  alias Kinoko.Lang.{Ast, Cid, Format, Parser, Universe}
-  alias Kinoko.Lang.Types.Extract
+  alias Kinoko.Lang.{Ast, Cid, Codegen, Format, Parser, Universe}
+  alias Kinoko.Lang.Types.{Check, Extract}
 
   @type reason :: %{name: String.t() | nil, code: String.t(), message: String.t()}
 
@@ -239,4 +239,32 @@ defmodule Kinoko.Lang do
   @doc "Every promoted round, oldest first: `%{ids: [id], entries: [{:live, name, cid} | {:gone, name}]}`."
   @spec history(Universe.t()) :: [map()]
   defdelegate history(u), to: Universe
+
+  @doc """
+  The committed code compiled to one Erlang module (`Kinoko.Lang.Codegen`):
+  `{:ok, %{module:, binary:, hash:, names:, tests:}}`, where `names` is
+  `%{def => {fun, arity}}` and `tests` `%{test => fun}`; or
+  `{:error, %{code: "compile", message: m}}`. Nothing is loaded.
+  """
+  @spec image(Universe.t()) :: {:ok, map()} | {:error, %{code: String.t(), message: String.t()}}
+  def image(u), do: u |> committed() |> Codegen.compile()
+
+  @doc """
+  The expression `source` checked against the committed signatures (it
+  may stay polymorphic): `{:ok, typed, type}`, or `{:error, [reason]}`
+  with a `"parse"` reason or the checker's.
+  """
+  @spec check_expr(Universe.t(), String.t()) :: {:ok, tuple(), term()} | {:error, [reason]}
+  def check_expr(u, source) when is_binary(source) do
+    case Parser.expr(source) do
+      {:ok, e} ->
+        case Check.expr(Ast.without_positions(e), signatures(u)).result do
+          {:ok, typed} -> {:ok, typed, Keyword.fetch!(elem(typed, 1), :type)}
+          {:error, errors} -> {:error, Enum.map(errors, &Map.put_new(&1, :name, nil))}
+        end
+
+      {:error, %{message: message, line: line, col: col}} ->
+        {:error, [refused("parse", "#{line}:#{col}: #{message}")]}
+    end
+  end
 end
