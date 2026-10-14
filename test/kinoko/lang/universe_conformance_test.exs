@@ -12,6 +12,9 @@ defmodule Kinoko.Lang.UniverseConformanceTest do
   - `universe.qnt`: every step stages a patch under an id or unstages one, and
     must leave the same committed code, staged patches with the same reasons,
     the same history, and the same kind of step.
+
+  Excluded by default (about 80 s, needs `quint` on PATH). Run it with
+  `mix test --include quint test/kinoko/lang/universe_conformance_test.exs`.
   """
   use ExUnit.Case, async: false
 
@@ -123,30 +126,33 @@ defmodule Kinoko.Lang.UniverseConformanceTest do
     out =
       Path.join(
         System.tmp_dir!(),
-        "kinoko-itf-#{label}-#{System.unique_integer([:positive])}"
+        "kinoko-itf-#{label}-#{System.pid()}-#{System.unique_integer([:positive])}"
       )
 
     File.mkdir_p!(out)
 
-    {output, status} =
-      System.cmd(
-        System.find_executable("quint"),
-        ["run", Path.join(specs_dir(), spec)] ++
-          args ++ ["--out-itf", Path.join(out, "trace_{seq}.itf.json")],
-        cd: Path.dirname(specs_dir()),
-        stderr_to_stdout: true
-      )
+    try do
+      {output, status} =
+        System.cmd(
+          System.find_executable("quint"),
+          ["run", Path.join(specs_dir(), spec)] ++
+            args ++ ["--out-itf", Path.join(out, "trace_{seq}.itf.json")],
+          cd: Path.dirname(specs_dir()),
+          stderr_to_stdout: true
+        )
 
-    assert status == 0, "quint run failed:\n#{output}"
+      assert status == 0, "quint run failed:\n#{output}"
 
-    all =
-      out
-      |> File.ls!()
-      |> Enum.sort()
-      |> Enum.map(&(out |> Path.join(&1) |> File.read!() |> JSON.decode!()))
+      all =
+        out
+        |> File.ls!()
+        |> Enum.sort()
+        |> Enum.map(&(out |> Path.join(&1) |> File.read!() |> JSON.decode!()))
 
-    File.rm_rf!(out)
-    all
+      all
+    after
+      File.rm_rf!(out)
+    end
   end
 
   # --- abstract -------------------------------------------------------------
@@ -178,7 +184,9 @@ defmodule Kinoko.Lang.UniverseConformanceTest do
           assert got == want,
                  "step #{i}: the names refused: got #{inspect(got)} want #{inspect(want)}\n#{inspect(p)}"
 
-          assert ex_committed(u) == spec_committed(state), "step #{i}: committed code"
+          assert Enum.sort(ex_committed(u)) == Enum.sort(spec_committed(state)),
+                 "step #{i}: committed code"
+
           {u, if(want == [], do: {pro + 1, ref}, else: {pro, ref + 1})}
         end)
         |> elem(1)
