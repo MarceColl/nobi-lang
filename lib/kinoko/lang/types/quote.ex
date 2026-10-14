@@ -37,13 +37,19 @@ defmodule Kinoko.Lang.Types.Quote do
   @doc "`s`, cut at the limit characters then `…`."
   @spec cut(String.t()) :: String.t()
   def cut(s) do
-    case String.split_at(s, @limit) do
-      {head, ""} -> head
-      {head, _} -> head <> @elided
+    case s |> String.to_charlist() |> Enum.split(@limit) do
+      {_, []} -> s
+      {head, _} -> List.to_string(head) <> @elided
     end
   end
 
-  defp short(s), do: String.slice(s, 0, @limit)
+  @doc "The first `n` code points of `s` (Rust counts code points, not graphemes)."
+  def take(s, n), do: s |> String.to_charlist() |> Enum.take(n) |> List.to_string()
+
+  @doc "The number of code points in `s`."
+  def length(s), do: s |> String.to_charlist() |> Kernel.length()
+
+  defp short(s), do: take(s, @limit)
   defp elided, do: {:name, [], [@elided]}
 
   # Copies of an expression's first `left` nodes, in the order they are

@@ -11,6 +11,11 @@ defmodule Kinoko.Lang.Types.Infer do
   A type is the `Kinoko.Lang.Ast` type shape plus `{:uvar, n}` at any depth.
   A `{:var, name}` is a *scheme* variable (only a signature writes one) and is
   replaced by `instantiate`; one reaching `unify` is an `"internal"` error.
+
+  Rust to Elixir names: `resolve` -> `resolve/2` (top only), `resolve_deep` ->
+  `resolve_deep/3`, `quote_type` -> `Quote.type/1`, `quote_context` ->
+  `Quote.expr/1`, `quote_pattern` -> `Quote.pattern/1`, `lift` -> identity,
+  `errors` field -> `errors/1`. `resolve_full/2` has no Rust twin (unmeasured).
   """
 
   alias Kinoko.Lang.Types.Quote
@@ -22,6 +27,7 @@ defmodule Kinoko.Lang.Types.Infer do
   defstruct next: 0,
             subst: %{},
             errors: [],
+            error_count: 0,
             work: 0,
             allowance: @base_type_work,
             stopped: false,
@@ -83,7 +89,15 @@ defmodule Kinoko.Lang.Types.Infer do
   def error(%__MODULE__{stopped: true} = st, _code, _message), do: st
 
   def error(st, code, message),
-    do: %{st | errors: st.errors ++ [%{code: code, message: message}]}
+    do: %{
+      st
+      | errors: [%{code: code, message: message} | st.errors],
+        error_count: st.error_count + 1
+    }
+
+  @doc "The errors recorded so far, in the order they were recorded. Never read the `errors` field directly (it is reversed)."
+  @spec errors(t()) :: [error()]
+  def errors(st), do: Enum.reverse(st.errors)
 
   @doc "Records the error that ends the check: nothing after it is checked or reported."
   def stop(st, code, message), do: %{error(st, code, message) | stopped: true}
@@ -108,27 +122,31 @@ defmodule Kinoko.Lang.Types.Infer do
 
   def shallow(_st, t), do: t
 
-  @doc """
-  `t` fully resolved: every bound uvar replaced, to a fixpoint. Unmeasured;
-  the checker measures with `fits`/`resolve_deep` first when `t` is untrusted.
-  """
+  @doc "Rust's `resolve`: what `t` is at its top only (children are left as they are)."
   @spec resolve(t(), itype()) :: itype()
-  def resolve(st, t) do
+  def resolve(st, t), do: shallow(st, t)
+
+  @doc """
+  `t` fully resolved: every bound uvar replaced, to a fixpoint. Unmeasured:
+  never call on untrusted types; use `resolve_deep/3`, which measures first.
+  """
+  @spec resolve_full(t(), itype()) :: itype()
+  def resolve_full(st, t) do
     case shallow(st, t) do
-      {:applied, n, args} -> {:applied, n, Enum.map(args, &resolve(st, &1))}
-      {:arrow, ps, ret} -> {:arrow, Enum.map(ps, &resolve(st, &1)), resolve(st, ret)}
-      {:tuple, items} -> {:tuple, Enum.map(items, &resolve(st, &1))}
+      {:applied, n, args} -> {:applied, n, Enum.map(args, &resolve_full(st, &1))}
+      {:arrow, ps, ret} -> {:arrow, Enum.map(ps, &resolve_full(st, &1)), resolve_full(st, ret)}
+      {:tuple, items} -> {:tuple, Enum.map(items, &resolve_full(st, &1))}
       other -> other
     end
   end
 
   @doc """
-  `resolve`, once `t` fits (quoting `quote` if it does not). After the check
+  `resolve_full`, once `t` fits (quoting `quote` if it does not). After the check
   has stopped nothing is known: a fresh uvar.
   """
   def resolve_deep(st, t, quote \\ fn -> "" end) do
     case fits_quoting(st, t, quote) do
-      {true, st} -> {resolve(st, t), st}
+      {true, st} -> {resolve_full(st, t), st}
       {false, st} -> fresh(st)
     end
   end
@@ -244,7 +262,7 @@ defmodule Kinoko.Lang.Types.Infer do
     limit = Quote.limit()
     {parts, n} = write(st, t, {[], 0}, limit)
     text = parts |> Enum.reverse() |> IO.iodata_to_binary()
-    if n > limit, do: String.slice(text, 0, limit) <> "…", else: text
+    if n > limit, do: Quote.take(text, limit) <> "…", else: text
   end
 
   # The accumulator is {reversed pieces, chars written}; writing stops once
@@ -296,7 +314,7 @@ defmodule Kinoko.Lang.Types.Infer do
     end)
   end
 
-  defp push({parts, n}, s), do: {[s | parts], n + String.length(s)}
+  defp push({parts, n}, s), do: {[s | parts], n + Quote.length(s)}
 
   # --- unification --------------------------------------------------------
 
@@ -313,7 +331,7 @@ defmodule Kinoko.Lang.Types.Infer do
   defp quoter(expr), do: fn -> Quote.expr(expr) end
 
   def unify_quoting(st, a, b, quote) do
-    before = length(st.errors)
+    before = st.error_count
 
     with {true, st} <- fits_quoting(st, a, quote),
          {true, st} <- fits_quoting(st, b, quote) do
@@ -322,31 +340,33 @@ defmodule Kinoko.Lang.Types.Infer do
           {:ok, st}
 
         {:error, :mismatch, st} ->
-          got = format_itype(st, a)
-          expected = format_itype(st, b)
-
-          st =
-            error(
-              st,
-              "mismatch",
-              "type mismatch: expected #{expected}, got #{got} in `#{quote.()}`"
-            )
-
-          {:error, "mismatch", st}
+          {:error, "mismatch", record_mismatch(st, a, b, quote)}
 
         {:error, code, st} ->
-          {:error, code, st}
+          {:error, code, record_mismatch(st, a, b, quote)}
       end
     else
       {false, st} -> {:error, failure_code(st, before), st}
     end
   end
 
-  defp failure_code(st, before) do
-    case Enum.drop(st.errors, before) do
-      [] -> "type-too-large"
-      [%{code: code} | _] -> code
+  # Like Rust, every failed comparison ends with a mismatch (a no-op once
+  # the check has stopped), even after "occurs".
+  defp record_mismatch(st, a, b, quote) do
+    if st.stopped do
+      st
+    else
+      got = format_itype(st, a)
+      expected = format_itype(st, b)
+      error(st, "mismatch", "type mismatch: expected #{expected}, got #{got} in `#{quote.()}`")
     end
+  end
+
+  # The code of the first error this unification recorded (a size stop).
+  defp failure_code(st, before) do
+    if st.error_count > before,
+      do: st.errors |> Enum.take(st.error_count - before) |> List.last() |> Map.fetch!(:code),
+      else: "type-too-large"
   end
 
   defp unify_inner(st, a, b, quote) do

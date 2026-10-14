@@ -23,7 +23,7 @@ defmodule Kinoko.Lang.InferTest do
     test "a uvar unifies with List<Int> and resolves" do
       {u, st} = Infer.fresh(Infer.new())
       assert {:ok, st} = Infer.unify(st, u, {:applied, "List", [@int]})
-      assert Infer.resolve(st, u) == {:applied, "List", [@int]}
+      assert Infer.resolve_full(st, u) == {:applied, "List", [@int]}
     end
 
     test "resolve follows chains and nested uvars to a fixpoint" do
@@ -31,18 +31,41 @@ defmodule Kinoko.Lang.InferTest do
       {b, st} = Infer.fresh(st)
       {:ok, st} = Infer.unify(st, a, {:tuple, [b, b]})
       {:ok, st} = Infer.unify(st, b, @int)
-      assert Infer.resolve(st, a) == {:tuple, [@int, @int]}
+      assert Infer.resolve_full(st, a) == {:tuple, [@int, @int]}
+    end
+
+    test "resolve is top-only" do
+      {a, st} = Infer.fresh(Infer.new())
+      {b, st} = Infer.fresh(st)
+      {:ok, st} = Infer.unify(st, a, {:tuple, [b]})
+      {:ok, st} = Infer.unify(st, b, @int)
+      assert Infer.resolve(st, a) == {:tuple, [b]}
+    end
+
+    test "20_000 mismatching unifications stay fast" do
+      st = Infer.allow(Infer.new(), 1_000_000)
+
+      {us, st} =
+        :timer.tc(fn ->
+          Enum.reduce(1..20_000, st, fn _, st ->
+            {:error, "mismatch", st} = Infer.unify(st, @int, @string)
+            st
+          end)
+        end)
+
+      assert length(Infer.errors(st)) == 20_000
+      assert us < 200_000
     end
 
     test "the occurs check" do
       {u, st} = Infer.fresh(Infer.new())
       assert {:error, "occurs", st} = Infer.unify(st, u, {:applied, "List", [u]})
-      assert [%{code: "occurs"}] = st.errors
+      assert ["occurs", "mismatch"] = Enum.map(Infer.errors(st), & &1.code)
     end
 
     test "Int against String is a mismatch recorded once" do
       assert {:error, "mismatch", st} = Infer.unify(Infer.new(), @int, @string, body("1 + \"x\""))
-      assert [%{code: "mismatch", message: msg}] = st.errors
+      assert [%{code: "mismatch", message: msg}] = Infer.errors(st)
       assert msg =~ "expected String, got Int"
       assert msg =~ "1 + \"x\""
     end
@@ -117,7 +140,7 @@ defmodule Kinoko.Lang.InferTest do
 
     test "after stopping, nothing is recorded" do
       st = Infer.stop(Infer.new(), "internal", "x")
-      assert Infer.error(st, "mismatch", "y").errors == st.errors
+      assert Infer.error(st, "mismatch", "y").errors == Infer.errors(st)
     end
   end
 
@@ -160,6 +183,16 @@ defmodule Kinoko.Lang.InferTest do
       assert q == Quote.cut(Format.expr(e))
       assert String.length(q) == Quote.limit() + 1
       assert String.ends_with?(q, "…")
+    end
+
+    test "cuts count code points, not graphemes" do
+      s = String.duplicate("e\u0301", 150)
+      assert String.length(s) == 150
+
+      assert Quote.cut(s) ==
+               s |> String.to_charlist() |> Enum.take(200) |> List.to_string() |> Kernel.<>("…")
+
+      assert Quote.length(Quote.take(s, 200)) == 200
     end
 
     test "patterns quote" do
