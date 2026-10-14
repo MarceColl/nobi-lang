@@ -1,8 +1,7 @@
 defmodule Kinoko.Lang.CheckAnnotationsTest do
   @moduledoc """
   Type annotations `(e : T)` and the lone expression (`Check.expr`), against
-  the Rust crate's `tests/types_annotations.rs`. The map-key and JSX cases
-  are Task 8's.
+  the Rust crate's `tests/types_annotations.rs`.
   """
   use ExUnit.Case, async: true
 
@@ -52,6 +51,11 @@ defmodule Kinoko.Lang.CheckAnnotationsTest do
 
     assert first.("([] : List<Int, Int>)") ==
              {"arity", "type `List` expects 1 parameter(s), got 2"}
+
+    assert first.("(%{} : Map<(Int -> Int), Int>)") ==
+             {"non-data-map-key",
+              "the type `Map<(Int -> Int), Int>` holds a `Map` whose key is not data — map keys cannot hold a " <>
+                "function, `Cmd`, or `Html`"}
   end
 
   test "an annotation's types are dependencies" do
@@ -65,6 +69,21 @@ defmodule Kinoko.Lang.CheckAnnotationsTest do
     checked = last_checked("def M.f() : Int do List.length(([] : List<M.T>)) end")
     assert {:error, _} = checked.result
     assert checked.deps == want
+  end
+
+  test "an annotation keeps what its expression resolves to" do
+    msg = "deftype E.Msg do Set(String) end\n"
+
+    typed =
+      all_ok(
+        msg <>
+          "def E.v() : Html<E.Msg> do <input on-change={(E.Msg.Set : (String -> E.Msg))} /> end"
+      )
+
+    {:def, _, [_, _, _, {:block, _, [_, {:jsx, _, [_, [{:event, _, handler}], _]}]}]} =
+      typed["E.v"]
+
+    assert res(handler) == {:ctor_ref, "E.Msg", "Set", 1}
   end
 
   test "check_expr leaves a type open" do

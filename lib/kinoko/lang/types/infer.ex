@@ -99,6 +99,10 @@ defmodule Kinoko.Lang.Types.Infer do
   @spec errors(t()) :: [error()]
   def errors(st), do: Enum.reverse(st.errors)
 
+  @doc "How many errors have been recorded so far."
+  @spec error_count(t()) :: non_neg_integer()
+  def error_count(st), do: st.error_count
+
   @doc "Records the error that ends the check: nothing after it is checked or reported."
   def stop(st, code, message), do: %{error(st, code, message) | stopped: true}
 

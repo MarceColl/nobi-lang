@@ -107,7 +107,7 @@ defmodule Kinoko.Lang.Types.Check.Decl do
   @doc """
   Whether `t` is itself disallowed where data is required: a function type,
   `Cmd`, or `Html`. The predicate `forbid_in_model_field/3` and the map-key
-  rule (Task 8's `keys`) are built on.
+  rule (`Kinoko.Lang.Types.Keys`) are built on.
   """
   def non_data?({:arrow, _, _}), do: true
   def non_data?({:named, n}), do: n == "Cmd"

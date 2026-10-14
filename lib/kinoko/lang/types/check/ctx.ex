@@ -11,6 +11,11 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
 
   `scopes` is innermost first and never empty. `pending` and `tuple_cases`
   are kept newest first; their takers reverse them.
+
+  The map-key rule's memo (`keys`, `key_recorded`, `reported_non_data_maps`)
+  belongs to `Kinoko.Lang.Types.Keys`; the unbound-name caches (`names`,
+  `table_says`) to `Kinoko.Lang.Types.Hints`. Both only ever speed a check
+  up: what a check gives does not depend on them.
   """
 
   alias Kinoko.Lang.Types.Infer
@@ -21,12 +26,18 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
             used: MapSet.new(),
             pending: [],
             tuple_cases: [],
-            open_names: %{}
+            open_names: %{},
+            keys: nil,
+            key_recorded: MapSet.new(),
+            reported_non_data_maps: MapSet.new(),
+            names: nil,
+            table_says: %{}
 
   @type t :: %__MODULE__{}
 
   @spec new(map() | (String.t() -> term())) :: t()
-  def new(sigs), do: %__MODULE__{infer: Infer.new(), sigs: sigs}
+  def new(sigs),
+    do: %__MODULE__{infer: Infer.new(), sigs: sigs, keys: Kinoko.Lang.Types.Keys.new()}
 
   @doc """
   The signature `name` has (TS's `dget`), recording `name` as consulted
@@ -41,6 +52,9 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
 
     {sig, %{ctx | used: MapSet.put(ctx.used, name)}}
   end
+
+  @doc "`names` recorded as consulted, without a lookup (they were read already)."
+  def record(%__MODULE__{} = ctx, names), do: %{ctx | used: MapSet.union(ctx.used, names)}
 
   # --- scopes -------------------------------------------------------------
 
@@ -109,7 +123,7 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
   end
 
   def stopped?(ctx), do: Infer.stopped?(ctx.infer)
-  def no_errors?(ctx), do: ctx.infer.error_count == 0
+  def no_errors?(ctx), do: Infer.error_count(ctx.infer) == 0
   def errors(ctx), do: Infer.errors(ctx.infer)
   def shallow(ctx, t), do: Infer.shallow(ctx.infer, t)
   def format(ctx, t), do: Infer.format_itype(ctx.infer, t)

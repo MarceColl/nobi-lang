@@ -20,13 +20,14 @@ defmodule Kinoko.Lang.Types.Check do
   Synthesis annotates each node with an inference type (uvars allowed);
   `finalize_node/2` resolves it. Pattern binding is
   `Kinoko.Lang.Types.Patterns`; a tuple `case`'s exhaustiveness is
-  `Kinoko.Lang.Types.Exhaustive`; name rules are `Check.Decl`. JSX, `defapp`,
-  the map-key rule and unbound-name hints are seams Task 8 fills (see the
-  functions marked "Seam").
+  `Kinoko.Lang.Types.Exhaustive`; name rules are `Check.Decl`. JSX and
+  `defapp` are `Kinoko.Lang.Types.JsxApp`, the map-key rule is
+  `Kinoko.Lang.Types.Keys`, and what an unbound name says is
+  `Kinoko.Lang.Types.Hints`.
   """
 
   alias Kinoko.Lang.Ast
-  alias Kinoko.Lang.Types.{Exhaustive, Extract, Infer, Patterns, Quote}
+  alias Kinoko.Lang.Types.{Exhaustive, Extract, Hints, Infer, JsxApp, Keys, Patterns, Quote}
   alias Kinoko.Lang.Types.Check.{Ctx, Decl}
 
   import Kinoko.Lang.Types.Check.Tree,
@@ -66,51 +67,45 @@ defmodule Kinoko.Lang.Types.Check do
   @spec program([Ast.decl()], map() | (String.t() -> term())) :: %{String.t() => result()}
   defdelegate program(decls, base), to: Decl, as: :check_program
 
-  # ---------- seams for Task 8 ----------
+  # ---------- JSX, apps, map keys, hints (their own modules) ----------
+
+  @doc "`defapp`'s shape (`Kinoko.Lang.Types.JsxApp.check_app/2`)."
+  defdelegate check_app(ctx, name), to: JsxApp
+
+  @doc "An element, an `Html<m>` (`Kinoko.Lang.Types.JsxApp.synth_jsx/2`)."
+  defdelegate synth_jsx(ctx, e), to: JsxApp
 
   @doc """
-  Seam (Task 8, `jsx_app.rs`'s `check_app`): a `defapp`'s shape. Until it is
-  ported, an app is refused rather than accepted unchecked.
+  Reports `t` when a `Map` key in it is not data (`Kinoko.Lang.Types.Keys`):
+  a function type, `Cmd` or `Html`, found directly (`Map<(Int -> Int), Int>`)
+  or passed to a deftype parameter that reaches a key. Every annotation
+  (`validate_annotation/3`) and every node's finalized type
+  (`finalize_node/2`) come through here: the only two places a type enters
+  a program. Each offending type is reported once per check, keyed on the
+  type itself, never its (cut) quoted text.
   """
-  def check_app(ctx, name),
-    do:
-      Ctx.error(
-        ctx,
-        "internal",
-        "app `#{name}` cannot be checked yet: defapp checking is not ported"
-      )
+  def refuse_non_data_map_keys(ctx, t) do
+    {data?, ctx} = Keys.keys_are_data(ctx, t)
 
-  @doc """
-  Seam (Task 8, `jsx_app.rs`'s `synth_jsx`): an element, an `Html<m>`.
-  Until it is ported, JSX is refused rather than accepted unchecked.
-  """
-  def synth_jsx(ctx, e) do
-    ctx = Ctx.error(ctx, "internal", "JSX cannot be checked yet: JSX checking is not ported")
-    unchecked(ctx, e)
-  end
+    cond do
+      data? ->
+        ctx
 
-  @doc """
-  Seam (Task 8, `keys.rs`): reports `t` when a `Map` key in it is not data.
-  Called on every annotation and every node's finalized type.
-  """
-  def refuse_non_data_map_keys(ctx, _t), do: ctx
+      MapSet.member?(ctx.reported_non_data_maps, t) ->
+        ctx
 
-  @doc """
-  Seam (Task 8, `hints.rs`'s `unbound_message`): what `name`, which did not
-  resolve, says. `as_value` is whether it stands as a value rather than a
-  call's target. Returns `{message, ctx}`.
-  """
-  def unbound_message(ctx, name, _as_value), do: {"unbound symbol `#{name}`", ctx}
+      true ->
+        message =
+          "the type `#{Quote.type(t)}` holds a `Map` whose key is not data — map keys cannot hold a " <>
+            "function, `Cmd`, or `Html`"
 
-  @doc "An annotation's type `name` resolves to nothing (`hints.rs`'s `unknown_type`)."
-  def unknown_type(name) do
-    if Ast.capitalised?(name) do
-      "unknown type `#{name}`"
-    else
-      "unknown type `#{name}` — an annotation names concrete types; `#{name}` in an answer means any type " <>
-        "and cannot be written"
+        ctx = %{ctx | reported_non_data_maps: MapSet.put(ctx.reported_non_data_maps, t)}
+        Ctx.error(ctx, "non-data-map-key", message)
     end
   end
+
+  @doc "What `name`, which did not resolve, says (`Kinoko.Lang.Types.Hints.unbound_message/3`)."
+  defdelegate unbound_message(ctx, name, as_value), to: Hints
 
   # ---------- annotations ----------
 
@@ -147,7 +142,7 @@ defmodule Kinoko.Lang.Types.Check do
             Ctx.error(ctx, "arity", "type `#{name}` expects #{length(ps)} parameter(s)")
 
           {_, ctx} ->
-            Ctx.error(ctx, "unbound", unknown_type(name))
+            Ctx.error(ctx, "unbound", Hints.unknown_type(name))
         end
     end
   end
@@ -168,7 +163,7 @@ defmodule Kinoko.Lang.Types.Check do
     ctx =
       cond do
         expected == nil ->
-          Ctx.error(ctx, "unbound", unknown_type(name))
+          Ctx.error(ctx, "unbound", Hints.unknown_type(name))
 
         expected != length(args) ->
           message = "type `#{name}` expects #{expected} parameter(s), got #{length(args)}"
@@ -214,45 +209,52 @@ defmodule Kinoko.Lang.Types.Check do
   defp resolve_variant(ctx, name, for_call) do
     owner = Extract.owner_of(name)
 
-    with {{:type, params, variants}, ctx} <- Ctx.dget(ctx, owner),
-         {variant, vargs} when is_list(vargs) <-
-           List.keyfind(variants, Extract.last_segment(name), 0) || {:none, ctx} do
-      # The variant's arguments and the type's own parameters share one
-      # mapping, so `Option.Some(1)` is an `Option<Int>`.
-      pset = MapSet.new(params)
-
-      {args, {mapping, ctx}} =
-        Enum.map_reduce(vargs, {%{}, ctx}, fn a, {mapping, ctx} ->
-          {t, mapping, ctx} = Ctx.instantiate(ctx, a, pset, mapping)
-          {t, {mapping, ctx}}
-        end)
-
-      {result_args, {_, ctx}} =
-        Enum.map_reduce(params, {mapping, ctx}, fn p, {mapping, ctx} ->
-          case mapping do
-            %{^p => u} ->
-              {u, {mapping, ctx}}
-
-            _ ->
-              {u, ctx} = Ctx.fresh(ctx)
-              {u, {Map.put(mapping, p, u), ctx}}
-          end
-        end)
-
-      result = Patterns.type_of(owner, params, result_args)
-      arity = length(vargs)
-
-      found =
-        cond do
-          for_call -> {{:arrow, args, result}, {:variant, owner, variant, arity}}
-          arity == 0 -> {result, {:variant, owner, variant, arity}}
-          true -> {{:arrow, args, result}, {:ctor_ref, owner, variant, arity}}
+    case Ctx.dget(ctx, owner) do
+      {{:type, params, variants}, ctx} ->
+        case List.keyfind(variants, Extract.last_segment(name), 0) do
+          {variant, vargs} -> instantiate_variant(ctx, owner, params, variant, vargs, for_call)
+          nil -> {nil, ctx}
         end
 
-      {found, ctx}
-    else
-      {_, %Ctx{} = ctx} -> {nil, ctx}
+      {_, ctx} ->
+        {nil, ctx}
     end
+  end
+
+  # The variant's arguments and the type's own parameters share one
+  # mapping, so `Option.Some(1)` is an `Option<Int>`.
+  defp instantiate_variant(ctx, owner, params, variant, vargs, for_call) do
+    pset = MapSet.new(params)
+
+    {args, {mapping, ctx}} =
+      Enum.map_reduce(vargs, {%{}, ctx}, fn a, {mapping, ctx} ->
+        {t, mapping, ctx} = Ctx.instantiate(ctx, a, pset, mapping)
+        {t, {mapping, ctx}}
+      end)
+
+    {result_args, {_, ctx}} =
+      Enum.map_reduce(params, {mapping, ctx}, fn p, {mapping, ctx} ->
+        case mapping do
+          %{^p => u} ->
+            {u, {mapping, ctx}}
+
+          _ ->
+            {u, ctx} = Ctx.fresh(ctx)
+            {u, {Map.put(mapping, p, u), ctx}}
+        end
+      end)
+
+    result = Patterns.type_of(owner, params, result_args)
+    arity = length(vargs)
+
+    found =
+      cond do
+        for_call -> {{:arrow, args, result}, {:variant, owner, variant, arity}}
+        arity == 0 -> {result, {:variant, owner, variant, arity}}
+        true -> {{:arrow, args, result}, {:ctor_ref, owner, variant, arity}}
+      end
+
+    {found, ctx}
   end
 
   # A def's signature has no type parameters of its own: only the stdlib's
@@ -282,7 +284,7 @@ defmodule Kinoko.Lang.Types.Check do
   `e`, every node annotated with its inference type (TS's `synth`), each
   type measured as it is built: too large a one stops the check, and a
   stopped check looks at nothing more. Each expression lets the check do
-  that much more type work. Public for Task 8's JSX checking.
+  that much more type work. Public for JSX checking (`Kinoko.Lang.Types.JsxApp`).
   """
   def synth(ctx, e) do
     if Ctx.stopped?(ctx) do

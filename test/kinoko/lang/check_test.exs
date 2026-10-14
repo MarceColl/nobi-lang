@@ -1,8 +1,8 @@
 defmodule Kinoko.Lang.CheckTest do
   @moduledoc """
   The checker against the Rust crate's `tests/types_check.rs` (itself TS's
-  `typecheck`/`review-fixes` tests). JSX, app-shape, map-key and hint-message
-  cases are Task 8's.
+  `typecheck`/`review-fixes` tests). The corpus, `defapp`, JSX and event,
+  unbound-name hint and map-key cases close the file.
   """
   use ExUnit.Case, async: true
 
@@ -144,7 +144,7 @@ defmodule Kinoko.Lang.CheckTest do
     assert program == Check.program([f, g], Stdlib.signatures())
   end
 
-  # ---------- names that do not resolve (hint messages are Task 8's) ----------
+  # ---------- names that do not resolve ----------
 
   @game """
   defmodel Game.Board do
@@ -258,7 +258,9 @@ defmodule Kinoko.Lang.CheckTest do
         "1" <> String.duplicate(" else 2 end", depth) <> " end"
     end
 
-    assert {:error, _} = Parser.program(nested.(512))
+    assert {:error, %{code: "parse", message: "nesting too deep (limit 512)"}} =
+             Parser.program(nested.(512))
+
     assert ty(checks(nested.(511))) == @int
   end
 
@@ -1023,5 +1025,554 @@ defmodule Kinoko.Lang.CheckTest do
       assert {:ok, _} = checked.result
       assert MapSet.subset?(Extract.deps(d), checked.deps)
     end
+  end
+
+  # ---------- typecheck.test.ts "yabu corpus typechecks" ----------
+
+  for file <- ~w(counter notes split todo) do
+    test "#{file}.yabu fully checks" do
+      all_ok(YabuOracle.corpus_source(unquote(file) <> ".yabu"))
+    end
+  end
+
+  # ---------- typecheck.test.ts "defapp validation" ----------
+
+  # TS writes bare `Html`; here `Html` carries the app's `Msg`.
+  @app_base """
+  defmodel C.Model do n : Int end
+  deftype C.Msg do Inc end
+  def C.init() : (C.Model, Cmd<C.Msg>) do (%C.Model{n: 0}, Cmd.none()) end
+  def C.view(model : C.Model) : Html<C.Msg> do <div>{model.n}</div> end
+  """
+
+  test "defapp accepts the full shape" do
+    all_ok(
+      @app_base <>
+        """
+        def C.update(msg : C.Msg, model : C.Model) : (C.Model, Cmd<C.Msg>) do (model, Cmd.none()) end
+        defapp C
+        """
+    )
+  end
+
+  test "defapp rejects update returning a bare model" do
+    src =
+      @app_base <>
+        "def C.update(msg : C.Msg, model : C.Model) : C.Model do model end\ndefapp C"
+
+    {:error, [e | _]} = check_all(src)["C"].result
+    assert e.code == "bad-app-shape"
+    assert e.message =~ "C.update"
+  end
+
+  test "defapp rejects a missing view" do
+    src = """
+    defmodel D.Model do n : Int end
+    deftype D.Msg do Inc end
+    def D.init() : (D.Model, Cmd<D.Msg>) do (%D.Model{n: 0}, Cmd.none()) end
+    def D.update(msg : D.Msg, model : D.Model) : (D.Model, Cmd<D.Msg>) do (model, Cmd.none()) end
+    defapp D
+    """
+
+    {:error, [e | _]} = check_all(src)["D"].result
+    assert e.message =~ "D.view"
+  end
+
+  test "an app reports every part missing or misshapen" do
+    checked =
+      last_checked("""
+      deftype D.Model do X end
+      defmodel D.Msg do n : Int end
+      deftest D.init do 1 end
+      defapp D
+      """)
+
+    {:error, errs} = checked.result
+
+    assert Enum.map(errs, &{&1.code, &1.message}) ==
+             Enum.map(
+               [
+                 "app `D` requires `D.update`, which is not defined",
+                 "app `D` requires `D.view`, which is not defined",
+                 "`D.Model` must be a defmodel",
+                 "`D.Msg` must be a deftype",
+                 "`D.init` must be a def"
+               ],
+               &{"bad-app-shape", &1}
+             )
+
+    assert sorted(checked.deps) == ["D.Model", "D.Msg", "D.init", "D.update", "D.view"]
+
+    src =
+      @app_base <>
+        "def C.update(msg : C.Msg, model : C.Model) : C.Model do model end\ndefapp C"
+
+    {:error, errs} = last_checked(src).result
+
+    assert Enum.map(errs, &{&1.code, &1.message}) == [
+             {"bad-app-shape",
+              "`C.update` must have type (C.Msg, C.Model -> (C.Model, Cmd<C.Msg>)), got (C.Msg, C.Model -> C.Model)"}
+           ]
+  end
+
+  # ---------- typecheck.test.ts "views and events" ----------
+
+  test "on-click requires a variant value" do
+    src =
+      "deftype A.Msg do Go end\ndef A.v() : Html<A.Msg> do <button on-click={42}>x</button> end"
+
+    assert first_error(src).code == "bad-event"
+  end
+
+  test "on-change requires a 1-arity String constructor" do
+    all_ok(
+      "deftype E.Msg do Set(String) end\ndef E.v() : Html<E.Msg> do <input on-change={E.Msg.Set} /> end"
+    )
+
+    bad =
+      "deftype E.Msg do Set(Int, Int) end\ndef E.v() : Html<E.Msg> do <input on-change={E.Msg.Set} /> end"
+
+    assert first_error(bad).code == "bad-event"
+  end
+
+  test "on-change takes only an unapplied one-argument String constructor" do
+    msg = """
+    deftype E.Msg do Set(String) | Num(Int) | Go end
+    def E.set(s : String) : E.Msg do E.Msg.Set(s) end
+    """
+
+    needs =
+      &{"bad-event", "on-change needs an unapplied 1-argument String constructor, got `#{&1}`"}
+
+    for {handler, expected} <- [
+          {"fn (s : String) -> E.Msg.Set(s) end",
+           [needs.("fn (s : String) -> E.Msg.Set(s) end")]},
+          {"E.set", [needs.("E.set")]},
+          {"E.Msg.Go", [needs.("E.Msg.Go")]},
+          {"E.Msg.Num",
+           [
+             {"mismatch", "type mismatch: expected String, got Int in `E.Msg.Num`"},
+             needs.("E.Msg.Num")
+           ]}
+        ] do
+      src = msg <> "def E.v() : Html<E.Msg> do <input on-change={#{handler}} /> end"
+      assert found(src) == expected, handler
+    end
+
+    # The constructor is attached as one used without its arguments.
+    typed = all_ok(msg <> "def E.v() : Html<E.Msg> do <input on-change={E.Msg.Set} /> end")
+    {:def, _, [_, _, _, {:block, _, [_, {:jsx, _, [_, [attr | _], _]}]}]} = typed["E.v"]
+    {:event, "change", handler} = attr
+    assert res(handler) == {:ctor_ref, "E.Msg", "Set", 1}
+    assert ty(handler) == {:arrow, [@string], {:named, "E.Msg"}}
+  end
+
+  test "any other event takes a value of a deftype" do
+    msg = "deftype E.Msg do Set(String) | Go end\n"
+    src = msg <> "def E.v() : Html<E.Msg> do <input on-click={E.Msg.Set} /> end"
+
+    assert found(src) == [
+             {"bad-event",
+              "on-click needs a message value (a variant), got (String -> E.Msg) in `E.Msg.Set`"}
+           ]
+
+    # The type is a dependency, whatever it is.
+    for handler <- ["E.Msg.Go", ~S|E.Msg.Set("x")|] do
+      checked =
+        last_checked(
+          msg <> "def E.v() : Html<E.Msg> do <button on-click={#{handler}}>x</button> end"
+        )
+
+      assert {:ok, _} = checked.result, handler
+      assert sorted(checked.deps) == ["E.Msg"], handler
+    end
+
+    deps =
+      last_checked(
+        "deftype A.Msg do Go end\ndef A.v() : Html<A.Msg> do <button on-click={42}>x</button> end"
+      ).deps
+
+    assert sorted(deps) == ["A.Msg", "Int"]
+  end
+
+  test "JSX attributes hold scalars and children Html, text or numbers" do
+    msg = "deftype E.Msg do Go end\n"
+
+    typed =
+      checks(
+        msg <>
+          """
+          def E.v(b : Bool, u : Uuid) : Html<E.Msg> do
+            <div class="a" id={1} title={"t"} hidden={b} key={u}>
+              x {"y"} {2}
+              <p>{List.map([1], fn (x : Int) -> <i>{x}</i> end)}</p>
+            </div>
+          end
+          """
+      )
+
+    assert ty(typed) == {:applied, "Html", [{:named, "E.Msg"}]}
+
+    child = "JSX child must be Html, String, Int, or List<Html>, got"
+
+    for {src, message} <- [
+          {"def E.v(xs : List<Int>) : Html<E.Msg> do <input value={xs} /> end",
+           "attribute `value` must be a scalar, got List<Int> in `xs`"},
+          {"def E.v(xs : List<Int>) : Html<E.Msg> do <div>{xs}</div> end",
+           "#{child} List<Int> in `xs`"},
+          {"def E.v(b : Bool) : Html<E.Msg> do <div><p>{b}</p></div> end", "#{child} Bool in `b`"}
+        ] do
+      assert found(msg <> src) == [{"mismatch", message}], src
+    end
+
+    # An open type is taken as an `Html`: what `JSON.parse` gave, here.
+    typed =
+      checks(
+        msg <>
+          """
+          def E.v(s : String) : Html<E.Msg> do case JSON.parse(s) do
+            Result.Ok(v) -> <div>{v}</div>
+            Result.Err(e) -> <p>{e}</p>
+          end end
+          """
+      )
+
+    {:case, _, [scrutinee, _]} = typed
+    html = {:applied, "Html", [{:named, "E.Msg"}]}
+    assert ty(scrutinee) == {:applied, "Result", [html, @string]}
+  end
+
+  # ---------- typecheck.test.ts "unbound hints" ----------
+
+  test "a model called positionally names the construction syntax" do
+    m = probe("Game.Board(1, 2)")
+    assert m =~ "is a model, not a function"
+    assert m =~ "%Game.Board{moves: …, winner: …}"
+  end
+
+  test "the invented constructor family points at the model it hangs off" do
+    for guess <- ~w|Game.Board.new(1) Game.Board.create(1) Game.Board.mk(1) Game.Board.insert(1)| do
+      assert probe(guess) =~ "%Game.Board{moves: …, winner: …}", guess
+    end
+  end
+
+  test "id is never offered: the store mints it" do
+    refute probe("Game.Board(1, 2)") =~ "id:"
+  end
+
+  test "the update form is shown too, since it is not guessable either" do
+    assert probe("Game.Board(1, 2)") =~ "%Game.Board{row | moves: …}"
+  end
+
+  test "a bare name reports the qualified form, because every name is qualified" do
+    m = probe("Board(1, 2)")
+    assert m =~ "`Board` is not in scope"
+    assert m =~ "Game.Board"
+  end
+
+  test "a wrong variant lists the real ones instead of denying the type" do
+    m = probe("Game.Turn.Maybe")
+    assert m =~ "is a type, not a value"
+    assert m =~ "`Game.Turn.X`"
+    assert m =~ "`Game.Turn.O`"
+  end
+
+  test "a def reached by the wrong name still says where it lives" do
+    assert probe("other(Game.Turn.X)") =~ "Game.other"
+  end
+
+  test "a wrong case is the same mistake, so it gets the same answer" do
+    for guess <- ["Game.board(1, 2)", "board(1, 2)"] do
+      assert probe(guess) =~ "%Game.Board{moves: …, winner: …}", guess
+    end
+  end
+
+  test "a missing member answers with the namespace that does exist" do
+    m = probe("List.fold(1)")
+    assert m =~ "there is no `List.fold`"
+    assert m =~ "`List.foldl`"
+    refute m =~ "`List.fold`,"
+  end
+
+  test "a missing effect answers with the effects there are" do
+    assert probe("Cmd.store.bogus(1)") =~ "`Cmd.store.insert`"
+  end
+
+  test "a field of a capitalised local suggests parenthesising it" do
+    err = first_error("defmodel A.M do x : Int end\ndef A.f(M : A.M) : Int do M.x end")
+    assert err.code == "unbound"
+    assert err.message =~ "`(M).x`"
+    assert ty(checks("defmodel A.M do x : Int end\ndef A.f(M : A.M) : Int do (M).x end")) == @int
+  end
+
+  test "the local field hint yields to TS's own hints" do
+    probe_with_local = fn body ->
+      first_error(@game <> "def Game.probe(Game : Int) : Int do #{body} end").message
+    end
+
+    for {body, ts_says} <- [
+          {"Game.Board.moves",
+           "`Game.Board.moves` is not in scope — `Game.Board` is a model, not a function"},
+          {"Game.board",
+           "`Game.board` is not in scope — `Game.Board` is a model, not a function"},
+          {"Game.Turn.Maybe",
+           "`Game.Turn.Maybe` is not in scope — `Game.Turn` is a type, not a value"},
+          {"Game.x",
+           "there is no `Game.x` — `Game` has `Game.Board`, `Game.Turn`, `Game.other`, `Game.probe`"}
+        ] do
+      m = probe_with_local.(body)
+
+      assert String.starts_with?(m, ts_says) and not String.contains?(m, "(Game)"),
+             "#{body}: #{m}"
+    end
+  end
+
+  test "a case-insensitive hint prefers the stdlib in its declared order" do
+    for {body, name} <- [
+          {"get(1)", "`Cmd.store.get`"},
+          {"list(1)", "`Cmd.store.list`"},
+          {"List", "`Cmd.store.list`"},
+          {"delete(1)", "`Cmd.store.delete`"},
+          {"put(1)", "`Cmd.blob.put`"}
+        ] do
+      assert probe(body) =~ "is what you want — every name is fully qualified, so write #{name}",
+             body
+    end
+  end
+
+  test "a case-insensitive hint prefers the stdlib to the program's own declarations" do
+    err =
+      first_error(
+        "def App.length(x : Int) : Int do x end\ndef App.f(xs : List<Int>) : Int do length(xs) end"
+      )
+
+    assert err.message =~ "so write `List.length`"
+  end
+
+  test "a lookup function gives the plain message: it has no whole table to hint from" do
+    {:ok, [d]} = Parser.program("def Game.probe() : Int do board(1, 2) end")
+    sigs = fn name -> Map.get(Stdlib.signatures(), name) end
+    {:error, [e | _]} = Check.decl(d, sigs).result
+    assert e.message == "unbound symbol `board`"
+  end
+
+  # ---------- Rust-only: map keys must be data ----------
+
+  test "a map annotated with a function key is refused" do
+    err = first_error("def A.f(m : Map<(Int -> Int), Int>) : Int do 0 end")
+    assert err.code == "non-data-map-key"
+    assert err.message =~ "map key"
+  end
+
+  test "a map literal with a function key is refused" do
+    err = first_error("def A.f() : Int do m = %{fn (x : Int) -> x end => 1} \n 0 end")
+    assert err.code == "non-data-map-key"
+    assert err.message =~ "map key"
+  end
+
+  test "a map with a function value is still allowed" do
+    checks("def A.f(m : Map<String, (Int -> Int)>) : Map<String, (Int -> Int)> do m end")
+  end
+
+  defp with_fake_make do
+    Map.put(
+      Stdlib.signatures(),
+      "Fake.make",
+      {:def, [{:var, "a"}], {:applied, "Map", [{:var, "a"}, @int]}}
+    )
+  end
+
+  test "a generic call's Map result with a function key is refused" do
+    [d] = parse("def A.f() : Int do\n  m = Fake.make(fn (x : Int) -> x end)\n  0\nend")
+    {:error, errs} = Check.decl(d, with_fake_make()).result
+    assert Enum.any?(errs, &(&1.code == "non-data-map-key")), inspect(errs)
+  end
+
+  test "a generic deftype holding a Map at a function key is refused" do
+    src =
+      "deftype Box.T<K, V> do B(Map<K, V>) end\ndef A.f(b : Box.T<(Int -> Int), Int>) : Int do 0 end"
+
+    assert first_error(src).code == "non-data-map-key"
+  end
+
+  test "a recursive generic deftype holding a Map at a function key is refused" do
+    src =
+      "deftype Rec.T<K, V> do Node(Map<K, V>, Rec.T<K, V>) | Leaf end\ndef A.f(r : Rec.T<(Int -> Int), Int>) : Int do 0 end"
+
+    assert first_error(src).code == "non-data-map-key"
+  end
+
+  test "a deftype the map-key rule expands is a dependency" do
+    src = """
+    deftype M.Inner<K> do I(K) end
+    deftype M.W<K> do W(M.Inner<K>) end
+    def M.c(w : M.W<(Int -> Int)>) : Int do 1 end
+    """
+
+    checked = last_checked(src)
+    assert {:ok, _} = checked.result
+    assert sorted(checked.deps) == ["M.Inner", "M.W"]
+    broken = String.replace(src, "I(K)", "I(Map<K, Int>)")
+    assert first_error(broken).code == "non-data-map-key"
+
+    # A failed check reads on past a key that is not data.
+    failed =
+      last_checked(src <> "def M.d(x : (Map<(Int -> Int), Int>, M.W<Cmd<Int>>)) : Int do 1 end")
+
+    assert {:error, _} = failed.result
+    assert MapSet.member?(failed.deps, "M.Inner")
+  end
+
+  test "a recursive generic deftype holding a Map at a data key checks" do
+    checks(
+      "deftype Rec.T<K, V> do Node(Map<K, V>, Rec.T<K, V>) | Leaf end\ndef A.f(r : Rec.T<String, Int>) : Int do 0 end"
+    )
+  end
+
+  # Every declaration of `src`, checked within `seconds` once parsed. The
+  # bounds are Rust's debug-build ones: 1 s for most, 8 s for the fan and the
+  # dense group (each settles a group of about 250,000 type nodes).
+  defp check_all_within(src, seconds) do
+    decls = parse(src)
+    {micros, checked} = :timer.tc(fn -> Check.program(decls, Stdlib.signatures()) end)
+
+    assert micros / 1_000_000 < seconds,
+           "took #{micros / 1_000_000} s: #{String.slice(src, 0, 200)}"
+
+    checked
+  end
+
+  defp failures(checked) do
+    for {name, %{result: {:error, errs}}} <- Enum.sort(checked),
+        do: {name, Enum.map(errs, & &1.code)}
+  end
+
+  test "a deftype that never repeats an instantiation checks quickly" do
+    chain = Enum.map_join(1..40, fn i -> "deftype T.A#{i}<K> do A(T.A#{i - 1}<(K, K)>) end\n" end)
+
+    shapes = [
+      "deftype T.A<K> do A(T.A<(K, K)>) | E | M(Map<K, Int>) end",
+      "deftype T.A<K> do A(T.A<T.A<K>>) | E | M(Map<K, Int>) end",
+      "deftype T.A0<K> do A(Map<K, Int>) end\n#{chain}deftype T.A<K> do A(T.A40<K>) end"
+    ]
+
+    for shape <- shapes do
+      data = check_all_within(shape <> "\ndef T.f(a : T.A<Int>) : Int do 1 end", 1.0)
+      assert failures(data) == [], shape
+      function = check_all_within(shape <> "\ndef T.f(a : T.A<(Int -> Int)>) : Int do 1 end", 1.0)
+      assert codes(function["T.f"]) == ["non-data-map-key"], shape
+    end
+
+    assert failures(check_all_within("deftype T.A<K> do A(T.A<(K, K)>) | E end", 1.0)) == []
+  end
+
+  defp pad(i), do: String.pad_leading(Integer.to_string(i), 5, "0")
+
+  test "a long chain of deftypes checks quickly" do
+    chain =
+      Enum.map_join(0..1998, fn i -> "deftype T.C#{pad(i)}<K> do A(T.C#{pad(i + 1)}<K>) end\n" end) <>
+        "deftype T.C01999<K> do A(Map<K, Int>) end\n"
+
+    src =
+      chain <>
+        "def T.f(c : T.C00000<(Int -> Int)>) : Int do 1 end\ndef T.g(c : T.C00000<Int>) : Int do 1 end"
+
+    checked = check_all_within(src, 1.0)
+    assert failures(checked) == [{"T.f", ["non-data-map-key"]}]
+    assert MapSet.size(checked["T.f"].deps) == 2000
+    assert checked["T.g"].deps == MapSet.new(["T.C00000"])
+  end
+
+  test "a ring of deftypes checks quickly" do
+    length = 2000
+
+    ring =
+      Enum.map_join(0..(length - 1), fn i ->
+        key = if i == 0, do: " | M(Map<K, Int>)", else: ""
+        "deftype T.R#{pad(i)}<K> do A(T.R#{pad(rem(i + 1, length))}<K>)#{key} end\n"
+      end)
+
+    src =
+      ring <>
+        "def T.f(r : T.R01000<(Int -> Int)>) : Int do 1 end\ndef T.g(r : T.R01000<Int>) : Int do 1 end"
+
+    checked = check_all_within(src, 1.0)
+    assert failures(checked) == [{"T.f", ["non-data-map-key"]}]
+    assert MapSet.size(checked["T.f"].deps) == length
+    assert checked["T.g"].deps == MapSet.new(["T.R01000"])
+  end
+
+  test "a wide fan of deftypes checks quickly" do
+    leaves = 10_000
+
+    leaf =
+      Enum.map_join(0..(leaves - 1), fn i ->
+        "deftype T.L#{pad(i)}<K, V> do A(Map<K, V>) end\n"
+      end)
+
+    variants = Enum.map_join(0..(leaves - 1), " | ", fn i -> "V#{pad(i)}(T.L#{pad(i)}<K, V>)" end)
+
+    src =
+      leaf <>
+        "deftype T.Z<K, V> do #{variants} end\n" <>
+        "def T.f(z : T.Z<Int, (Int -> Int)>) : Int do 1 end\ndef T.g(z : T.Z<(Int -> Int), Int>) : Int do 1 end"
+
+    checked = check_all_within(src, 8.0)
+    assert failures(checked) == [{"T.g", ["non-data-map-key"]}]
+    assert MapSet.size(checked["T.f"].deps) == leaves + 1
+    assert MapSet.size(checked["T.g"].deps) == leaves + 1
+  end
+
+  test "a dense group of deftypes checks quickly" do
+    size = 500
+    name = &"T.D#{String.pad_leading(Integer.to_string(&1), 3, "0")}"
+    all = Enum.map_join(0..(size - 1), ", ", &"#{name.(&1)}<K>")
+
+    group =
+      Enum.map_join(0..(size - 1), fn i ->
+        key = if i == size - 1, do: " | M(Map<K, Int>)", else: ""
+        "deftype #{name.(i)}<K> do A(#{all})#{key} end\n"
+      end)
+
+    src =
+      group <>
+        "def T.f(d : T.D000<(Int -> Int)>) : Int do 1 end\ndef T.g(d : T.D000<Int>) : Int do 1 end"
+
+    checked = check_all_within(src, 8.0)
+    assert failures(checked) == [{"T.f", ["non-data-map-key"]}]
+    assert MapSet.size(checked["T.f"].deps) == size
+    assert checked["T.g"].deps == MapSet.new(["T.D000"])
+  end
+
+  test "a parameter reaches a key through deftypes that hold each other" do
+    types =
+      "deftype T.X<K, P> do X(T.Y<K>, P) end\ndeftype T.Y<K> do Y(List<T.X<(Int, K), Int>>) | M(Map<K, Int>) end"
+
+    err = first_error(types <> "\ndef T.f(x : T.X<(Int -> Int), Int>) : Int do 1 end")
+    assert err.code == "non-data-map-key"
+    checks(types <> "\ndef T.f(x : T.X<Int, (Int -> Int)>) : Int do 1 end")
+  end
+
+  test "two deftype instantiations colliding past the quote limit are each checked" do
+    arg_x = "(" <> Enum.join(List.duplicate("String", 70), ", ") <> ")"
+    arg_y = "(" <> Enum.join(List.duplicate("String", 69) ++ ["(Int -> Int)"], ", ") <> ")"
+    d = "deftype D.T<K> do C(Map<K, Int>) end\n"
+    checks(d <> "def A.f(x : D.T<#{arg_x}>) : Int do 0 end")
+
+    assert first_error(d <> "def A.f(x : D.T<#{arg_y}>) : Int do 0 end").code ==
+             "non-data-map-key"
+
+    assert first_error(d <> "def A.f(x : (D.T<#{arg_x}>, D.T<#{arg_y}>)) : Int do 0 end").code ==
+             "non-data-map-key"
+  end
+
+  test "an offending map type used many times is reported once" do
+    [d] =
+      parse(
+        "def A.f() : Int do\n  m = Fake.make(fn (x : Int) -> x end)\n  n = m\n  o = n\n  0\nend"
+      )
+
+    {:error, errs} = Check.decl(d, with_fake_make()).result
+    assert Enum.count(errs, &(&1.code == "non-data-map-key")) == 1, inspect(errs)
   end
 end
