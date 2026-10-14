@@ -1,0 +1,60 @@
+defmodel Todo.Item do
+  id : Int
+  text : String
+  done : Bool
+end
+
+defmodel Todo.Model do
+  items : List<Todo.Item>
+  input : String
+  next_id : Int
+end
+
+deftype Todo.Msg do
+  SetInput(String) | AddItem | Toggle(Int) | ClearDone
+end
+
+def Todo.init() : (Todo.Model, Cmd<Todo.Msg>) do
+  (%Todo.Model{items: [], input: "", next_id: 1}, Cmd.none())
+end
+
+def Todo.toggle_item(items : List<Todo.Item>, id : Int) : List<Todo.Item> do
+  List.map(items, fn (item : Todo.Item) ->
+    if item.id == id do %Todo.Item{item | done: not item.done} else item end
+  end)
+end
+
+def Todo.update(msg : Todo.Msg, model : Todo.Model) : (Todo.Model, Cmd<Todo.Msg>) do
+  always(model.next_id > List.length(model.items))
+  next = case msg do
+    Todo.Msg.SetInput(text) -> %Todo.Model{model | input: text}
+    Todo.Msg.AddItem ->
+      if model.input == "" do
+        model
+      else
+        item = %Todo.Item{id: model.next_id, text: model.input, done: false}
+        %Todo.Model{model | items: List.append(model.items, item), input: "", next_id: model.next_id + 1}
+      end
+    Todo.Msg.Toggle(id) -> %Todo.Model{model | items: Todo.toggle_item(model.items, id)}
+    Todo.Msg.ClearDone ->
+      %Todo.Model{model | items: List.filter(model.items, fn (item : Todo.Item) -> not item.done end)}
+  end
+  (next, Cmd.none())
+end
+
+def Todo.view_item(item : Todo.Item) : Html<Todo.Msg> do
+  <li class={if item.done do "done" else "pending" end}>
+    <button on-click={Todo.Msg.Toggle(item.id)}>{item.text}</button>
+  </li>
+end
+
+def Todo.view(model : Todo.Model) : Html<Todo.Msg> do
+  <div class="todo">
+    <input value={model.input} on-change={Todo.Msg.SetInput} />
+    <button on-click={Todo.Msg.AddItem}>Add</button>
+    <ul>{List.map(model.items, Todo.view_item)}</ul>
+    <button on-click={Todo.Msg.ClearDone}>Clear done</button>
+  </div>
+end
+
+defapp Todo

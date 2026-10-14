@@ -1,0 +1,156 @@
+defmodel Split.Expense do
+  id : Uuid
+  payer : String
+  what : String
+  cents : Int
+end
+
+defmodel Split.Share do
+  who : String
+  owes : Int
+end
+
+defmodel Split.Model do
+  expenses : List<Split.Expense>
+  payer : String
+  what : String
+  amount : String
+  error : String
+end
+
+deftype Split.Msg do
+  SetPayer(String) | SetWhat(String) | SetAmount(String) | Add | Added(Uuid) | Loaded(List<Split.Expense>)
+end
+
+def Split.init() : (Split.Model, Cmd<Split.Msg>) do
+  (
+    %Split.Model{expenses: [], payer: "", what: "", amount: "", error: ""},
+    Cmd.store.list(fn (rows : List<Split.Expense>) -> Split.Msg.Loaded(rows) end)
+  )
+end
+
+def Split.payers(expenses : List<Split.Expense>) : List<String> do
+  List.foldl(expenses, [], fn (e : Split.Expense, acc : List<String>) ->
+    if List.member(acc, e.payer) do acc else List.append(acc, e.payer) end
+  end)
+end
+
+def Split.total(expenses : List<Split.Expense>) : Int do
+  List.sum(List.map(expenses, fn (e : Split.Expense) -> e.cents end))
+end
+
+def Split.paid_by(expenses : List<Split.Expense>, who : String) : Int do
+  Split.total(List.filter(expenses, fn (e : Split.Expense) -> e.payer == who end))
+end
+
+def Split.balance(expenses : List<Split.Expense>, who : String) : Int do
+  share = Split.total(expenses) / List.length(Split.payers(expenses))
+  share - Split.paid_by(expenses, who)
+end
+
+def Split.shares(expenses : List<Split.Expense>) : List<Split.Share> do
+  List.map(Split.payers(expenses), fn (who : String) ->
+    %Split.Share{who: who, owes: Split.balance(expenses, who)}
+  end)
+end
+
+def Split.money(cents : Int) : String do
+  sign = if cents < 0 do "-" else "" end
+  n = if cents < 0 do 0 - cents else cents end
+  whole = n / 100
+  rest = n - whole * 100
+  pad = if rest < 10 do "0" else "" end
+  sign ++ String.from_int(whole) ++ "." ++ pad ++ String.from_int(rest)
+end
+
+def Split.update(msg : Split.Msg, model : Split.Model) : (Split.Model, Cmd<Split.Msg>) do
+  always(List.length(Split.payers(model.expenses)) <= List.length(model.expenses))
+  case msg do
+    Split.Msg.SetPayer(v) -> (%Split.Model{model | payer: v}, Cmd.none())
+    Split.Msg.SetWhat(v) -> (%Split.Model{model | what: v}, Cmd.none())
+    Split.Msg.SetAmount(v) -> (%Split.Model{model | amount: v}, Cmd.none())
+    Split.Msg.Add ->
+      case String.to_int(model.amount) do
+        Option.None -> (%Split.Model{model | error: "How much, in cents?"}, Cmd.none())
+        Option.Some(cents) ->
+          if cents <= 0 or String.is_empty(String.trim(model.payer)) do
+            (%Split.Model{model | error: "Who paid, and how much?"}, Cmd.none())
+          else
+            (
+              %Split.Model{model | error: "", what: "", amount: ""},
+              Cmd.store.insert(
+                %Split.Expense{payer: String.trim(model.payer), what: model.what, cents: cents},
+                fn (id : Uuid) -> Split.Msg.Added(id) end
+              )
+            )
+          end
+      end
+    Split.Msg.Added(id) ->
+      (model, Cmd.store.list(fn (rows : List<Split.Expense>) -> Split.Msg.Loaded(rows) end))
+    Split.Msg.Loaded(rows) -> (%Split.Model{model | expenses: rows}, Cmd.none())
+  end
+end
+
+def Split.view_expense(e : Split.Expense) : Html<Split.Msg> do
+  <li class="expense">
+    <span class="who">{e.payer}</span>
+    <span class="what">{e.what}</span>
+    <span class="amount">{Split.money(e.cents)}</span>
+  </li>
+end
+
+def Split.view_share(s : Split.Share) : Html<Split.Msg> do
+  <li class={if s.owes > 0 do "share owes" else "share owed" end}>
+    <span class="who">{s.who}</span>
+    <span class="amount">{Split.money(s.owes)}</span>
+  </li>
+end
+
+def Split.view(model : Split.Model) : Html<Split.Msg> do
+  <div class="split">
+    <h1>Ski trip</h1>
+    <form class="entry">
+      <input value={model.payer} on-change={Split.Msg.SetPayer} placeholder="Who paid" />
+      <input value={model.what} on-change={Split.Msg.SetWhat} placeholder="What for" />
+      <input value={model.amount} on-change={Split.Msg.SetAmount} placeholder="Cents" />
+      <button on-click={Split.Msg.Add}>Add</button>
+    </form>
+    <p class="error">{model.error}</p>
+    <h2>Expenses</h2>
+    <ul class="expenses">{List.map(model.expenses, Split.view_expense)}</ul>
+    <h2>Total</h2>
+    <p class="total">{Split.money(Split.total(model.expenses))}</p>
+    <h2>Who owes what</h2>
+    <ul class="shares">{List.map(Split.shares(model.expenses), Split.view_share)}</ul>
+  </div>
+end
+
+defapp Split
+
+deftest Split.money_prints_cents do
+  always(Split.money(0) == "0.00")
+  always(Split.money(5) == "0.05")
+  always(Split.money(250) == "2.50")
+  always(Split.money(1234) == "12.34")
+  always(Split.money(0 - 250) == "-2.50")
+  always(Split.money(0 - 5) == "-0.05")
+end
+
+deftest Split.splits_what_was_paid do
+  expenses = [
+    %Split.Expense{payer: "ana", what: "lift pass", cents: 6000},
+    %Split.Expense{payer: "bo", what: "fondue", cents: 3000},
+    %Split.Expense{payer: "ana", what: "wax", cents: 1200}
+  ]
+  always(Split.total(expenses) == 10200)
+  always(Split.payers(expenses) == ["ana", "bo"])
+  always(Split.paid_by(expenses, "ana") == 7200)
+  always(Split.balance(expenses, "ana") == 0 - 2100)
+  always(Split.balance(expenses, "bo") == 2100)
+end
+
+deftest Split.handles_an_empty_trip do
+  always(Split.total([]) == 0)
+  always(Split.money(Split.total([])) == "0.00")
+  always(List.is_empty(Split.shares([])))
+end

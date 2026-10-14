@@ -1,0 +1,35 @@
+defmodel Notes.Note do
+  id : Uuid
+  title : String
+  body : String
+end
+
+defmodel Notes.Model do
+  saved : Int
+end
+
+deftype Notes.Msg do
+  Save(String) | Saved(Uuid)
+end
+
+def Notes.init() : (Notes.Model, Cmd<Notes.Msg>) do
+  (%Notes.Model{saved: 0}, Cmd.none())
+end
+
+def Notes.update(msg : Notes.Msg, model : Notes.Model) : (Notes.Model, Cmd<Notes.Msg>) do
+  always(model.saved >= 0)
+  case msg do
+    Notes.Msg.Save(text) ->
+      (model, Cmd.store.insert(%Notes.Note{title: text, body: "written"}, fn (id : Uuid) -> Notes.Msg.Saved(id) end))
+    Notes.Msg.Saved(id) -> (%Notes.Model{model | saved: model.saved + 1}, Cmd.none())
+  end
+end
+
+def Notes.view(model : Notes.Model) : Html<Notes.Msg> do
+  <div class="notes">
+    <span class="count">{model.saved}</span>
+    <button on-click={Notes.Msg.Save("quicknote")}>save</button>
+  </div>
+end
+
+defapp Notes
