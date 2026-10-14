@@ -102,14 +102,10 @@ defmodule Kinoko.Lang.Universe do
 
   @doc """
   How many times the database has checked a declaration, over this
-  universe's life (the sum of `Salsa.stats/1` computes of `{:check, _}`).
-  Those counts are cumulative, one entry per distinct check ever run, so
-  this walks a map that only grows.
+  universe's life: the salsa's running `:check` counter (`Salsa.computed/2`).
   """
   @spec check_count(t()) :: non_neg_integer()
-  def check_count(%__MODULE__{salsa: salsa}) do
-    for {{:check, _}, n} <- Salsa.stats(salsa).computes, reduce: 0, do: (sum -> sum + n)
-  end
+  def check_count(%__MODULE__{salsa: salsa}), do: Salsa.computed(salsa, :check)
 
   @doc "The code `rounds` (oldest first) build, each name's declaration by CID."
   @spec replay([round]) :: %{String.t() => String.t()}
@@ -195,12 +191,19 @@ defmodule Kinoko.Lang.Universe do
             {:error, reasons}
 
           _ ->
-            {:ok, %{u | history: Enum.reverse(rounds), texts: Map.merge(u.texts, texts)}}
+            {:ok, %{u | history: Enum.reverse(rounds), texts: referenced(rounds, texts, u.texts)}}
         end
 
       errors ->
         {:error, errors}
     end
+  end
+
+  # The texts of every cid the rounds commit, canonical (`Format.decl`) text
+  # winning over what storage gave.
+  defp referenced(rounds, given, canonical) do
+    cids = for round <- rounds, {:live, _, cid} <- round.entries, into: MapSet.new(), do: cid
+    given |> Map.take(MapSet.to_list(cids)) |> Map.merge(canonical)
   end
 
   defp read_back(name, cid, nil),

@@ -421,7 +421,9 @@ defmodule Kinoko.Lang.UniverseTest do
   end
 
   # Two patches define `M.hub` differently, each failing alone, each touching
-  # what the other does, so neither is dropped. Sixteen callers of `M.hub`
+  # what the other does, so neither is dropped. Twelve callers of `M.hub`
+  # (Rust stages sixteen; each caller's own stage enumerates 2^k sets, as in
+  # Rust, untimed, so twelve keeps the suite fast)
   # stage around them. Then a root is staged whose second declaration fails
   # alone over what nothing else touches, so `alive` drops the root alone,
   # and the part ends at once.
@@ -432,7 +434,7 @@ defmodule Kinoko.Lang.UniverseTest do
     {u, {:staged, _}} = stage(u, "hubb", patch("def M.hub() : Int do M.missing_b() end"))
 
     u =
-      Enum.reduce(0..15, u, fn i, u ->
+      Enum.reduce(0..11, u, fn i, u ->
         {u, {:staged, reasons}} =
           stage(u, "caller#{pad2(i)}", patch("def M.c#{pad2(i)}() : Int do M.hub() + #{i} end"))
 
@@ -450,7 +452,7 @@ defmodule Kinoko.Lang.UniverseTest do
            inspect(reasons)
 
     assert took < 5.0, "took #{took}"
-    assert map_size(Universe.staged(u)) == 19
+    assert map_size(Universe.staged(u)) == 15
   end
 
   # A failed check stops early: `M.Box` is unbound, so the field values are
@@ -591,6 +593,37 @@ defmodule Kinoko.Lang.UniverseTest do
 
     assert {:staged, _} = v
     assert checked == ["M.d", "M.e", "M.x"]
+  end
+
+  test "compute counts stay bounded while check_count keeps growing" do
+    {u, _} = stage(Universe.new(), "base", patch("def M.x() : Int do 1 end"))
+
+    sizes =
+      for round <- 1..5 do
+        u =
+          Enum.reduce(1..100, u, fn i, u ->
+            {u, {:staged, _}} =
+              stage(u, "w", patch("def M.w#{round}x#{i}() : Int do M.x() + M.u#{i}() end"))
+
+            u |> Universe.unstage("w") |> elem(0)
+          end)
+          |> Universe.collect(true)
+
+        {map_size(Salsa.stats(u.salsa).computes), Universe.check_count(u)}
+      end
+
+    assert Enum.all?(sizes, fn {size, _} -> size <= 10 end), inspect(sizes)
+    assert Enum.all?(sizes, fn {_, checks} -> checks >= 100 end), inspect(sizes)
+
+    {u, _} =
+      Enum.reduce(1..300, {u, nil}, fn i, {u, _} ->
+        {u, _} = stage(u, "w", patch("def M.v#{i}() : Int do M.x() + M.u#{i}() end"))
+        Universe.unstage(u, "w")
+      end)
+
+    u = Universe.collect(u, true)
+    assert map_size(Salsa.stats(u.salsa).computes) <= 10
+    assert Universe.check_count(u) >= 300
   end
 
   test "a body edit checks only that declaration, never its dependents (a chain of 20)" do
@@ -832,6 +865,13 @@ defmodule Kinoko.Lang.UniverseTest do
     assert Universe.history(restored) == Universe.history(u)
     assert Universe.signatures(restored) == Universe.signatures(u)
     assert Universe.staged(restored) == %{}
+    # Only texts history references are kept, and canonical text wins.
+    {:ok, padded} = Universe.restore(Universe.history(u), Map.put(texts, "unreferenced", "junk"))
+    assert Universe.text(padded, "unreferenced") == nil
+    a = Universe.committed(u)["M.a"].cid
+    loose = Map.put(texts, a, "def   M.a() : Int do\n  2\nend")
+    {:ok, relaid} = Universe.restore(Universe.history(u), loose)
+    assert Universe.text(relaid, a) == Universe.text(u, a)
     assert {:ok, empty} = Universe.restore([], %{})
     assert Universe.committed(empty) == %{}
 

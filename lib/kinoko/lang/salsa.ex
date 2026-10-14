@@ -39,9 +39,11 @@ defmodule Kinoko.Lang.Salsa do
   ## Stats
 
   `stats/1` reports `computes: %{query => n}`: how many times each query's
-  body ran over the database's whole life, failed runs included. It is
-  cumulative: `retain/2`, `retain_reads/2` and `trim/1` drop memos, never
-  counts.
+  body ran, failed runs included. Counts accumulate while a query holds
+  memos; `retain/2`, `retain_reads/2` and `trim/1` drop a query's count
+  together with its last memo, so the map stays within what the memos hold.
+  `computed/2` is a running total per query tag (`{:check, _}` is
+  `:check`) over the database's whole life, never pruned.
   """
 
   alias Kinoko.Lang.Salsa.Reads
@@ -61,7 +63,8 @@ defmodule Kinoko.Lang.Salsa do
     layers: %{},
     memos: %{},
     verified: %{},
-    computes: %{}
+    computes: %{},
+    computed: %{}
   ]
 
   @typedoc "A query's value, as its compute gave it."
@@ -180,7 +183,7 @@ defmodule Kinoko.Lang.Salsa do
   @doc "Drop the memos of every query `keep?` rejects; asked again, it is computed again."
   @spec retain(t(), (term() -> boolean())) :: t()
   def retain(%__MODULE__{} = db, keep?) do
-    %{db | memos: Map.filter(db.memos, fn {q, _} -> keep?.(q) end), verified: %{}}
+    prune(%{db | memos: Map.filter(db.memos, fn {q, _} -> keep?.(q) end), verified: %{}})
   end
 
   @doc """
@@ -198,7 +201,7 @@ defmodule Kinoko.Lang.Salsa do
       end)
     end
 
-    %{db | memos: filter_memos(db.memos, kept?), verified: %{}}
+    prune(%{db | memos: filter_memos(db.memos, kept?), verified: %{}})
   end
 
   @doc """
@@ -211,8 +214,25 @@ defmodule Kinoko.Lang.Salsa do
   @spec trim(t()) :: t()
   def trim(%__MODULE__{} = db) do
     held = db.memos |> Map.keys() |> MapSet.new()
-    %{db | memos: trim_memos(db.memos, held), verified: %{}}
+    prune(%{db | memos: trim_memos(db.memos, held), verified: %{}})
   end
+
+  @doc """
+  How many times the body of a query tagged `tag` ran over the database's
+  whole life (a tuple query's tag is its first element; any other query is
+  its own tag). A running counter: never pruned, and it holds one integer
+  per tag.
+  """
+  @spec computed(t(), term()) :: non_neg_integer()
+  def computed(%__MODULE__{computed: computed}, tag), do: Map.get(computed, tag, 0)
+
+  defp tag(query) when is_tuple(query) and tuple_size(query) > 0, do: elem(query, 0)
+  defp tag(query), do: query
+
+  # A query's compute count goes with its last memo, so the counts stay
+  # within what the memos hold.
+  defp prune(db),
+    do: %{db | computes: Map.filter(db.computes, fn {q, _} -> Map.has_key?(db.memos, q) end)}
 
   @doc "How many queries hold memos (`stats/1`'s `queries`, without walking them)."
   @spec queries(t()) :: non_neg_integer()
@@ -221,7 +241,7 @@ defmodule Kinoko.Lang.Salsa do
   @doc """
   `queries`: how many queries hold memos; `memos`: how many memos, all
   told; `reads`: how many reads they record; `computes`: how many times each
-  query's body ran (cumulative over the database's life).
+  query's body ran (kept while it holds memos; see `computed/2`).
   """
   @spec stats(t()) :: %{
           queries: non_neg_integer(),
@@ -347,7 +367,12 @@ defmodule Kinoko.Lang.Salsa do
 
   # Compute `query`, recording what it reads, as its newest memo.
   defp compute(%Reads{} = r, query) do
-    db = %{r.db | computes: Map.update(r.db.computes, query, 1, &(&1 + 1))}
+    db = %{
+      r.db
+      | computes: Map.update(r.db.computes, query, 1, &(&1 + 1)),
+        computed: Map.update(r.db.computed, tag(query), 1, &(&1 + 1))
+    }
+
     {value, inner} = db.mod.compute(query, %{r | db: db, reads: [], height: 0, failed: nil})
     db = inner.db
 

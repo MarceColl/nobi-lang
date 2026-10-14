@@ -278,7 +278,10 @@ defmodule Kinoko.Lang.SalsaTest do
         Salsa.retain(db, &(&1 != {:check, "A"}))
       end)
 
-    assert {runs(db, {:check, "A"}), runs(db, {:sig, "A"})} == {2, 1}
+    # Dropping {:check, "A"}'s last memo drops its count too (`stats`);
+    # the running per-tag counter keeps every run.
+    assert {runs(db, {:check, "A"}), runs(db, {:sig, "A"})} == {0, 1}
+    assert {Salsa.computed(db, :check), Salsa.computed(db, :sig)} == {2, 1}
   end
 
   # Sig A has a memo that read `a1` and one that read `a2`. Dropping what read
@@ -332,7 +335,22 @@ defmodule Kinoko.Lang.SalsaTest do
     db = db |> Salsa.retain(&(&1 != {:sig, "A"})) |> Salsa.trim()
     assert Salsa.stats(db).memos == 1
     assert {{:ok, "b1+a"}, db} = Salsa.query(db, @committed, {:check, "B"})
-    assert {runs(db, {:check, "B"}), runs(db, {:sig, "A"})} == {2, 3}
+    # {:sig, "A"}'s count went with its memos; the per-tag counter keeps all three runs.
+    assert {runs(db, {:check, "B"}), runs(db, {:sig, "A"})} == {2, 1}
+    assert {Salsa.computed(db, :check), Salsa.computed(db, :sig)} == {2, 3}
+  end
+
+  test "computes are pruned with their query's memos; computed/2 keeps counting" do
+    db =
+      Enum.reduce(1..50, db(), fn i, db ->
+        db = Salsa.set(db, "committed", "A#{i}", "a")
+        {{:ok, _}, db} = Salsa.query(db, @committed, {:check, "A#{i}"})
+        db |> Salsa.unset("committed", "A#{i}") |> Salsa.retain(&(&1 != {:check, "A#{i}"}))
+      end)
+
+    assert map_size(Salsa.stats(db).computes) == 0
+    assert Salsa.computed(db, :check) == 50
+    assert Salsa.computed(db, :nothing) == 0
   end
 
   # Dropping a memo can leave what read it reading what no memo gives: `trim`
