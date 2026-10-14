@@ -1,0 +1,108 @@
+defmodule Kinoko.Lang.Types.Stdlib do
+  @moduledoc """
+  Stdlib signatures (ported from `types/stdlib.rs`): the 59 rows the checker
+  resolves calls against, in the Rust/TS declared order. Generic positions use
+  lowercase `{:var, "a"}` for defs and `{:var, "T"}` for the `Option`/`Result`
+  deftypes. Only what feeds the checker lives here; the evaluator's metadata
+  (codegen, effect idempotency) belongs to the interpreter.
+  """
+
+  @rows (
+          tv = fn n -> {:var, n} end
+          nm = fn n -> {:named, n} end
+          ap = fn n, args -> {:applied, n, args} end
+          arrow = fn ps, r -> {:arrow, ps, r} end
+          list = fn t -> {:applied, "List", [t]} end
+          option = fn t -> {:applied, "Option", [t]} end
+          cmd = fn t -> {:applied, "Cmd", [t]} end
+          def_ = fn ps, r -> {:def, ps, r} end
+
+          a = tv.("a")
+          b = tv.("b")
+          int = nm.("Int")
+          str = nm.("String")
+          bool = nm.("Bool")
+          uuid = nm.("Uuid")
+          op = nm.("Tx.Op")
+
+          [
+            # List
+            {"List.map", def_.([list.(a), arrow.([a], b)], list.(b))},
+            {"List.filter", def_.([list.(a), arrow.([a], bool)], list.(a))},
+            {"List.append", def_.([list.(a), a], list.(a))},
+            {"List.concat", def_.([list.(a), list.(a)], list.(a))},
+            {"List.length", def_.([list.(a)], int)},
+            {"List.is_empty", def_.([list.(a)], bool)},
+            {"List.foldl", def_.([list.(a), b, arrow.([a, b], b)], b)},
+            {"List.sum", def_.([list.(int)], int)},
+            {"List.maximum", def_.([list.(int)], option.(int))},
+            {"List.minimum", def_.([list.(int)], option.(int))},
+            {"List.reverse", def_.([list.(a)], list.(a))},
+            {"List.member", def_.([list.(a), a], bool)},
+            {"List.all", def_.([list.(a), arrow.([a], bool)], bool)},
+            {"List.any", def_.([list.(a), arrow.([a], bool)], bool)},
+            {"List.head", def_.([list.(a)], option.(a))},
+            {"List.take", def_.([list.(a), int], list.(a))},
+            {"List.drop", def_.([list.(a), int], list.(a))},
+            {"List.filter_map", def_.([list.(a), arrow.([a], option.(b))], list.(b))},
+            {"List.sort_by", def_.([list.(a), arrow.([a], int)], list.(a))},
+            # String
+            {"String.length", def_.([str], int)},
+            {"String.concat", def_.([str, str], str)},
+            {"String.from_int", def_.([int], str)},
+            {"String.to_int", def_.([str], option.(int))},
+            {"String.is_empty", def_.([str], bool)},
+            {"String.reverse", def_.([str], str)},
+            {"String.trim", def_.([str], str)},
+            {"String.to_upper", def_.([str], str)},
+            {"String.to_lower", def_.([str], str)},
+            {"String.contains", def_.([str, str], bool)},
+            {"String.starts_with", def_.([str, str], bool)},
+            {"String.split", def_.([str, str], list.(str))},
+            {"String.join", def_.([list.(str), str], str)},
+            {"String.slice", def_.([str, int, int], str)},
+            # Option
+            {"Option.with_default", def_.([option.(a), a], a)},
+            {"Option.map", def_.([option.(a), arrow.([a], b)], option.(b))},
+            {"Option.and_then", def_.([option.(a), arrow.([a], option.(b))], option.(b))},
+            # JSON. stringify returns a Result: a function, Cmd or Html is not data.
+            {"JSON.parse", def_.([str], ap.("Result", [a, str]))},
+            {"JSON.stringify", def_.([a], ap.("Result", [str, str]))},
+            # stdlib deftypes
+            {"Option", {:type, ["T"], [{"Some", [tv.("T")]}, {"None", []}]}},
+            {"Result", {:type, ["T", "E"], [{"Ok", [tv.("T")]}, {"Err", [tv.("E")]}]}},
+            # Effects
+            {"Cmd.none", def_.([], cmd.(a))},
+            {"Cmd.batch", def_.([list.(cmd.(a))], cmd.(a))},
+            {"Cmd.store.insert", def_.([a, arrow.([uuid], b)], cmd.(b))},
+            {"Cmd.store.list", def_.([arrow.([list.(a)], b)], cmd.(b))},
+            {"Cmd.store.get", def_.([uuid, arrow.([option.(a)], b)], cmd.(b))},
+            {"Cmd.store.update", def_.([uuid, a, arrow.([uuid], b)], cmd.(b))},
+            {"Cmd.store.delete", def_.([uuid, arrow.([option.(a)], b)], cmd.(b))},
+            {"Cmd.store.tx", def_.([list.(op), arrow.([list.(uuid)], b)], cmd.(b))},
+            {"Cmd.time.now", def_.([arrow.([int], a)], cmd.(a))},
+            {"Cmd.random.int", def_.([int, int, arrow.([int], a)], cmd.(a))},
+            {"Cmd.blob.put", def_.([str, str, arrow.([str], a)], cmd.(a))},
+            {"Cmd.blob.get", def_.([str, arrow.([option.(str)], a)], cmd.(a))},
+            {"Cmd.blob.list", def_.([str, arrow.([list.(str)], a)], cmd.(a))},
+            {"Cmd.blob.delete", def_.([str, arrow.([str], a)], cmd.(a))},
+            {"Cmd.ai.generate", def_.([str, str, arrow.([str], a)], cmd.(a))},
+            # Tx: a zero-variant type; insert/update/delete build values of it.
+            {"Tx.Op", {:type, [], []}},
+            {"Tx.insert", def_.([a], op)},
+            {"Tx.update", def_.([uuid, a], op)},
+            {"Tx.delete", def_.([a], op)}
+          ]
+        )
+
+  @signatures Map.new(@rows)
+  @names Enum.map(@rows, &elem(&1, 0))
+
+  @doc "Every stdlib signature, keyed by fully qualified name."
+  @spec signatures() :: %{String.t() => Kinoko.Lang.Types.Extract.signature()}
+  def signatures, do: @signatures
+
+  @doc "Every stdlib name, in the declared (TS `STDLIB`) order."
+  @spec names() :: [String.t()]
+  def names, do: @names
+end
