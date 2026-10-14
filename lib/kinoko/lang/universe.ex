@@ -367,9 +367,9 @@ defmodule Kinoko.Lang.Universe do
   # is left, if the stdlib has one.
   defp apply_entry({:gone, name}, {u, checks}) do
     sigs =
-      case Stdlib.signatures() do
-        %{^name => sig} -> Map.put(u.sigs, name, sig)
-        _ -> Map.delete(u.sigs, name)
+      case Stdlib.signature(name) do
+        nil -> Map.delete(u.sigs, name)
+        sig -> Map.put(u.sigs, name, sig)
       end
 
     u = %{
@@ -485,7 +485,7 @@ defmodule Kinoko.Lang.Universe do
   # the stdlib's signature of it, if the stdlib has one.
   def over(sigs, changes) do
     Enum.reduce(changes, sigs, fn {name, sig}, sigs ->
-      case sig || Map.get(Stdlib.signatures(), name) do
+      case sig || Stdlib.signature(name) do
         nil -> Map.delete(sigs, name)
         sig -> Map.put(sigs, name, sig)
       end
@@ -493,12 +493,10 @@ defmodule Kinoko.Lang.Universe do
   end
 
   @doc false
-  def defines_stdlib?(patch) do
-    Enum.any?(
-      patch,
-      &(match?({:live, _, _, _}, &1) and Map.has_key?(Stdlib.signatures(), entry_name(&1)))
-    )
-  end
+  # Whether `patch` defines a name the language provides (`Stdlib.provided?/1`):
+  # no check's dependencies hold one, so such a patch can break any of them.
+  def defines_stdlib?(patch),
+    do: Enum.any?(patch, &(match?({:live, _, _, _}, &1) and Stdlib.provided?(entry_name(&1))))
 
   @doc false
   # A committed declaration as a live entry.
@@ -535,14 +533,13 @@ defmodule Kinoko.Lang.Universe do
       cids = MapSet.new(live ++ Enum.map(u.committed, fn {_, c} -> c.cid end))
       staged_names = for {_, patch} <- u.staged, e <- patch, do: entry_name(e)
       names = MapSet.new(staged_names ++ Map.keys(u.committed))
-      stdlib = Stdlib.signatures()
 
       salsa =
         u.salsa
         |> Salsa.retain(fn
           {:signature, cid} -> MapSet.member?(cids, cid)
           {:check, cid} -> MapSet.member?(cids, cid)
-          {_, name} -> MapSet.member?(names, name) or Map.has_key?(stdlib, name)
+          {_, name} -> MapSet.member?(names, name) or Stdlib.signature(name) != nil
         end)
         |> Salsa.retain_reads(fn
           {cid, _decl} -> MapSet.member?(cids, cid)

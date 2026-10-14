@@ -78,7 +78,7 @@ defmodule Kinoko.Lang.Universe.Db do
 
   def compute({:sig, name}, r) do
     case Salsa.input(r, {:name, name}) do
-      {nil, r} -> {{:ok, Map.get(Stdlib.signatures(), name)}, r}
+      {nil, r} -> {{:ok, Stdlib.signature(name)}, r}
       {cid, r} -> Salsa.ask(r, {:signature, cid})
     end
   end
@@ -135,7 +135,7 @@ defmodule Kinoko.Lang.Universe.Db do
     fn name ->
       case Salsa.peek(r, {:name, name}) do
         nil ->
-          Map.get(Stdlib.signatures(), name)
+          Stdlib.signature(name)
 
         cid ->
           case Salsa.peek(r, {:decl, cid}) do
@@ -196,9 +196,6 @@ defmodule Kinoko.Lang.Universe.Db do
         {:error, _} -> MapSet.union(checked.deps, Extract.deps(decl))
       end
 
-    MapSet.reject(deps, fn n ->
-      Map.has_key?(Stdlib.signatures(), n) or n in Extract.builtin_named() or
-        Map.has_key?(Extract.builtin_applied(), n)
-    end)
+    MapSet.reject(deps, &Stdlib.provided?/1)
   end
 end

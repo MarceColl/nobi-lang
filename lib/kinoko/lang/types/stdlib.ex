@@ -105,4 +105,19 @@ defmodule Kinoko.Lang.Types.Stdlib do
   @doc "Every stdlib name, in the declared (TS `STDLIB`) order."
   @spec names() :: [String.t()]
   def names, do: @names
+
+  @doc "The stdlib's signature of `name`, or `nil` when it has none."
+  @spec signature(String.t()) :: Kinoko.Lang.Types.Extract.signature() | nil
+  def signature(name), do: Map.get(@signatures, name)
+
+  @doc """
+  Whether the language itself provides `name`: a stdlib name or a builtin
+  type (`Int`, `List`, ...). A check's dependencies leave these out, so a
+  patch defining one can change any check (the universe treats it so).
+  """
+  @spec provided?(String.t()) :: boolean()
+  def provided?(name),
+    do:
+      Map.has_key?(@signatures, name) or name in Kinoko.Lang.Types.Extract.builtin_named() or
+        Map.has_key?(Kinoko.Lang.Types.Extract.builtin_applied(), name)
 end

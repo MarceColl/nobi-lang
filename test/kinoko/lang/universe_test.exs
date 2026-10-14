@@ -313,6 +313,21 @@ defmodule Kinoko.Lang.UniverseTest do
     assert length(reasons) == length(references)
   end
 
+  test "one rule says which names the language provides" do
+    for name <- ["List.map", "Cmd.none", "Int", "List", "Map"], do: assert(Stdlib.provided?(name))
+    for name <- ["A.f", "Lists", "List.nope"], do: refute(Stdlib.provided?(name))
+    assert Stdlib.signature("List.map") == Stdlib.signatures()["List.map"]
+    assert Stdlib.signature("A.f") == nil
+
+    deps =
+      Db.deps(decl("def A.f(x : Int) : Int do\n  List.length([x]) + A.g()\nend"), %{
+        deps: MapSet.new(["Int", "List.length", "A.g"]),
+        result: {:ok, nil}
+      })
+
+    assert deps == MapSet.new(["A.g"])
+  end
+
   # Removing a name thousands of committed declarations use: each breaks,
   # and each one's reasons are worded from the whole table. The table's
   # sorted names and name index are built once for all of them, never once
