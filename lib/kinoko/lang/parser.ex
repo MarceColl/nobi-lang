@@ -70,35 +70,15 @@ defmodule Kinoko.Lang.Parser do
 
   defp run(src, f) when is_binary(src) do
     if String.valid?(src) do
-      old_heap = presize_heap(src)
-
       try do
         {:ok, src |> init() |> f.()}
       catch
         {:perr, line, col, msg} -> {:error, %{code: "parse", message: msg, line: line, col: col}}
-      after
-        restore_heap(old_heap)
       end
     else
       {:error, %{code: "parse", message: "source is not valid UTF-8", line: 1, col: 1}}
     end
   end
-
-  # A big source builds a big, long-lived tree; with the default heap growth
-  # the collector re-copies it again and again (5x slower on a 5 MB source).
-  # Give the calling process room up front, and put the flag back afterwards.
-  @heap_words_per_byte 6
-  @heap_threshold 100_000
-  @heap_cap 64_000_000
-
-  defp presize_heap(src) when byte_size(src) > @heap_threshold do
-    Process.flag(:min_heap_size, min(byte_size(src) * @heap_words_per_byte, @heap_cap))
-  end
-
-  defp presize_heap(_), do: nil
-
-  defp restore_heap(nil), do: :ok
-  defp restore_heap(old), do: Process.flag(:min_heap_size, old) && :ok
 
   defp init(src), do: advance(%{cur: nil, lx: Lexer.new(src), openers: [], depth: 0, reach: 0})
 
@@ -555,11 +535,10 @@ defmodule Kinoko.Lang.Parser do
 
   defp stmt(p) do
     case peek(p) do
-      {:name, w, _, _} = t when w not in @keywords ->
+      {:name, w, _, _} when w not in @keywords ->
         if match?({:eq, _, _, _}, peek2(p)) do
           p = p |> advance() |> advance() |> skip_nl()
           {e, p} = exp(p)
-          _ = t
           {{:bind, w, e}, p}
         else
           expr_stmt(p)
@@ -731,11 +710,12 @@ defmodule Kinoko.Lang.Parser do
         {collapse(meta(open), stmts, last), p}
 
       a when a in ["always", "sometimes"] ->
+        kind = if a == "always", do: :always, else: :sometimes
         p = advance(p)
         {_, p} = expect(p, :lparen)
         {e, p} = exp(p)
         {_, p} = expect(p, :rparen)
-        {{String.to_existing_atom(a), m, [e]}, p}
+        {{kind, m, [e]}, p}
 
       _ ->
         cond do
@@ -997,7 +977,7 @@ defmodule Kinoko.Lang.Parser do
     {estmts, elast, p} = rest_of_block(p)
 
     {{:if, m,
-      [cond_, collapse(meta(otherwise), tstmts, tlast), collapse(meta(opener), estmts, elast)]},
+      [cond_, collapse(meta(opener), tstmts, tlast), collapse(meta(otherwise), estmts, elast)]},
      p}
   end
 

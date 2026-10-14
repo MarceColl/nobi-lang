@@ -120,9 +120,11 @@ defmodule Kinoko.Lang.Lexer do
     {head, lx} = take_ascii(lx, :ident)
 
     {full, lx} =
-      if capitalised?(head), do: dotted(lx, head), else: {head, lx}
+      if Kinoko.Lang.Ast.capitalised?(head), do: dotted(lx, head), else: {head, lx}
 
-    {:ok, {:name, full, l, c}, lx}
+    # Copy: a name kept in a tree must not be a sub-binary of the whole source
+    # (that made GC of a big parsed program ~2.5x slower and pinned the source).
+    {:ok, {:name, :binary.copy(full), l, c}, lx}
   end
 
   # A capitalised head joins every following `.ident`.
@@ -134,9 +136,6 @@ defmodule Kinoko.Lang.Lexer do
   end
 
   defp dotted(lx, acc), do: {acc, lx}
-
-  defp capitalised?(<<c, _::binary>>) when c in ?A..?Z, do: true
-  defp capitalised?(_), do: false
 
   # Takes a run of ASCII characters matching `pred` (one byte = one column).
   defp take_ascii(%{rest: rest, col: col} = lx, pred) do
@@ -297,7 +296,7 @@ defmodule Kinoko.Lang.Lexer do
     case lx.rest do
       <<s, _::binary>> when s in ?a..?z or s in ?A..?Z or s == ?_ ->
         {name, lx} = take_ascii(lx, :jsx_ident)
-        {:ok, name, lx}
+        {:ok, :binary.copy(name), lx}
 
       _ ->
         {:error, error(l, c, "expected a JSX name")}

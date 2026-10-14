@@ -313,6 +313,13 @@ defmodule Kinoko.Lang.ParserTest do
       assert m =~ "if requires an else branch"
     end
 
+    test "if branch blocks carry the meta of their opener" do
+      src = "if a do\n  x = 1\n  x\nelse\n  y = 2\n  y\nend"
+
+      assert {:ok, {:if, _, [_, {:block, [line: 1, col: _], _}, {:block, [line: 4, col: _], _}]}} =
+               Parser.expr(src)
+    end
+
     test "fn with typed params" do
       assert expr!("fn (x : Int, y : Int) -> x + y end") ==
                {:fn, [[{"x", t("Int")}, {"y", t("Int")}], bin(:+, n("x"), n("y"))]}
