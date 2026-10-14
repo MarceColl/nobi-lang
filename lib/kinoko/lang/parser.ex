@@ -27,7 +27,7 @@ defmodule Kinoko.Lang.Parser do
   once per link) is bounded by `max_depth/0`; deeper input is a parse error.
   """
 
-  alias Kinoko.Lang.{Ast, Lexer}
+  alias Kinoko.Lang.{Ast, Format, Lexer}
 
   @max_depth 512
 
@@ -35,7 +35,6 @@ defmodule Kinoko.Lang.Parser do
   @keywords ~w(def defmodel deftype defapp deftest do end case if else fn always sometimes and or not true false)
 
   @binops Map.new(Ast.ops(), fn {atom, sym, prec} -> {sym, {atom, prec}} end)
-  @op_syms Map.new(Ast.ops(), fn {_atom, sym, _prec} = t -> {elem(t, 0), sym} end)
 
   @puncts %{
     lparen: "(",
@@ -877,7 +876,7 @@ defmodule Kinoko.Lang.Parser do
          true <- at?(p, :arrow) do
       error_here(
         p,
-        "the call `#{show(call)}` swallowed the next arm's tuple pattern — start each arm on its own line"
+        "the call `#{Format.expr(call)}` swallowed the next arm's tuple pattern — start each arm on its own line"
       )
     else
       _ -> :ok
@@ -889,19 +888,6 @@ defmodule Kinoko.Lang.Parser do
   defp trailing_call({:not, _, [last]}), do: trailing_call(last)
   defp trailing_call({:neg, _, [last]}), do: trailing_call(last)
   defp trailing_call(_), do: nil
-
-  # A small renderer for the call named in the message above; the canonical
-  # formatter lives in `Kinoko.Lang.Format`.
-  defp show({:call, _, [n, args]}), do: "#{n}(#{Enum.map_join(args, ", ", &show/1)})"
-  defp show({:int, _, [i]}), do: Integer.to_string(i)
-  defp show({:bool, _, [b]}), do: to_string(b)
-  defp show({:name, _, [n]}), do: n
-  defp show({:str, _, [s]}), do: inspect(s)
-  defp show({:field, _, [e, f]}), do: show(e) <> "." <> f
-  defp show({:neg, _, [e]}), do: "-" <> show(e)
-  defp show({:not, _, [e]}), do: "not " <> show(e)
-  defp show({:bin, _, [op, l, r]}), do: "#{show(l)} #{Map.fetch!(@op_syms, op)} #{show(r)}"
-  defp show(_), do: "…"
 
   defp pattern(p), do: nested(p, &pattern_inner/1)
 
