@@ -13,7 +13,9 @@ defmodule Kinoko.Lang.Types.Check do
   (absent ones included: declaring one later must check this again).
 
   A check returns `%{deps: MapSet.t(), result: {:ok, typed} | {:error, [%{code, message}]},
-  looked_up: MapSet.t(), groups: MapSet.t()}`. `looked_up` is the names whose
+  looked_up: MapSet.t(), groups: MapSet.t(), unbound: [String.t() | nil]}`.
+  `unbound` has one entry per error: the name an `"unbound"` error is about
+  (whose message the whole table can reword, `Hints.reword/2`), else `nil`. `looked_up` is the names whose
   signatures the check read itself (each through `Ctx.dget/2`); `groups` is
   the deftypes whose map-key positions it consulted (`Kinoko.Lang.Types.Keys`),
   each standing for its whole group in `deps`. What a check gives follows
@@ -45,7 +47,8 @@ defmodule Kinoko.Lang.Types.Check do
           deps: MapSet.t(String.t()),
           result: {:ok, term()} | {:error, [%{code: String.t(), message: String.t()}]},
           looked_up: MapSet.t(String.t()),
-          groups: MapSet.t(String.t())
+          groups: MapSet.t(String.t()),
+          unbound: [String.t() | nil]
         }
 
   # ---------- entry points (bodies in Check.Decl, as decl.rs) ----------
@@ -53,9 +56,12 @@ defmodule Kinoko.Lang.Types.Check do
   @doc """
   Checks `decl` against `sigs`, the signatures of everything it may use
   (TS's `checkDecl`): its own names first, then the rules of its kind.
+  `table:` is `Kinoko.Lang.Types.Hints.table(sigs)`, for a caller checking
+  many declarations against one map of signatures: built once, not once per
+  check that meets an unbound name.
   """
-  @spec decl(Ast.decl(), map() | (String.t() -> term())) :: result()
-  defdelegate decl(decl, sigs), to: Decl, as: :check_decl
+  @spec decl(Ast.decl(), map() | (String.t() -> term()), keyword()) :: result()
+  defdelegate decl(decl, sigs, opts \\ []), to: Decl, as: :check_decl
 
   @doc """
   Checks `expr` alone against `sigs` (the server's `eval`): a declaration
@@ -316,7 +322,7 @@ defmodule Kinoko.Lang.Types.Check do
 
       {nil, ctx} ->
         {message, ctx} = unbound_message(ctx, name, true)
-        {u, ctx} = ctx |> Ctx.error("unbound", message) |> Ctx.fresh()
+        {u, ctx} = ctx |> Ctx.unbound(name, message) |> Ctx.fresh()
         {put_ann(e, u, nil), ctx}
     end
   end
@@ -477,7 +483,7 @@ defmodule Kinoko.Lang.Types.Check do
     case resolve_name(ctx, name, true) do
       {nil, ctx} ->
         {message, ctx} = unbound_message(ctx, name, false)
-        ctx = Ctx.error(ctx, "unbound", message)
+        ctx = Ctx.unbound(ctx, name, message)
         {args, ctx} = Enum.map_reduce(args, ctx, &synth(&2, &1))
         {u, ctx} = Ctx.fresh(ctx)
         {put_ann({:call, m, [name, args]}, u, nil), ctx}

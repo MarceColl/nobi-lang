@@ -86,12 +86,16 @@ defmodule Kinoko.Lang.Types.Infer do
 
   @doc "Records an error, unless the check has stopped."
   @spec error(t(), String.t(), String.t()) :: t()
-  def error(%__MODULE__{stopped: true} = st, _code, _message), do: st
+  def error(st, code, message), do: error(st, code, message, %{})
 
-  def error(st, code, message),
+  @doc "`error/3`, the error map carrying `extra` fields too (`Ctx.unbound/3`'s name)."
+  @spec error(t(), String.t(), String.t(), map()) :: t()
+  def error(%__MODULE__{stopped: true} = st, _code, _message, _extra), do: st
+
+  def error(st, code, message, extra),
     do: %{
       st
-      | errors: [%{code: code, message: message} | st.errors],
+      | errors: [Map.merge(extra, %{code: code, message: message}) | st.errors],
         error_count: st.error_count + 1
     }
 

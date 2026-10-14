@@ -13,8 +13,18 @@ defmodule Kinoko.Lang.Types.Hints do
   Every lookup here is a diagnostic peek, deliberately not `Ctx.dget/2`:
   what a diagnostic found is not a dependency. Peeks need the whole table
   (a map). A check against a lookup function has none, so its messages say
-  less (Rust's `Table::whole`).
+  less (Rust's `Table::whole`); `reword/2` gives such a message what the
+  whole table says, exactly as a check against the table would have.
+
+  The whole table is `table/1`: the signatures, their names sorted (for
+  `siblings`) and indexed by lowercased name (for `decl_for`). Building it
+  is linear-logarithmic in the table, so it is built once per table and
+  shared by every check against it (`Ctx.new/2`'s `table:`), never once per
+  check that meets an unbound name.
   """
+
+  @typedoc "The whole table: `sigs`, its names sorted, and its name index."
+  @type table :: %{sigs: map(), sorted: tuple(), names: map()}
 
   alias Kinoko.Lang.Ast
   alias Kinoko.Lang.Types.Check.Ctx
@@ -44,6 +54,50 @@ defmodule Kinoko.Lang.Types.Hints do
     {message, ctx}
   end
 
+  @doc "The whole table of `sigs` (a map), for `says/2`, `reword/2` and `Ctx.new/2`."
+  @spec table(map()) :: table()
+  def table(sigs) when is_map(sigs),
+    do: %{
+      sigs: sigs,
+      sorted: sigs |> Map.keys() |> Enum.sort() |> List.to_tuple(),
+      names: name_index(sigs)
+    }
+
+  @doc """
+  What the whole table says of `name`, which did not resolve: what it is,
+  or is close to, or what its namespace has; `nil` when it says none of
+  those (the message is then a lookup check's: a local's hint, or "unbound").
+  """
+  @spec says(table(), String.t()) :: String.t() | nil
+  def says(table, name) do
+    case decl_for(table, name) do
+      {found, sig} ->
+        hint = misuse_hint(found, sig)
+        if found == name, do: hint, else: "`#{name}` is not in scope — #{hint}"
+
+      nil ->
+        case siblings(table, name) do
+          [] ->
+            nil
+
+          near ->
+            shown = near |> Enum.take(8) |> Enum.map_join(", ", &"`#{&1}`")
+            more = if length(near) > 8, do: ", …", else: ""
+            "there is no `#{name}` — `#{Extract.owner_of(name)}` has #{shown}#{more}"
+        end
+    end
+  end
+
+  @doc """
+  The message a check against the whole table gives an `"unbound"` error
+  about `name` that a check against a lookup function worded `message`: a
+  table check says what the table says, when it says anything, and
+  otherwise exactly what the lookup check said.
+  """
+  @spec reword(table(), %{message: String.t(), unbound: String.t() | nil}) :: String.t()
+  def reword(_table, %{unbound: nil, message: message}), do: message
+  def reword(table, %{unbound: name, message: message}), do: says(table, name) || message
+
   @doc "An annotation's type `name` resolves to nothing."
   def unknown_type(name) do
     if Ast.capitalised?(name) do
@@ -54,25 +108,11 @@ defmodule Kinoko.Lang.Types.Hints do
     end
   end
 
-  # What the table says of `name`: what it is, or is close to, or what its
-  # namespace has; nil when it says none of those.
+  # What the table says of `name`, the table built on the first unbound
+  # name a check meets (unless handed in); nil when the check has no table.
   defp what_the_table_says(%Ctx{sigs: sigs} = ctx, name) when is_map(sigs) do
-    case decl_for(ctx, sigs, name) do
-      {{found, sig}, ctx} ->
-        hint = misuse_hint(found, sig)
-        {if(found == name, do: hint, else: "`#{name}` is not in scope — #{hint}"), ctx}
-
-      {nil, ctx} ->
-        case siblings(ctx, sigs, name) do
-          {[], ctx} ->
-            {nil, ctx}
-
-          {near, ctx} ->
-            shown = near |> Enum.take(8) |> Enum.map_join(", ", &"`#{&1}`")
-            more = if length(near) > 8, do: ", …", else: ""
-            {"there is no `#{name}` — `#{Extract.owner_of(name)}` has #{shown}#{more}", ctx}
-        end
-    end
+    table = ctx.table || table(sigs)
+    {says(table, name), %{ctx | table: table}}
   end
 
   defp what_the_table_says(ctx, _name), do: {nil, ctx}
@@ -81,46 +121,41 @@ defmodule Kinoko.Lang.Types.Hints do
   # which turns a guessed member (`Game.Board.new`) into the model it hangs
   # off; and a case-insensitive match of the whole name or, for an undotted
   # name, of any declaration's last segment.
-  defp decl_for(ctx, sigs, name) do
+  defp decl_for(%{sigs: sigs, names: index}, name) do
     dotted = String.contains?(name, ".")
     owner = Extract.owner_of(name)
 
     cond do
       Map.has_key?(sigs, name) ->
-        {{name, sigs[name]}, ctx}
+        {name, sigs[name]}
 
       dotted and Map.has_key?(sigs, owner) ->
-        {{owner, sigs[owner]}, ctx}
+        {owner, sigs[owner]}
 
       true ->
-        index = ctx.names || name_index(sigs)
-        ctx = %{ctx | names: index}
-
         case close(index, String.downcase(name), dotted) do
-          nil -> {nil, ctx}
-          found -> {{found, sigs[found]}, ctx}
+          nil -> nil
+          found -> {found, sigs[found]}
         end
     end
   end
 
   # What does exist under `name`'s namespace: the first nine, sorted. Looked
-  # up in the table's names sorted once per check (`ctx.sorted`), never
-  # scanned out of it: a patch of many unbound references stages in time
-  # linear in its size.
-  defp siblings(ctx, sigs, name) do
+  # up in the table's sorted names, never scanned out of it: a patch of many
+  # unbound references stages in time linear in its size.
+  defp siblings(%{sorted: sorted}, name) do
     if String.contains?(name, ".") do
       prefix = Extract.owner_of(name) <> "."
-      sorted = ctx.sorted || sigs |> Map.keys() |> Enum.sort() |> List.to_tuple()
 
-      {take_prefixed(
-         sorted,
-         first_at_least(sorted, prefix, 0, tuple_size(sorted)),
-         prefix,
-         name,
-         9
-       ), %{ctx | sorted: sorted}}
+      take_prefixed(
+        sorted,
+        first_at_least(sorted, prefix, 0, tuple_size(sorted)),
+        prefix,
+        name,
+        9
+      )
     else
-      {[], ctx}
+      []
     end
   end
 

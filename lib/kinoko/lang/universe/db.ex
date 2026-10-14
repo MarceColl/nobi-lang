@@ -36,9 +36,13 @@ defmodule Kinoko.Lang.Universe.Db do
   check consulted a name those reads do not cover (Rust's debug assert):
   its memo would then be reused where it no longer holds.
 
-  A check's value is an outcome, never its messages: what one says of an
-  unbound name reads the whole table, not one name's signature. Domain
-  errors here are `{:error, {:missing, cid}}`, never the salsa's own shapes.
+  A check's value is an outcome. Its errors are kept as a check against
+  the lookup words them, which follows from the signatures it read alone;
+  what one says of an unbound name reads the whole table, not one name's
+  signature, so each unbound error keeps that name and the universe rewords
+  it from the whole table (`Kinoko.Lang.Types.Hints.reword/2`), never
+  checking the declaration again. Domain errors here are
+  `{:error, {:missing, cid}}`, never the salsa's own shapes.
   """
 
   @behaviour Kinoko.Lang.Salsa
@@ -48,10 +52,17 @@ defmodule Kinoko.Lang.Universe.Db do
 
   @typedoc """
   A check as the database keeps it: its checked tree if it typechecks, the
-  names it depends on (`deps/2`), and whether it failed on the checker's own
-  fault (`"internal"`).
+  names it depends on (`deps/2`), whether it failed on the checker's own
+  fault (`"internal"`), and its errors (`[]` when it typechecks), each
+  `%{code, message, unbound}`: `unbound` the name an unbound error is
+  about, whose message the whole table rewords, else `nil`.
   """
-  @type outcome :: %{typed: term() | nil, deps: MapSet.t(String.t()), internal: boolean()}
+  @type outcome :: %{
+          typed: term() | nil,
+          deps: MapSet.t(String.t()),
+          internal: boolean(),
+          errors: [%{code: String.t(), message: String.t(), unbound: String.t() | nil}]
+        }
 
   @doc "The context of a trial of the patches `ids`: each over committed code, then the CAS."
   @spec ctx(Enumerable.t()) :: [term()]
@@ -105,13 +116,17 @@ defmodule Kinoko.Lang.Universe.Db do
               "read #{inspect(MapSet.to_list(read))}"
     end
 
-    {typed, internal} =
+    {typed, internal, errors} =
       case checked.result do
-        {:ok, typed} -> {typed, false}
-        {:error, errors} -> {nil, Enum.any?(errors, &(&1.code == "internal"))}
+        {:ok, typed} ->
+          {typed, false, []}
+
+        {:error, errors} ->
+          errors = Enum.zip_with(errors, checked.unbound, &Map.put(&1, :unbound, &2))
+          {nil, Enum.any?(errors, &(&1.code == "internal")), errors}
       end
 
-    {{:ok, %{typed: typed, deps: deps(decl, checked), internal: internal}}, r}
+    {{:ok, %{typed: typed, deps: deps(decl, checked), internal: internal, errors: errors}}, r}
   end
 
   # What a name's signature is in this context, unrecorded: the caller
@@ -156,7 +171,7 @@ defmodule Kinoko.Lang.Universe.Db do
 
       {{:error, _}, db} ->
         failed = %{deps: MapSet.new(), result: {:error, []}}
-        {%{typed: nil, deps: deps(decl, failed), internal: true}, db}
+        {%{typed: nil, deps: deps(decl, failed), internal: true, errors: []}, db}
     end
   end
 

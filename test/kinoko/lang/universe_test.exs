@@ -9,7 +9,7 @@ defmodule Kinoko.Lang.UniverseTest do
   import Kinoko.Lang.UniverseCases, only: [parse: 1, patch: 1, entries: 1, play: 4, run: 3]
 
   alias Kinoko.Lang.{Ast, Cid, Format, NaiveUniverse, Salsa, Universe, UniverseCases}
-  alias Kinoko.Lang.Types.{Check, Stdlib}
+  alias Kinoko.Lang.Types.{Check, Extract, Stdlib}
   alias Kinoko.Lang.Universe.{Db, Search}
 
   defp gone(name), do: {:gone, name}
@@ -311,6 +311,68 @@ defmodule Kinoko.Lang.UniverseTest do
     assert reasons |> Enum.take(4) |> Enum.map(& &1.message) == first
     assert Enum.all?(reasons, &(&1.name == "N.f" and &1.code == "unbound"))
     assert length(reasons) == length(references)
+  end
+
+  # Removing a name thousands of committed declarations use: each breaks,
+  # and each one's reasons are worded from the whole table. The table's
+  # sorted names and name index are built once for all of them, never once
+  # per broken declaration (1.3/5.4/22.6 s for 1,000/2,000/4,000 before).
+  @tag timeout: 120_000
+  @tag :perf
+  test "removing a name thousands of declarations use stages quickly" do
+    users = Enum.map_join(0..3_999, &"def M.u#{pad(&1)}() : Int do\n  M.base()\nend\n")
+    source = "def M.base() : Int do\n  1\nend\n" <> users
+    {u, {:promoted, _}} = stage(Universe.new(), "base", patch(source))
+
+    {took, {_, {:staged, reasons}}} = seconds(fn -> stage(u, "rm", [gone("M.base")]) end)
+    assert took < 2.0, "took #{took}"
+    assert length(reasons) == 4_000
+    assert Enum.all?(reasons, &(&1.code == "unbound"))
+  end
+
+  # A broken declaration's reasons are the database check's errors, each
+  # unbound name's message reworded from the whole table: exactly what a
+  # fresh check against that table says.
+  test "reasons of broken declarations are a fresh check's over the whole table" do
+    source = """
+    def M.base() : Int do
+      1
+    end
+
+    def M.other() : Int do
+      2
+    end
+
+    def M.a() : Int do
+      M.base() + M.other()
+    end
+
+    def M.c(n : Int) : Int do
+      M.base() + n
+    end
+    """
+
+    {u, {:promoted, _}} = stage(Universe.new(), "base", patch(source))
+    model = decl("defmodel M.Base do\n  count : Int\nend")
+
+    for {id, entries, says} <- [
+          {"rm", [gone("M.base")], "there is no `M.base` — `M` has"},
+          {"model", [gone("M.base"), {:live, model}], "`M.Base` is a model"}
+        ] do
+      {u, {:staged, reasons}} = stage(u, id, entries)
+      changes = for {:live, d} <- entries, do: {Ast.name(d), Extract.signature(d)}
+      sigs = Universe.over(Universe.signatures(u), [{"M.base", nil} | changes])
+
+      fresh =
+        for name <- ["M.a", "M.c"],
+            {:error, errors} = Check.decl(Universe.committed(u)[name].decl, sigs).result,
+            e <- errors,
+            do: %{name: name, code: e.code, message: e.message}
+
+      assert reasons == fresh
+      assert length(reasons) == 2
+      assert Enum.all?(reasons, &String.contains?(&1.message, says)), inspect(reasons)
+    end
   end
 
   # An agent retries `M.f` under a fresh id each time, every attempt refused

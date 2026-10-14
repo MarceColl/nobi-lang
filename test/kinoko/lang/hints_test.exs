@@ -163,4 +163,38 @@ defmodule Kinoko.Lang.HintsTest do
     {_, after_peek} = Check.unbound_message(ctx, "board", true)
     assert after_peek.used == MapSet.new()
   end
+
+  # A lookup check (the universe's database) words each unbound name with
+  # no table; `reword/2` gives it what a check against the table says.
+  test "a lookup check's unbound messages reworded match a table check's" do
+    sigs = mixed_table()
+    table = Hints.table(sigs)
+    ctx = Ctx.new(&Map.get(sigs, &1)) |> Ctx.push_scope(%{"m" => {:named, "Int"}})
+
+    for name <- guesses(sigs), as_value <- [true, false] do
+      {raw, _} = Check.unbound_message(ctx, name, as_value)
+      reworded = Hints.reword(table, %{unbound: name, message: raw})
+      assert reworded == by_scan(sigs, "m", name, as_value), "#{name} #{as_value}"
+    end
+
+    assert Hints.reword(table, %{unbound: nil, message: "kept"}) == "kept"
+  end
+
+  # A table handed in is the one a check words its messages from: a caller
+  # checking many declarations against one table builds it once.
+  test "a check uses the table it is handed, never building its own" do
+    sigs = Stdlib.signatures()
+
+    decl =
+      {:def, [], ["A.f", [], {:named, "Int"}, {:block, [], [[], {:call, [], ["A.thing", []]}]}]}
+
+    other = Hints.table(Map.put(sigs, "A.Thing", {:model, []}))
+
+    assert {:error, [%{message: "unbound symbol `A.thing`"}]} = Check.decl(decl, sigs).result
+
+    assert {:error, [%{message: "`A.thing` is not in scope — `A.Thing` is a model" <> _}]} =
+             Check.decl(decl, sigs, table: other).result
+
+    assert Check.decl(decl, sigs, table: Hints.table(sigs)) == Check.decl(decl, sigs)
+  end
 end

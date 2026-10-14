@@ -15,9 +15,11 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
   are kept newest first; their takers reverse them.
 
   The map-key rule's memo (`keys`, `key_recorded`, `reported_non_data_maps`)
-  belongs to `Kinoko.Lang.Types.Keys`; the unbound-name caches (`names`,
-  `sorted`, `table_says`) to `Kinoko.Lang.Types.Hints`. Both only ever speed a check
-  up: what a check gives does not depend on them.
+  belongs to `Kinoko.Lang.Types.Keys`; the unbound-name caches (`table`, the
+  whole table's sorted names and name index, and `table_says`) to
+  `Kinoko.Lang.Types.Hints`. Both only ever speed a check up: what a check
+  gives does not depend on them. `table` may be handed in already built
+  (`new/2`), so checks against one table share it.
   """
 
   alias Kinoko.Lang.Types.Infer
@@ -33,15 +35,24 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
             keys: nil,
             key_recorded: MapSet.new(),
             reported_non_data_maps: MapSet.new(),
-            names: nil,
-            sorted: nil,
+            table: nil,
             table_says: %{}
 
   @type t :: %__MODULE__{}
 
-  @spec new(map() | (String.t() -> term())) :: t()
-  def new(sigs),
-    do: %__MODULE__{infer: Infer.new(), sigs: sigs, keys: Kinoko.Lang.Types.Keys.new()}
+  @doc """
+  A fresh check's state over `sigs`. `table:` is `Kinoko.Lang.Types.Hints.table/1`
+  of `sigs`, built once by a caller that checks many declarations against
+  the same table; built here, lazily, when not given.
+  """
+  @spec new(map() | (String.t() -> term()), keyword()) :: t()
+  def new(sigs, opts \\ []),
+    do: %__MODULE__{
+      infer: Infer.new(),
+      sigs: sigs,
+      keys: Kinoko.Lang.Types.Keys.new(),
+      table: Keyword.get(opts, :table)
+    }
 
   @doc """
   The signature `name` has (TS's `dget`), recording `name` as consulted
@@ -107,6 +118,14 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
   # --- inference, threaded ------------------------------------------------
 
   def error(ctx, code, message), do: %{ctx | infer: Infer.error(ctx.infer, code, message)}
+
+  @doc """
+  An `"unbound"` error for `name`, which did not resolve: it keeps `name`,
+  so what the whole table says of it can reword `message` later
+  (`Kinoko.Lang.Types.Hints.reword/2`).
+  """
+  def unbound(ctx, name, message),
+    do: %{ctx | infer: Infer.error(ctx.infer, "unbound", message, %{unbound: name})}
 
   def fresh(ctx) do
     {u, infer} = Infer.fresh(ctx.infer)

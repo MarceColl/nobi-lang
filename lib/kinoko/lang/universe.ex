@@ -15,8 +15,12 @@ defmodule Kinoko.Lang.Universe do
   serves every context where those signatures are the same: an edit that
   keeps a declaration's signature never checks its dependents again.
 
-  What a check says is kept, never its messages: those are worded from the
-  whole signature table (`sigs`: the stdlib's and committed code's), afresh.
+  What a check says is kept as a check against the database's lookup words
+  it; what an unbound name says is worded again from the whole signature
+  table (`sigs`: the stdlib's and committed code's, the patch over them),
+  built once per staging that needs it (`Kinoko.Lang.Types.Hints.reword/2`).
+  So a failing declaration is checked once, through the database, never
+  again for its messages.
 
   A universe is a value; every operation returns the new one.
 
@@ -44,7 +48,7 @@ defmodule Kinoko.Lang.Universe do
   """
 
   alias Kinoko.Lang.{Ast, Cid, Format, Parser, Salsa}
-  alias Kinoko.Lang.Types.{Check, Stdlib}
+  alias Kinoko.Lang.Types.{Hints, Stdlib}
   alias Kinoko.Lang.Universe.{Db, Search}
 
   defstruct history: [],
@@ -72,9 +76,10 @@ defmodule Kinoko.Lang.Universe do
   # The one patch `restore/2` checks committed code as. Its round is never
   # kept: the history restored takes its place.
   @restore "$restore"
-  # A memo that says a declaration fails where a fresh check passes: never
-  # (the tests fail on it), so the patch still has a reason to stay.
-  @memo_only "its check through the database fails, but a fresh check passes"
+  # A check through the database that failed and kept no error: only a
+  # salsa error (never; the tests fail on it), so the patch still has a
+  # reason to stay.
+  @no_error "its check through the database failed without an error"
 
   @doc "An empty universe: nothing committed, staged or promoted."
   @spec new() :: t()
@@ -159,8 +164,9 @@ defmodule Kinoko.Lang.Universe do
   @doc """
   Why a staged patch cannot promote on its own (`[]` for an id nothing is
   staged under). Which declarations break is checked through the database,
-  only for those that could; the messages are a fresh check's of each, over
-  the whole table.
+  only for those that could; their errors are those checks', each unbound
+  name's message worded again from the whole table (what a fresh check
+  over it says).
   """
   @spec reasons(t(), id) :: [reason]
   def reasons(%__MODULE__{} = u, id), do: u |> reasons_of(id) |> elem(0)
@@ -410,9 +416,9 @@ defmodule Kinoko.Lang.Universe do
     ctx = Db.ctx([id])
 
     {broken, salsa} =
-      Enum.flat_map_reduce(code, u.salsa, fn {:live, _, cid, decl} = d, salsa ->
+      Enum.flat_map_reduce(code, u.salsa, fn {:live, name, cid, decl}, salsa ->
         {outcome, salsa} = Db.checked(salsa, ctx, cid, decl)
-        {if(outcome.typed == nil, do: [d], else: []), salsa}
+        {if(outcome.typed == nil, do: [{name, outcome.errors}], else: []), salsa}
       end)
 
     u = %{u | salsa: salsa}
@@ -430,17 +436,19 @@ defmodule Kinoko.Lang.Universe do
             {{name, nil}, u}
         end)
 
-      sigs = over(u.sigs, changes)
+      # The whole table, built once for every broken declaration, and only
+      # when one of them has an unbound name to word.
+      table =
+        if Enum.any?(broken, fn {_, errors} -> Enum.any?(errors, & &1.unbound) end),
+          do: Hints.table(over(u.sigs, changes))
 
       reasons =
-        Enum.flat_map(broken, fn {:live, name, _, decl} ->
-          case Check.decl(decl, sigs).result do
-            {:error, errors} ->
-              Enum.map(errors, &%{name: name, code: &1.code, message: &1.message})
+        Enum.flat_map(broken, fn
+          {name, []} ->
+            [%{name: name, code: "internal", message: @no_error}]
 
-            {:ok, _} ->
-              [%{name: name, code: "internal", message: @memo_only}]
-          end
+          {name, errors} ->
+            Enum.map(errors, &%{name: name, code: &1.code, message: Hints.reword(table, &1)})
         end)
 
       {reasons, u}

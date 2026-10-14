@@ -7,14 +7,14 @@ defmodule Kinoko.Lang.Types.Check.Decl do
   """
 
   alias Kinoko.Lang.Ast
-  alias Kinoko.Lang.Types.{Check, Exhaustive, Extract, Infer, Patterns, Quote, Stdlib}
+  alias Kinoko.Lang.Types.{Check, Exhaustive, Extract, Hints, Infer, Patterns, Quote, Stdlib}
   alias Kinoko.Lang.Types.Check.Ctx
 
   # ---------- entry points (`Kinoko.Lang.Types.Check` delegates here) ----------
 
   @doc false
-  def check_decl(decl, sigs) do
-    ctx = check_name_convention(Ctx.new(sigs), decl)
+  def check_decl(decl, sigs, opts \\ []) do
+    ctx = check_name_convention(Ctx.new(sigs, opts), decl)
     {typed, ctx} = check_kind(ctx, decl)
     finish(ctx, typed)
   end
@@ -45,12 +45,27 @@ defmodule Kinoko.Lang.Types.Check.Decl do
         end
       end
 
-    Map.new(decls, &{Ast.name(&1), check_decl(&1, sigs)})
+    # One table for every declaration: its sorted names and name index are
+    # built once, not once per declaration that meets an unbound name.
+    opts = if is_map(sigs), do: [table: Hints.table(sigs)], else: []
+    Map.new(decls, &{Ast.name(&1), check_decl(&1, sigs, opts)})
   end
 
   defp finish(ctx, typed) do
-    result = if Ctx.no_errors?(ctx), do: {:ok, typed}, else: {:error, Ctx.errors(ctx)}
-    %{deps: ctx.used, result: result, looked_up: ctx.looked_up, groups: ctx.key_recorded}
+    errors = Ctx.errors(ctx)
+
+    result =
+      if Ctx.no_errors?(ctx),
+        do: {:ok, typed},
+        else: {:error, Enum.map(errors, &Map.take(&1, [:code, :message]))}
+
+    %{
+      deps: ctx.used,
+      result: result,
+      looked_up: ctx.looked_up,
+      groups: ctx.key_recorded,
+      unbound: Enum.map(errors, &Map.get(&1, :unbound))
+    }
   end
 
   defp check_kind(ctx, {:def, m, [name, params, ret, {:block, _, [_, last]} = body]}) do
