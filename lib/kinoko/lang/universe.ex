@@ -24,6 +24,11 @@ defmodule Kinoko.Lang.Universe do
 
   A universe is a value; every operation returns the new one.
 
+  Other pieces of Kinoko go through `Kinoko.Lang`, never through this
+  module: its documented functions back the façade, and the `@doc false`
+  ones are the promotion search's (`Kinoko.Lang.Universe.Search`) and the
+  tests' alone.
+
   ## Shapes
 
   - entry: `{:live, decl} | {:gone, name}`, what a patch does to one name.

@@ -70,6 +70,31 @@ defmodule Kinoko.Lang.Format do
   def type({:arrow, ps, ret}), do: "(#{types(ps)} -> #{type(ret)})"
   def type({:tuple, items}), do: "(#{types(items)})"
 
+  @doc """
+  A signature (`Kinoko.Lang.Types.Extract.signature/1`) of the declaration
+  `name`, as one line: a def as `Name(T1, T2) : Ret`; a model as
+  `model {f : T, ...}`; a type as `type Name<P> = V(T) | W`; apps and tests
+  as `app` / `test`.
+  """
+  @spec signature(String.t(), term()) :: String.t()
+  def signature(name, {:def, params, ret}), do: "#{name}(#{types(params)}) : #{type(ret)}"
+
+  def signature(_, {:model, fields}),
+    do: "model {" <> Enum.map_join(fields, ", ", fn {f, t} -> "#{f} : #{type(t)}" end) <> "}"
+
+  def signature(name, {:type, params, variants}) do
+    head = if params == [], do: name, else: "#{name}<#{Enum.join(params, ", ")}>"
+
+    "type #{head} = " <>
+      Enum.map_join(variants, " | ", fn
+        {v, []} -> v
+        {v, ts} -> "#{v}(#{types(ts)})"
+      end)
+  end
+
+  def signature(_, :app), do: "app"
+  def signature(_, :test), do: "test"
+
   @spec pattern(term) :: String.t()
   def pattern(:wild), do: "_"
   def pattern({:pvar, n}), do: n
