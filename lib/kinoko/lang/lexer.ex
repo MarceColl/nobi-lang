@@ -63,10 +63,19 @@ defmodule Kinoko.Lang.Lexer do
   @spec next_token(t) :: {:ok, token, t} | {:error, error}
   def next_token(%__MODULE__{} = lx), do: lx |> skip_inline_space() |> dispatch()
 
-  defp skip_inline_space(%{rest: <<c, rest::binary>>} = lx) when c in [?\s, ?\t, ?\r],
-    do: skip_inline_space(advance(lx, c, rest))
+  defp skip_inline_space(%{rest: rest, col: col} = lx) do
+    case inline_run(rest, 0) do
+      0 ->
+        lx
 
-  defp skip_inline_space(lx), do: lx
+      n ->
+        <<_::binary-size(n), rest::binary>> = rest
+        %{lx | rest: rest, col: col + n}
+    end
+  end
+
+  defp inline_run(<<c, rest::binary>>, n) when c in [?\s, ?\t, ?\r], do: inline_run(rest, n + 1)
+  defp inline_run(_, n), do: n
 
   defp dispatch(%{rest: "", line: l, col: c} = lx), do: {:ok, {:eof, nil, l, c}, lx}
 
@@ -83,15 +92,19 @@ defmodule Kinoko.Lang.Lexer do
 
   defp dispatch(lx), do: punct(lx)
 
-  defp skip_blank(%{rest: <<c, rest::binary>>} = lx) when c in [?\n, ?\s, ?\t, ?\r],
-    do: skip_blank(advance(lx, c, rest))
+  defp skip_blank(%{rest: rest, line: line, col: col}), do: blank_run(rest, line, col)
 
-  defp skip_blank(lx), do: lx
+  defp blank_run(<<?\n, rest::binary>>, line, _col), do: blank_run(rest, line + 1, 1)
+
+  defp blank_run(<<c, rest::binary>>, line, col) when c in [?\s, ?\t, ?\r],
+    do: blank_run(rest, line, col + 1)
+
+  defp blank_run(rest, line, col), do: %__MODULE__{rest: rest, line: line, col: col}
 
   # ---------- ints ----------
 
   defp int(%{line: l, col: c} = lx) do
-    {digits, lx} = take_ascii(lx, &(&1 in ?0..?9))
+    {digits, lx} = take_ascii(lx, :digit)
     n = String.to_integer(digits)
 
     if n > @i64_max do
@@ -104,10 +117,10 @@ defmodule Kinoko.Lang.Lexer do
   # ---------- names ----------
 
   defp name(%{line: l, col: c} = lx) do
-    {head, lx} = take_ascii(lx, &ident_char?/1)
+    {head, lx} = take_ascii(lx, :ident)
 
     {full, lx} =
-      if head =~ ~r/\A[A-Z]/, do: dotted(lx, head), else: {head, lx}
+      if capitalised?(head), do: dotted(lx, head), else: {head, lx}
 
     {:ok, {:name, full, l, c}, lx}
   end
@@ -116,13 +129,14 @@ defmodule Kinoko.Lang.Lexer do
   defp dotted(%{rest: <<?., s, _::binary>>} = lx, acc)
        when s in ?a..?z or s in ?A..?Z or s == ?_ do
     <<?., rest::binary>> = lx.rest
-    {part, lx} = take_ascii(advance(lx, ?., rest), &ident_char?/1)
+    {part, lx} = take_ascii(advance(lx, ?., rest), :ident)
     dotted(lx, acc <> "." <> part)
   end
 
   defp dotted(lx, acc), do: {acc, lx}
 
-  defp ident_char?(c), do: c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_
+  defp capitalised?(<<c, _::binary>>) when c in ?A..?Z, do: true
+  defp capitalised?(_), do: false
 
   # Takes a run of ASCII characters matching `pred` (one byte = one column).
   defp take_ascii(%{rest: rest, col: col} = lx, pred) do
@@ -131,11 +145,18 @@ defmodule Kinoko.Lang.Lexer do
     {taken, %{lx | rest: rest, col: col + n}}
   end
 
-  defp count_while(<<c, rest::binary>>, pred, n) do
-    if pred.(c), do: count_while(rest, pred, n + 1), else: n
-  end
+  defp count_while(<<c, rest::binary>>, :digit, n) when c in ?0..?9,
+    do: count_while(rest, :digit, n + 1)
 
-  defp count_while(<<>>, _pred, n), do: n
+  defp count_while(<<c, rest::binary>>, :ident, n)
+       when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_,
+       do: count_while(rest, :ident, n + 1)
+
+  defp count_while(<<c, rest::binary>>, :jsx_ident, n)
+       when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ or c == ?-,
+       do: count_while(rest, :jsx_ident, n + 1)
+
+  defp count_while(_, _kind, n), do: n
 
   # ---------- strings ----------
 
@@ -275,7 +296,7 @@ defmodule Kinoko.Lang.Lexer do
 
     case lx.rest do
       <<s, _::binary>> when s in ?a..?z or s in ?A..?Z or s == ?_ ->
-        {name, lx} = take_ascii(lx, &(ident_char?(&1) or &1 == ?-))
+        {name, lx} = take_ascii(lx, :jsx_ident)
         {:ok, name, lx}
 
       _ ->

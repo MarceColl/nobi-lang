@@ -22,5 +22,14 @@ defmodule YabuOracle do
     gen ++ ill ++ cor
   end
 
+  @doc "Drop `meta` from every node: `{kind, meta, args}` becomes `{kind, args}`."
+  def strip({k, m, args}) when is_atom(k) and is_list(m) and is_list(args), do: {k, strip(args)}
+  def strip(list) when is_list(list), do: Enum.map(list, &strip/1)
+
+  def strip(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> strip() |> List.to_tuple()
+
+  def strip(x), do: x
+
   defp read(file), do: @dir |> Path.join(file) |> File.read!() |> JSON.decode!()
 end
