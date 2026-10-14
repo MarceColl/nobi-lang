@@ -148,6 +148,16 @@ defmodule Kinoko.Lang.Salsa do
   end
 
   @doc """
+  Inside a compute: what `key` reads as in this context, NOT recorded. For a
+  body that hands a pure function (a lookup) to code that cannot thread the
+  reads: the body must then record reads (`input/2`, `ask/2`) that determine
+  everything it derived from what it peeked, or its memo is reused where it
+  no longer holds.
+  """
+  @spec peek(Reads.t(), term()) :: term() | nil
+  def peek(%Reads{} = r, key), do: read_input(r.db, r.ctx, key)
+
+  @doc """
   Inside a compute: what `query` gives in this context, recorded. A salsa
   error fails the asking computation too, whatever its body makes of it.
   """
@@ -203,6 +213,10 @@ defmodule Kinoko.Lang.Salsa do
     held = db.memos |> Map.keys() |> MapSet.new()
     %{db | memos: trim_memos(db.memos, held), verified: %{}}
   end
+
+  @doc "How many queries hold memos (`stats/1`'s `queries`, without walking them)."
+  @spec queries(t()) :: non_neg_integer()
+  def queries(%__MODULE__{memos: memos}), do: map_size(memos)
 
   @doc """
   `queries`: how many queries hold memos; `memos`: how many memos, all

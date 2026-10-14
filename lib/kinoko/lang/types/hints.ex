@@ -63,11 +63,11 @@ defmodule Kinoko.Lang.Types.Hints do
         {if(found == name, do: hint, else: "`#{name}` is not in scope — #{hint}"), ctx}
 
       {nil, ctx} ->
-        case siblings(sigs, name) do
-          [] ->
+        case siblings(ctx, sigs, name) do
+          {[], ctx} ->
             {nil, ctx}
 
-          near ->
+          {near, ctx} ->
             shown = near |> Enum.take(8) |> Enum.map_join(", ", &"`#{&1}`")
             more = if length(near) > 8, do: ", …", else: ""
             {"there is no `#{name}` — `#{Extract.owner_of(name)}` has #{shown}#{more}", ctx}
@@ -103,20 +103,51 @@ defmodule Kinoko.Lang.Types.Hints do
     end
   end
 
-  # What does exist under `name`'s namespace: the first nine, sorted.
-  defp siblings(sigs, name) do
+  # What does exist under `name`'s namespace: the first nine, sorted. Looked
+  # up in the table's names sorted once per check (`ctx.sorted`), never
+  # scanned out of it: a patch of many unbound references stages in time
+  # linear in its size.
+  defp siblings(ctx, sigs, name) do
     if String.contains?(name, ".") do
       prefix = Extract.owner_of(name) <> "."
+      sorted = ctx.sorted || sigs |> Map.keys() |> Enum.sort() |> List.to_tuple()
 
-      sigs
-      |> Map.keys()
-      |> Enum.filter(&(String.starts_with?(&1, prefix) and &1 != name))
-      |> Enum.sort()
-      |> Enum.take(9)
+      {take_prefixed(
+         sorted,
+         first_at_least(sorted, prefix, 0, tuple_size(sorted)),
+         prefix,
+         name,
+         9
+       ), %{ctx | sorted: sorted}}
     else
-      []
+      {[], ctx}
     end
   end
+
+  # The first index in `lo..hi` whose name is not below `key`.
+  defp first_at_least(_sorted, _key, lo, hi) when lo >= hi, do: lo
+
+  defp first_at_least(sorted, key, lo, hi) do
+    mid = div(lo + hi, 2)
+
+    if elem(sorted, mid) < key,
+      do: first_at_least(sorted, key, mid + 1, hi),
+      else: first_at_least(sorted, key, lo, mid)
+  end
+
+  defp take_prefixed(_sorted, _i, _prefix, _name, 0), do: []
+
+  defp take_prefixed(sorted, i, prefix, name, n) when i < tuple_size(sorted) do
+    found = elem(sorted, i)
+
+    cond do
+      not String.starts_with?(found, prefix) -> []
+      found == name -> take_prefixed(sorted, i + 1, prefix, name, n)
+      true -> [found | take_prefixed(sorted, i + 1, prefix, name, n - 1)]
+    end
+  end
+
+  defp take_prefixed(_sorted, _i, _prefix, _name, _n), do: []
 
   # A Rust addition, the last resort before "unbound": a capitalised head
   # reads every `.ident` after it as one dotted name, so `M.x` with `M` a

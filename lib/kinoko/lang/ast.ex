@@ -49,6 +49,26 @@ defmodule Kinoko.Lang.Ast do
   @spec name(decl) :: String.t()
   def name({_kind, _meta, [name | _]}) when is_binary(name), do: name
 
+  @node_kinds ~w(int str bool name list map tuple bin not neg call field construct update case
+                 if fn block always sometimes jsx annot def defmodel deftype defapp deftest)a
+
+  @doc """
+  `tree` with no `line:` or `col:` in any node's meta: what its CID names,
+  and so equal to the same declaration parsed from anywhere (Rust's AST has
+  no positions). Nothing reads positions once a declaration is staged.
+  """
+  @spec without_positions(term) :: term
+  def without_positions({kind, meta, args})
+      when kind in @node_kinds and is_list(meta) and is_list(args),
+      do: {kind, Keyword.drop(meta, [:line, :col]), without_positions(args)}
+
+  def without_positions(list) when is_list(list), do: Enum.map(list, &without_positions/1)
+
+  def without_positions(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> Enum.map(&without_positions/1) |> List.to_tuple()
+
+  def without_positions(other), do: other
+
   @doc """
   A capitalised head makes a name a dotted global (`Counter.Msg`), a lowercase
   head a local (`total`).

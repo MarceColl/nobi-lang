@@ -7,14 +7,16 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
   scopes, and thin wrappers over `Infer` that thread the state.
 
   `sigs` is a map `%{name => signature}` or a lookup function
-  `(name -> signature | nil)`; both are read only through `dget/2`.
+  `(name -> signature | nil)`; both are read only through `dget/2`, which
+  also records the name in `looked_up` (`record/2`, for a group's names,
+  touches `used` alone).
 
   `scopes` is innermost first and never empty. `pending` and `tuple_cases`
   are kept newest first; their takers reverse them.
 
   The map-key rule's memo (`keys`, `key_recorded`, `reported_non_data_maps`)
   belongs to `Kinoko.Lang.Types.Keys`; the unbound-name caches (`names`,
-  `table_says`) to `Kinoko.Lang.Types.Hints`. Both only ever speed a check
+  `sorted`, `table_says`) to `Kinoko.Lang.Types.Hints`. Both only ever speed a check
   up: what a check gives does not depend on them.
   """
 
@@ -24,6 +26,7 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
             sigs: %{},
             scopes: [%{}],
             used: MapSet.new(),
+            looked_up: MapSet.new(),
             pending: [],
             tuple_cases: [],
             open_names: %{},
@@ -31,6 +34,7 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
             key_recorded: MapSet.new(),
             reported_non_data_maps: MapSet.new(),
             names: nil,
+            sorted: nil,
             table_says: %{}
 
   @type t :: %__MODULE__{}
@@ -50,7 +54,7 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
         lookup when is_function(lookup, 1) -> lookup.(name)
       end
 
-    {sig, %{ctx | used: MapSet.put(ctx.used, name)}}
+    {sig, %{ctx | used: MapSet.put(ctx.used, name), looked_up: MapSet.put(ctx.looked_up, name)}}
   end
 
   @doc "`names` recorded as consulted, without a lookup (they were read already)."

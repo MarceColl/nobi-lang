@@ -12,7 +12,13 @@ defmodule Kinoko.Lang.Types.Check do
   through `Ctx.dget/2`, so `deps` is exactly the names the check consulted
   (absent ones included: declaring one later must check this again).
 
-  A check returns `%{deps: MapSet.t(), result: {:ok, typed} | {:error, [%{code, message}]}}`.
+  A check returns `%{deps: MapSet.t(), result: {:ok, typed} | {:error, [%{code, message}]},
+  looked_up: MapSet.t(), groups: MapSet.t()}`. `looked_up` is the names whose
+  signatures the check read itself (each through `Ctx.dget/2`); `groups` is
+  the deftypes whose map-key positions it consulted (`Kinoko.Lang.Types.Keys`),
+  each standing for its whole group in `deps`. What a check gives follows
+  from those signatures and those groups' settled positions alone, so a memo
+  (the universe's) records a read of each and nothing else.
   The typed tree is the input with `type:` and `res:` added to each
   expression node's meta (`res` is `nil` where nothing resolved). A def's or
   test's body block carries its value's type too.
@@ -37,7 +43,9 @@ defmodule Kinoko.Lang.Types.Check do
 
   @type result :: %{
           deps: MapSet.t(String.t()),
-          result: {:ok, term()} | {:error, [%{code: String.t(), message: String.t()}]}
+          result: {:ok, term()} | {:error, [%{code: String.t(), message: String.t()}]},
+          looked_up: MapSet.t(String.t()),
+          groups: MapSet.t(String.t())
         }
 
   # ---------- entry points (bodies in Check.Decl, as decl.rs) ----------

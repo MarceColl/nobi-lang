@@ -50,7 +50,7 @@ defmodule Kinoko.Lang.Types.Check.Decl do
 
   defp finish(ctx, typed) do
     result = if Ctx.no_errors?(ctx), do: {:ok, typed}, else: {:error, Ctx.errors(ctx)}
-    %{deps: ctx.used, result: result}
+    %{deps: ctx.used, result: result, looked_up: ctx.looked_up, groups: ctx.key_recorded}
   end
 
   defp check_kind(ctx, {:def, m, [name, params, ret, {:block, _, [_, last]} = body]}) do
