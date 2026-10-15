@@ -286,6 +286,47 @@ defmodule Kinoko.UniverseTest do
       assert pid(u) == nil
     end
 
+    test "a crashed universe that cannot boot again is dropped, not restarted in a loop", %{u: u} do
+      {:promoted, _} = Universe.stage(u, "p1", @g)
+      [%{cid: cid}] = Universe.symbols(u)
+      Repo.delete_all(from d in "declarations", where: d.cid == ^cid)
+      sup = Process.whereis(Kinoko.Elm.Supervisor)
+      old = pid(u)
+
+      capture_log(fn ->
+        ref = Process.monitor(old)
+        Process.exit(old, :kill)
+        assert_receive {:DOWN, ^ref, :process, ^old, :killed}
+        Process.sleep(100)
+
+        children = DynamicSupervisor.which_children(Kinoko.Elm.Supervisor)
+        refute Enum.any?(children, fn {_, child, _, _} -> child in [old, :restarting] end)
+        assert Process.whereis(Kinoko.Elm.Supervisor) == sup
+        assert pid(u) == nil
+
+        # The next call boots it itself and reports why it cannot.
+        assert {:error, %{code: "internal", message: message}} = Universe.symbols(u)
+        assert message =~ cid
+      end)
+    end
+
+    test "a boot the database fails is unavailable, not internal", %{u: u} do
+      {:promoted, _} = Universe.stage(u, "p1", @g)
+      stop(u)
+
+      # Inside the test's transaction, so rolled back with it: the boot read
+      # fails with a Postgrex.Error, as it would against a broken database.
+      Repo.query!("ALTER TABLE elm_states RENAME TO elm_states_away")
+
+      capture_log(fn ->
+        assert {:error, %{code: "unavailable", message: message}} = Universe.symbols(u)
+        assert message =~ "database"
+      end)
+
+      Repo.query!("ALTER TABLE elm_states_away RENAME TO elm_states")
+      assert ["A.g"] = Enum.map(Universe.symbols(u), & &1.symbol)
+    end
+
     test "CAS text that does not parse refuses boot naming the CID", %{u: u} do
       {:promoted, _} = Universe.stage(u, "p1", @g)
       [%{cid: cid}] = Universe.symbols(u)

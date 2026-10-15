@@ -46,9 +46,9 @@ defmodule Kinoko.PersistentElmGenServer do
   DB is down it crashes, and its restarts fail, in a loop. Under a supervisor
   with the default intensity (3 restarts in 5 s) that loop takes the
   supervisor down, then its parent, up to the application.
-  `Kinoko.Elm.Supervisor` tolerates 1000 restarts a minute; if an outage
-  outlasts even that, it dies alone, the root restarts it empty, and its
-  servers are gone until something calls `start/3` again.
+  `Kinoko.Elm.Supervisor` tolerates 1000 restarts a minute, and a `start/3`
+  server never spends them in a loop: the supervisor's restart of a crashed
+  server either boots it or drops it (see "Restarts under `start/3`").
 
   `start_link/3` links to the caller, for callers that supervise the server
   themselves. Its generated child spec is
@@ -58,6 +58,27 @@ defmodule Kinoko.PersistentElmGenServer do
   One live process per key per node, enforced by the `Kinoko.Elm.Registry`
   name: a second start under a running key returns
   `{:error, {:already_started, pid}}` and writes nothing. `whereis/1` finds it.
+
+  ### Restarts under `start/3`
+
+  The supervisor restarts a crashed `start/3` server through the same start
+  as `start/3` itself, but a restart never fails:
+
+    * **Someone else already runs the key.** A caller can start the key
+      again (`start/3` or `start_link/3`) between the crash and the
+      supervisor's restart. The restart then finds the key registered to a
+      live process and returns `:ignore`: the supervisor drops its child,
+      and the caller's process alone serves the key. (Without this the
+      restart would get `{:error, {:already_started, pid}}` and be retried
+      until the supervisor's intensity ran out.)
+    * **The restart fails to boot** (the DB is down, a stored state no
+      longer decodes or migrates): logged as an error, then `:ignore`. The
+      key has no server until `start/3` is called again, whose own boot
+      returns the error to its caller.
+
+  Only the restarts: the first start of a `start/3` child returns whatever
+  booting returns, `{:error, {:already_started, pid}}` and boot errors
+  included.
 
   A key belongs to one module: every row stores the name of the module that
   wrote it, and a server whose module differs from the stored one refuses to
@@ -224,16 +245,46 @@ defmodule Kinoko.PersistentElmGenServer do
 
   The child is `:transient`: restarted after a crash, not after a normal
   stop. Returns what `DynamicSupervisor.start_child/2` does, including
-  `{:error, {:already_started, pid}}`.
+  `{:error, {:already_started, pid}}` and `{:error, reason}` when the server
+  fails to boot. A restart by the supervisor is `:ignore`d rather than
+  failed (see "Restarts under `start/3`").
   """
   def start(module, args, opts) do
     validate!(opts)
+    # Set by the child's first start: every later run of its start is a
+    # restart by the supervisor. Freed with the child spec.
+    started = :atomics.new(1, [])
 
     DynamicSupervisor.start_child(Kinoko.Elm.Supervisor, %{
       id: {module, Keyword.fetch!(opts, :key)},
-      start: {__MODULE__, :start_link, [module, args, opts]},
+      start: {__MODULE__, :start_child, [started, module, args, opts]},
       restart: :transient
     })
+  end
+
+  @doc false
+  # The start of a `start/3` child, run in the supervisor. The first run
+  # answers `start/3`'s caller as `start_link/3` does; a restart that cannot
+  # boot is `:ignore`, so the supervisor drops the child instead of retrying.
+  def start_child(started, module, args, opts) do
+    restart? = :atomics.exchange(started, 1, 1) == 1
+
+    case start_link(module, args, opts) do
+      {:error, {:already_started, _pid}} when restart? ->
+        :ignore
+
+      {:error, reason} when restart? ->
+        Logger.error(
+          "#{inspect(module)} under #{inspect(Keyword.fetch!(opts, :key))} crashed and " <>
+            "could not boot again, so it is not restarted until start/3 is called: " <>
+            Exception.format_exit(reason)
+        )
+
+        :ignore
+
+      other ->
+        other
+    end
   end
 
   @doc """
@@ -350,6 +401,11 @@ defmodule Kinoko.PersistentElmGenServer do
       try do
         module.decode(binary)
       rescue
+        # The database failing under `decode/1` is no fault of the row: it
+        # is raised as it is, so a caller can tell an outage from bad data.
+        e in [DBConnection.ConnectionError, DBConnection.OwnershipError, Postgrex.Error] ->
+          reraise e, __STACKTRACE__
+
         e ->
           reraise "#{inspect(module)} could not decode the state stored under " <>
                     "#{inspect(key)} (seq #{seq}, version #{version}): " <>

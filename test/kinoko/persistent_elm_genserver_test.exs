@@ -368,6 +368,82 @@ defmodule Kinoko.PersistentElmGenServerTest do
 
   defp children, do: DynamicSupervisor.which_children(Kinoko.Elm.Supervisor)
 
+  test "a caller that starts a crashed key before the supervisor's restart wins; the restart is dropped" do
+    sup = Process.whereis(Kinoko.Elm.Supervisor)
+
+    on_exit(fn ->
+      if pid = Server.whereis("race"), do: Process.exit(pid, :kill)
+    end)
+
+    assert {:ok, pid} = Server.start(PersistentCounter, [], key: "race")
+    Server.call("race", :inc)
+
+    # Hold the supervisor's restart back until the caller has started the key.
+    :ok = :sys.suspend(sup)
+    ref = Process.monitor(pid)
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
+    Enum.find(1..100, fn _ -> Server.whereis("race") == nil or Process.sleep(5) end)
+
+    test = self()
+
+    holder =
+      spawn(fn ->
+        {:ok, mine} = Server.start_link(PersistentCounter, [], key: "race")
+        send(test, {:started, mine})
+        Process.sleep(:infinity)
+      end)
+
+    assert_receive {:started, mine}
+    on_exit(fn -> Process.exit(holder, :kill) end)
+
+    :ok = :sys.resume(sup)
+
+    # The supervisor handled the crash (its mailbox is in order) and is alive.
+    children = children()
+    assert Process.whereis(Kinoko.Elm.Supervisor) == sup
+    refute Enum.any?(children, fn {_, child, _, _} -> child in [pid, :restarting] end)
+
+    # Exactly one server serves the key: the caller's, with the stored state.
+    Process.sleep(50)
+    assert Process.whereis(Kinoko.Elm.Supervisor) == sup
+    assert Server.whereis("race") == mine
+    assert Server.call("race", :count) == 1
+    assert Registry.lookup(Kinoko.Elm.Registry, "race") == [{mine, nil}]
+  end
+
+  test "a supervisor restart that fails to boot is dropped and logged, not retried" do
+    sup = Process.whereis(Kinoko.Elm.Supervisor)
+
+    on_exit(fn ->
+      if pid = Server.whereis("doomed"), do: Process.exit(pid, :kill)
+    end)
+
+    assert {:ok, pid} = Server.start(PersistentCounter, [], key: "doomed")
+    Server.call("doomed", :inc)
+    # The row now belongs to another module, so the restart refuses to boot.
+    put_row(PersistentCached, "doomed", 5, 1, %{})
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        ref = Process.monitor(pid)
+        Process.exit(pid, :kill)
+        assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
+        Process.sleep(100)
+        refute Enum.any?(children(), fn {_, child, _, _} -> child == :restarting end)
+      end)
+
+    assert log =~ "could not boot again"
+    assert Process.whereis(Kinoko.Elm.Supervisor) == sup
+    assert Server.whereis("doomed") == nil
+
+    # The next start/3 is a first start: its caller gets the boot error.
+    assert {:error, {%RuntimeError{message: message}, _}} =
+             Server.start(PersistentCounter, [], key: "doomed")
+
+    assert message =~ "Kinoko.PersistentCached"
+  end
+
   test "an unsupported host effect names PersistentElmGenServer" do
     pid = start("c")
     ref = Process.monitor(pid)

@@ -17,7 +17,8 @@ defmodule Kinoko.Universe do
       boot (for example a declaration missing from the CAS; `m` names its
       CID), or its CodeDb crashed while answering;
     * `{:error, %{code: "unavailable", message: m}}`: the database or the
-      CodeDb could not be reached (it went away mid-call, or a read timed
+      CodeDb could not be reached (the database failed while the universe
+      booted or answered, the CodeDb went away mid-call, or a read timed
       out). A write's outcome is then unknown: restage the same id, which is
       idempotent.
 
@@ -226,32 +227,39 @@ defmodule Kinoko.Universe do
     end
   end
 
-  defp ensure_started(name, attempts \\ 3) do
+  defp ensure_started(name) do
     case Server.whereis(CodeDb.key(name)) do
       pid when is_pid(pid) ->
         {:ok, pid}
 
       nil ->
-        case CodeDb.start(name) do
-          {:ok, pid} ->
-            {:ok, pid}
-
-          # Another start won the race for the key; it is registered now,
-          # unless it died straight away.
-          :ignore when attempts > 0 ->
-            ensure_started(name, attempts - 1)
-
-          :ignore ->
-            {:error, unavailable("universe #{name} keeps stopping while starting")}
-
-          {:error, reason} ->
-            {:error, internal("universe #{name} failed to boot: " <> describe(reason))}
+        case Server.start(CodeDb, nil, key: CodeDb.key(name)) do
+          {:ok, pid} -> {:ok, pid}
+          # Another start won the race for the key.
+          {:error, {:already_started, pid}} -> {:ok, pid}
+          {:error, reason} -> {:error, boot_error(name, reason)}
         end
     end
   catch
     :exit, reason ->
       {:error, unavailable("universe #{name} could not be started: " <> describe(reason))}
   end
+
+  # A boot that failed because the database did not answer is an outage;
+  # any other failure is the stored universe's (a CAS row missing, text
+  # that does not parse).
+  defp boot_error(name, reason) do
+    if db_outage?(reason),
+      do:
+        unavailable("universe #{name} could not be read from the database: " <> describe(reason)),
+      else: internal("universe #{name} failed to boot: " <> describe(reason))
+  end
+
+  @db_errors [DBConnection.ConnectionError, DBConnection.OwnershipError, Postgrex.Error]
+
+  defp db_outage?({%{__struct__: module}, stack}) when is_list(stack), do: module in @db_errors
+  defp db_outage?(%{__struct__: module}), do: module in @db_errors
+  defp db_outage?(_), do: false
 
   defp noproc?({:noproc, _}), do: true
   defp noproc?({{:nodedown, _}, _}), do: true
@@ -266,8 +274,11 @@ defmodule Kinoko.Universe do
   defp exit_error(name, {{:shutdown, _}, _call}),
     do: unavailable("universe #{name} stopped while answering")
 
-  defp exit_error(name, {reason, _call}),
-    do: internal("universe #{name} crashed while answering: " <> describe(reason))
+  defp exit_error(name, {reason, _call}) do
+    if db_outage?(reason),
+      do: unavailable("universe #{name} lost the database while answering: " <> describe(reason)),
+      else: internal("universe #{name} crashed while answering: " <> describe(reason))
+  end
 
   defp exit_error(name, reason),
     do: internal("universe #{name} crashed while answering: " <> describe(reason))

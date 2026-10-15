@@ -105,9 +105,10 @@ defmodule Kinoko.CodeDbTest do
     assert error.message =~ cid
   end
 
-  test "a start that loses the race for the key is :ignore, not an error", %{u: u} do
-    assert {:ok, pid} = CodeDb.start(u)
-    assert :ignore = CodeDb.start(u)
+  test "a second start under a running key is :already_started", %{u: u} do
+    start = fn -> Kinoko.PersistentElmGenServer.start(CodeDb, nil, key: CodeDb.key(u)) end
+    assert {:ok, pid} = start.()
+    assert {:error, {:already_started, ^pid}} = start.()
     assert pid(u) == pid
   end
 end

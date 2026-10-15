@@ -1,8 +1,9 @@
 defmodule Kinoko.CodeDb do
   @moduledoc """
   The process that keeps one universe alive: a `Kinoko.PersistentElmGenServer`
-  under `Kinoko.Elm.Supervisor`, keyed `"universe:" <> name`, whose state is
-  a `Kinoko.Lang` universe.
+  under `Kinoko.Elm.Supervisor`, keyed `"universe:" <> name` (`key/1`) and
+  started with `Kinoko.PersistentElmGenServer.start/3`, whose state is a
+  `Kinoko.Lang` universe.
 
   **Internal.** Only `Kinoko.Universe` starts it or talks to it.
 
@@ -39,35 +40,6 @@ defmodule Kinoko.CodeDb do
   @doc "The `Kinoko.Elm.Registry` key of universe `name`'s CodeDb."
   @spec key(String.t()) :: String.t()
   def key(name), do: "universe:" <> name
-
-  @doc """
-  Starts universe `name`'s CodeDb under `Kinoko.Elm.Supervisor`
-  (`:transient`): `{:ok, pid}`, `:ignore` when one is already running under
-  the key (look it up with `Kinoko.PersistentElmGenServer.whereis/1`), or
-  `{:error, reason}` when it fails to boot.
-
-  Like `Kinoko.PersistentElmGenServer.start/3`, except that a start that
-  loses the race for the key is `:ignore` rather than an error. That matters
-  for the supervisor's own restart after a crash: should a caller have
-  started the universe again first, the restart is dropped instead of
-  retried in a loop until the supervisor's intensity runs out.
-  """
-  @spec start(String.t()) :: {:ok, pid()} | :ignore | {:error, term()}
-  def start(name) do
-    DynamicSupervisor.start_child(Kinoko.Elm.Supervisor, %{
-      id: {__MODULE__, key(name)},
-      start: {__MODULE__, :start_link, [name]},
-      restart: :transient
-    })
-  end
-
-  @doc false
-  def start_link(name) do
-    case Kinoko.PersistentElmGenServer.start_link(__MODULE__, nil, key: key(name)) do
-      {:error, {:already_started, _pid}} -> :ignore
-      other -> other
-    end
-  end
 
   @impl true
   def init(_args), do: {Lang.new(), Fx.none()}
