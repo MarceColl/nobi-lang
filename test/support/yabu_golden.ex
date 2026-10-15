@@ -42,8 +42,9 @@ defmodule YabuGolden do
   image. So decoded function values are markers: `lambda/0` (`{:fn, "<lambda>"}`)
   for a compiled callback, `{:def_ref, name}` for a def and
   `{:ctor_ref, owner, variant, arity}` for a constructor. `without_closures/1`
-  rewrites every Erlang fun in an actual result to `lambda/0`, so a result can
-  be compared with a golden answer (closures never compare equal).
+  rewrites every closure in an actual result to `lambda/0` and every def or
+  constructor value to its marker, so a result can be compared with a golden
+  answer (closures never compare equal).
   """
 
   alias Kinoko.Lang
@@ -92,8 +93,35 @@ defmodule YabuGolden do
   @doc "The marker a closure is compared as."
   def lambda, do: {:fn, @lambda_name}
 
-  @doc "`term` with every Erlang fun in it, however deep, written as `lambda/0`."
-  def without_closures(f) when is_function(f), do: lambda()
+  @doc """
+  `term` with every closure in it, however deep, written as `lambda/0`, and
+  every def or constructor taken as a value written as the decoder's marker
+  for it (`{:def_ref, name}`, `{:ctor_ref, owner, variant, arity}`), as Rust's
+  `without_closures` keeps a def or a constructor and replaces only closures.
+  """
+  def without_closures(f) when is_function(f) do
+    info = Function.info(f)
+
+    cond do
+      # an image def or a stdlib def, named as `Show` names it
+      info[:type] == :external ->
+        case Kinoko.Exec.Show.show(f) do
+          "<fn " <> named -> {:def_ref, String.trim_trailing(named, ">")}
+          _ -> lambda()
+        end
+
+      # `Rt.ctor/3`'s fun only builds the variant: applied to placeholders
+      # it names it
+      info[:module] == Kinoko.Lang.Rt and
+          String.starts_with?(Atom.to_string(info[:name]), "-ctor/3-") ->
+        {:var, owner, variant, _} = apply(f, List.duplicate(nil, info[:arity]))
+        {:ctor_ref, owner, variant, info[:arity]}
+
+      true ->
+        lambda()
+    end
+  end
+
   def without_closures(list) when is_list(list), do: Enum.map(list, &without_closures/1)
 
   # a map's keys are data (the checker refuses the rest), so stay as they are

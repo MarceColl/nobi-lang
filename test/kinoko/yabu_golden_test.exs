@@ -140,5 +140,13 @@ defmodule YabuGoldenTest do
     assert YabuGolden.without_closures(%{"k" => f}) == %{"k" => YabuGolden.lambda()}
   end
 
+  test "without_closures keeps a def or a constructor, as its marker" do
+    ctor = Kinoko.Lang.Rt.ctor("Split.Msg", "SetPayer", 1)
+    assert YabuGolden.without_closures([ctor]) == [{:ctor_ref, "Split.Msg", "SetPayer", 1}]
+
+    length = &Kinoko.Lang.Rt.Stdlib.string_length/1
+    assert YabuGolden.without_closures({length}) == {{:def_ref, "String.length"}}
+  end
+
   defp msg_t, do: named("Split.Msg")
 end
