@@ -241,7 +241,7 @@ defmodule KinokoWeb.YabuHtmlTest do
   end
 
   test "reserved names and phx- ids are dropped" do
-    for n <- ["yabu_submit", "_target", "h", "yabu[e0]", "yabu_x"] do
+    for n <- ["yabu", "yabu_submit", "_target", "h", "yabu[e0]", "yabu_x"] do
       {doc, _} = render(el("input", [{"name", n}]))
       assert attr(doc, "input", "name") == [], n
     end

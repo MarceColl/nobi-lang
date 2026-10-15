@@ -31,7 +31,18 @@ defmodule KinokoWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://hexdocs.pm/phoenix/scopes.html)"
 
+  attr :bare, :boolean,
+    default: false,
+    doc: "no header and no width limit: the content owns the page (a served app)"
+
   slot :inner_block, required: true
+
+  def app(%{bare: true} = assigns) do
+    ~H"""
+    {render_slot(@inner_block)}
+    <.flash_group flash={@flash} />
+    """
+  end
 
   def app(assigns) do
     ~H"""

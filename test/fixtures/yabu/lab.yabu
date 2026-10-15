@@ -1,0 +1,51 @@
+defmodel Lab.Note do
+  id : Uuid
+  text : String
+end
+
+defmodel Lab.Model do
+  count : Int
+  roll : Int
+  now : Int
+  zero : Int
+end
+
+deftype Lab.Msg do
+  Inc | Divide | Roll | Rolled(Int) | Clock | Ticked(Int) | Save | Saved(Uuid)
+end
+
+def Lab.init() : (Lab.Model, Cmd<Lab.Msg>) do
+  (%Lab.Model{count: 0, roll: 0, now: 0, zero: 0}, Cmd.none())
+end
+
+def Lab.update(msg : Lab.Msg, model : Lab.Model) : (Lab.Model, Cmd<Lab.Msg>) do
+  case msg do
+    Lab.Msg.Inc -> (%Lab.Model{model | count: model.count + 1}, Cmd.none())
+    Lab.Msg.Divide -> (%Lab.Model{model | count: model.count / model.zero}, Cmd.none())
+    Lab.Msg.Roll -> (model, Cmd.random.int(1, 6, Lab.Msg.Rolled))
+    Lab.Msg.Rolled(n) -> (%Lab.Model{model | roll: n}, Cmd.none())
+    Lab.Msg.Clock -> (model, Cmd.time.now(Lab.Msg.Ticked))
+    Lab.Msg.Ticked(t) -> (%Lab.Model{model | now: t}, Cmd.none())
+    Lab.Msg.Save -> (model, Cmd.store.insert(%Lab.Note{text: "hi"}, Lab.Msg.Saved))
+    Lab.Msg.Saved(id) -> (model, Cmd.none())
+  end
+end
+
+def Lab.view(model : Lab.Model) : Html<Lab.Msg> do
+  <main id="lab" class="mx-auto max-w-xl p-6">
+    <p>Count <span id="count">{model.count}</span></p>
+    <p>Roll <span id="roll">{model.roll}</span></p>
+    <p>Now <span id="now">{model.now}</span></p>
+    <button id="inc" on-click={Lab.Msg.Inc}>Inc</button>
+    <button id="divide" on-click={Lab.Msg.Divide}>Divide</button>
+    <button id="roll-dice" on-click={Lab.Msg.Roll}>Roll</button>
+    <button id="clock" on-click={Lab.Msg.Clock}>Clock</button>
+    <button id="save" on-click={Lab.Msg.Save}>Save</button>
+  </main>
+end
+
+defapp Lab
+
+defroutes Main do
+  "/" -> Lab
+end

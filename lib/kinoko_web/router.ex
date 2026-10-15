@@ -33,10 +33,15 @@ defmodule KinokoWeb.Router do
     end
   end
 
-  scope "/", KinokoWeb do
+  # Kinoko's own pages live under the reserved prefix `/_` where deployments
+  # are served (`:mcp_enabled`), so they never shadow an app's paths.
+  @mcp_enabled Application.compile_env(:kinoko, :mcp_enabled, false)
+  @kinoko_prefix if @mcp_enabled, do: "/_", else: "/"
+
+  scope @kinoko_prefix, KinokoWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    if !@mcp_enabled, do: get("/", PageController, :home)
     live "/elm", ElmDemoLive
     live "/sim", SimLive
   end
@@ -55,11 +60,28 @@ defmodule KinokoWeb.Router do
     # as long as you are also using SSL (which you should anyway).
     import Phoenix.LiveDashboard.Router
 
-    scope "/dev" do
+    scope "/_/dev" do
       pipe_through :browser
 
       live_dashboard "/dashboard", metrics: KinokoWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
+    end
+  end
+
+  # Deployment serving: every path no route above took goes to the deployment
+  # the request's host resolves to (`KinokoWeb.DeploymentLive`). The reserved
+  # prefixes answer 404 here instead, so an app never receives them; routes
+  # under them must be declared above. Dev and test only, like `/mcp`.
+  if @mcp_enabled do
+    scope "/", KinokoWeb do
+      pipe_through :browser
+
+      for prefix <- ~w(_ mcp live assets phoenix images favicon.ico) do
+        match :*, "/#{prefix}", ReservedController, :not_found
+        match :*, "/#{prefix}/*rest", ReservedController, :not_found
+      end
+
+      live "/*path", DeploymentLive
     end
   end
 end

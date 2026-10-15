@@ -183,7 +183,8 @@ defmodule KinokoWeb.YabuHtml do
   # `name`s the event routing owns, and `id`s LiveView owns.
   defp reserved_ok?("name", v) when is_binary(v),
     do:
-      v not in ["yabu_submit", "_target", "h"] and not String.starts_with?(v, ["yabu[", "yabu_"])
+      v not in ["yabu", "yabu_submit", "_target", "h"] and
+        not String.starts_with?(v, ["yabu[", "yabu_"])
 
   defp reserved_ok?("id", v) when is_binary(v), do: not String.starts_with?(v, "phx-")
   defp reserved_ok?(_, _), do: true
