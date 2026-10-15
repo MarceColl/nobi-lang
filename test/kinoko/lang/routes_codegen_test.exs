@@ -129,6 +129,35 @@ defmodule Kinoko.Lang.RoutesCodegenTest do
       assert :error = Routes.path(@table, "Post", [{:uuid, "nope"}])
     end
 
+    test "falls through entries of one app and skips shadowed ones" do
+      table = [
+        %{segments: [{:lit, "a"}, {:param, "x"}], app: "A", params: [{"x", "Int"}]},
+        %{segments: [{:lit, "b"}, {:param, "x"}], app: "A", params: [{"x", "String"}]},
+        %{segments: [{:lit, "s"}, {:param, "x"}], app: "S", params: [{"x", "String"}]},
+        %{segments: [{:lit, "s"}, {:param, "x"}], app: "T", params: [{"x", "String"}]}
+      ]
+
+      assert {:ok, "/a/1"} = Routes.path(table, "A", [1])
+      assert {:ok, "/b/s"} = Routes.path(table, "A", ["s"])
+      assert :error = Routes.path(table, "A", [{:uuid, "x"}])
+      assert {:ok, "/s/q"} = Routes.path(table, "S", ["q"])
+      assert :error = Routes.path(table, "T", ["q"])
+    end
+
+    test "dot-only String values are neither matched nor built" do
+      assert :not_found = Routes.match([Enum.at(@table, 3)], "/u/..")
+      assert :not_found = Routes.match([Enum.at(@table, 3)], "/u/.")
+      assert :not_found = Routes.match([Enum.at(@table, 3)], "/u/%2E%2E")
+      assert :error = Routes.path(@table, "Str", [".."])
+      assert {:ok, "/u/a.b"} = Routes.path(@table, "Str", ["a.b"])
+    end
+
+    test "mismatched pattern and init params raise" do
+      bad = [%{segments: [{:param, "x"}], app: "A", params: []}]
+      assert_raise ArgumentError, fn -> Routes.match(bad, "/1") end
+      assert_raise ArgumentError, fn -> Routes.path(bad, "A", []) end
+    end
+
     test "round-trips with match" do
       cases = [
         {"Home", []},

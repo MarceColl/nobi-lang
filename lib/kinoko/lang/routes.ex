@@ -17,13 +17,20 @@ defmodule Kinoko.Lang.Routes do
     `/post/1`; `/` is the root). Any empty segment elsewhere (`//`) matches
     nothing. A query or fragment is not part of the path.
   - Segments are split before percent-decoding, so `%2F` stays inside a
-    String param. A literal segment compares after decoding.
+    String param. A literal segment compares after decoding, so `/%6E/5`
+    matches `/n/5`: a URL has several spellings, `path/3` gives one.
   - Int: optional `-`, then digits without leading zeros (`0` alone), in
     i64 range; `+1`, `007`, `-0`, `1.0` are 404s.
   - Uuid: canonical lowercase 36 characters (`8-4-4-4-12` hex); uppercase
     is a 404.
-  - String: any non-empty, valid UTF-8 text after percent-decoding; invalid
-    percent-encoding is a 404.
+  - String: any non-empty, valid UTF-8 text after percent-decoding, except
+    `.` and `..` (browsers normalise them away); invalid percent-encoding is
+    a 404.
+  - `path/3` only answers a path that `match/2` resolves back to the same
+    app and args: an entry that cannot build, or is shadowed by an earlier
+    entry, is skipped for the next entry of that app.
+  - Pattern params and init params that do not line up raise
+    `ArgumentError` (the checker prevents it).
   """
 
   @i64_min -9_223_372_036_854_775_808
@@ -44,9 +51,19 @@ defmodule Kinoko.Lang.Routes do
   @doc "The URL path for opening `app` with `args` (`init`'s order), or `:error`."
   @spec path([entry()], String.t(), [term()]) :: {:ok, String.t()} | :error
   def path(entries, app, args) do
+    # An entry that cannot build these args, or whose path an earlier entry
+    # would capture, is skipped: a path always round-trips with `match/2`.
     Enum.find_value(entries, :error, fn
-      %{app: ^app} = e -> build(e, args)
-      _ -> nil
+      %{app: ^app} = e ->
+        with {:ok, p} <- build(e, args),
+             {:ok, ^app, ^args} <- match(entries, p) do
+          {:ok, p}
+        else
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end)
   end
 
@@ -67,7 +84,9 @@ defmodule Kinoko.Lang.Routes do
 
   defp split(_), do: :error
 
-  defp match_entry(%{segments: segs, app: app, params: params}, parts) do
+  defp match_entry(%{segments: segs, app: app, params: params} = e, parts) do
+    check_params!(e)
+
     with true <- length(segs) == length(parts),
          {:ok, bound} <- bind(Enum.zip(segs, parts), %{}, Map.new(params)),
          {:ok, args} <- ordered(params, bound) do
@@ -123,7 +142,13 @@ defmodule Kinoko.Lang.Routes do
     end
   end
 
-  defp parse("String", part), do: decode(part)
+  defp parse("String", part) do
+    case decode(part) do
+      {:ok, s} when s not in [".", ".."] -> {:ok, s}
+      _ -> :error
+    end
+  end
+
   defp parse(_, _), do: :error
 
   defp decode(part) do
@@ -138,7 +163,8 @@ defmodule Kinoko.Lang.Routes do
 
   # ---------- path ----------
 
-  defp build(%{segments: segs, params: params}, args) when length(params) == length(args) do
+  defp build(%{segments: segs, params: params} = e, args) when length(params) == length(args) do
+    check_params!(e)
     values = params |> Enum.zip(args) |> Map.new(fn {{n, t}, v} -> {n, {t, v}} end)
 
     segs
@@ -161,6 +187,17 @@ defmodule Kinoko.Lang.Routes do
 
   defp build(_, _), do: :error
 
+  # The checker guarantees a pattern's params are exactly its target init's.
+  defp check_params!(%{segments: segs, params: params, app: app}) do
+    names = for {:param, n} <- segs, do: n
+
+    if Enum.sort(names) != Enum.sort(Enum.map(params, &elem(&1, 0))) do
+      raise ArgumentError,
+            "route to #{app}: pattern params #{inspect(names)} do not match " <>
+              "init params #{inspect(Enum.map(params, &elem(&1, 0)))}"
+    end
+  end
+
   defp param_segment(type, v, acc) do
     case segment(type, v) do
       {:ok, s} -> {:cont, {:ok, [s | acc]}}
@@ -175,7 +212,7 @@ defmodule Kinoko.Lang.Routes do
     if Regex.match?(@uuid, u), do: {:ok, u}, else: :error
   end
 
-  defp segment("String", s) when is_binary(s) and s != "" do
+  defp segment("String", s) when is_binary(s) and s not in ["", ".", ".."] do
     if String.valid?(s), do: {:ok, encode(s)}, else: :error
   end
 
