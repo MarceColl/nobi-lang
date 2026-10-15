@@ -109,6 +109,31 @@ defmodule KinokoWeb.McpTest do
       refute text =~ "fork_env"
       refute text =~ "workspace"
     end
+
+    test "the DECLARATIONS example is shown, promotes as written, and runs", %{
+      conn: conn,
+      u: u
+    } do
+      example = KinokoWeb.Mcp.Instructions.example()
+      {200, %{"result" => %{"instructions" => text}}} = rpc(conn, "initialize", %{})
+
+      assert text =~ "DECLARATIONS"
+
+      for line <- String.split(example, "\n", trim: true),
+          do: assert(text =~ "  " <> line, "the instructions lack: #{line}")
+
+      for form <- ["defmodel ", "deftype ", " = case ", " if ", "on-click={", "defapp "],
+          do: assert(example =~ form, "the example lacks #{form}")
+
+      assert ok!(conn, "stage_patch", %{"universe" => u, "id" => "ex", "source" => example}) ==
+               "promoted: ex"
+
+      assert ok!(conn, "eval", %{
+               "universe" => u,
+               "expression" =>
+                 "Counter.update(Counter.Msg.Add(5), %Counter.Model{count: 1, label: \"x\"})"
+             }) =~ "count: 6"
+    end
   end
 
   describe "robustness (Review Focus 5)" do
