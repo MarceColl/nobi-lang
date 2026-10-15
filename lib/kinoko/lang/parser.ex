@@ -31,8 +31,8 @@ defmodule Kinoko.Lang.Parser do
 
   @max_depth 512
 
-  @decl_kw ~w(def defmodel deftype defapp deftest)
-  @keywords ~w(def defmodel deftype defapp deftest do end case if else fn always sometimes and or not true false)
+  @decl_kw ~w(def defmodel deftype defapp deftest defroutes)
+  @keywords ~w(def defmodel deftype defapp deftest defroutes do end case if else fn always sometimes and or not true false)
 
   @binops Map.new(Ast.ops(), fn {atom, sym, prec} -> {sym, {atom, prec}} end)
 
@@ -357,8 +357,14 @@ defmodule Kinoko.Lang.Parser do
         {stmts, last, p} = rest_of_block(p)
         {{:deftest, m, [name, {:block, meta(open), [stmts, last]}]}, p}
 
+      {:name, "defroutes", _, _} ->
+        defroutes(p, m)
+
       {:name, w, _, _} ->
-        err_at(t, "expected 'def', 'defmodel', 'deftype', 'defapp' or 'deftest', got '#{w}'")
+        err_at(
+          t,
+          "expected 'def', 'defmodel', 'deftype', 'defapp', 'deftest' or 'defroutes', got '#{w}'"
+        )
 
       _ ->
         err_at(t, "expected a declaration, got '#{describe(t)}'")
@@ -408,6 +414,115 @@ defmodule Kinoko.Lang.Parser do
     else
       {f, p} = typed_name(p)
       model_fields(skip_nl(p), [f | acc])
+    end
+  end
+
+  # `defroutes Name do "/pattern" -> App ... end`: each pattern parsed here
+  # into its segments, so a malformed one is an error at the pattern.
+  defp defroutes(p, m) do
+    {name, p} = qualified_name(p)
+    {_, p} = open_do(p)
+    p = skip_nl(p)
+    {routes, p} = routes(p, [])
+    {_, p} = close_end(p)
+    {{:defroutes, m, [name, routes]}, p}
+  end
+
+  defp routes(p, acc) do
+    if at_terminator?(p, ["end"]) do
+      {Enum.reverse(acc), p}
+    else
+      {r, p} = route(p)
+      routes(skip_nl(p), [r | acc])
+    end
+  end
+
+  defp route(p) do
+    {t, p} = next(p)
+
+    pattern =
+      case t do
+        {:str, s, _, _} -> s
+        _ -> err_at(t, ~s(expected a route `"/path" -> App`, got '#{describe(t)}'))
+      end
+
+    segments =
+      case route_segments(pattern) do
+        {:ok, segments} -> segments
+        {:error, why} -> err_at(t, ~s(route pattern #{inspect(pattern)} #{why}))
+      end
+
+    {_, p} = expect(p, :arrow)
+    target_tok = peek(p)
+    {target, p} = qualified_name(p)
+
+    unless Ast.capitalised?(target),
+      do: err_at(target_tok, "route target `#{target}` must be an app's name, as in `Forum.Post`")
+
+    {{segments, target}, p}
+  end
+
+  @doc """
+  A route pattern's segments: `"/"` is `[]`, `"/post/:id"` is
+  `[{:lit, "post"}, {:param, "id"}]`. `{:error, why}` for a malformed one.
+  """
+  @spec route_segments(String.t()) ::
+          {:ok, [{:lit, String.t()} | {:param, String.t()}]} | {:error, String.t()}
+  def route_segments("/"), do: {:ok, []}
+
+  def route_segments("/" <> rest = pattern) do
+    rest
+    |> String.split("/")
+    |> Enum.reduce_while({:ok, []}, fn part, {:ok, acc} ->
+      case route_segment(part, pattern) do
+        {:ok, seg} -> {:cont, {:ok, [seg | acc]}}
+        {:error, _} = e -> {:halt, e}
+      end
+    end)
+    |> case do
+      {:ok, segs} -> repeated_param(Enum.reverse(segs))
+      e -> e
+    end
+  end
+
+  def route_segments(pattern),
+    do: {:error, ~s(must start with `/` — write it as "/#{pattern}")}
+
+  defp route_segment("", _),
+    do: {:error, ~s(has an empty segment — write "/a/b", never "/a//b" or "/a/")}
+
+  defp route_segment(":", _),
+    do: {:error, "has a `:` with no parameter name — write `:id`"}
+
+  defp route_segment(":" <> name, _) do
+    if Regex.match?(~r/\A[a-z_][A-Za-z0-9_]*\z/, name),
+      do: {:ok, {:param, name}},
+      else:
+        {:error,
+         "has parameter `#{name}` — a parameter is a lowercase identifier, as in `:id` or `:post_id`"}
+  end
+
+  defp route_segment(part, _) do
+    cond do
+      String.contains?(part, ":") ->
+        {:error,
+         "has `:` inside segment #{inspect(part)} — a parameter is a whole segment, as in \"/post/:id\""}
+
+      Regex.match?(~r/\A[A-Za-z0-9_.~-]+\z/, part) ->
+        {:ok, {:lit, part}}
+
+      true ->
+        {:error,
+         "has segment #{inspect(part)} — a literal segment holds only letters, digits, `-`, `_`, `.` and `~`"}
+    end
+  end
+
+  defp repeated_param(segs) do
+    names = for {:param, n} <- segs, do: n
+
+    case names -- Enum.uniq(names) do
+      [] -> {:ok, segs}
+      [n | _] -> {:error, "names parameter `#{n}` twice — each parameter is named once"}
     end
   end
 

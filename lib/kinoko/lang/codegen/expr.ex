@@ -389,6 +389,15 @@ defmodule Kinoko.Lang.Codegen.Expr do
       {kind, owner, variant, _} when kind in [:variant, :ctor_ref] ->
         seq(parts, ctx, &{:tuple, @a, [lit(:var), lit(owner), lit(variant), list(&1)]})
 
+      # `Cmd.navigate(App, args…)`: an effect naming the app, then init's
+      # arguments; the host resolves its URL (`Kinoko.Lang.Types.Routes`).
+      {:navigate, app, _params} ->
+        seq(
+          tl(parts),
+          ctx,
+          &rt(:cmd_effect, [lit("Cmd.navigate"), lit(nil), list([lit(app) | &1])])
+        )
+
       res ->
         raise ArgumentError, "unresolved call of `#{name}`: #{inspect(res)}"
     end

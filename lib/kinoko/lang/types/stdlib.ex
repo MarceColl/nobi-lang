@@ -16,7 +16,10 @@ defmodule Kinoko.Lang.Types.Stdlib do
           list = fn t -> {:applied, "List", [t]} end
           option = fn t -> {:applied, "Option", [t]} end
           cmd = fn t -> {:applied, "Cmd", [t]} end
-          def_ = fn ps, r -> {:def, ps, r} end
+
+          def_ = fn ps, r ->
+            {:def, ps, r, Enum.map(Enum.with_index(ps, 1), &"a#{elem(&1, 1)}")}
+          end
 
           a = tv.("a")
           b = tv.("b")

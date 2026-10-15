@@ -214,7 +214,7 @@ defmodule Kinoko.Universe do
 
   defp return_type(%{signatures: sigs}, symbol) do
     case sigs do
-      %{^symbol => {:def, _params, ret}} -> ret
+      %{^symbol => {:def, _params, ret, _names}} -> ret
       _ -> nil
     end
   end

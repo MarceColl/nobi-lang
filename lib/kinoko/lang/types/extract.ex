@@ -8,9 +8,10 @@ defmodule Kinoko.Lang.Types.Extract do
   alias Kinoko.Lang.Ast
 
   @type signature ::
-          {:def, [Ast.type()], Ast.type()}
+          {:def, [Ast.type()], Ast.type(), [String.t()]}
           | {:model, [{String.t(), Ast.type()}]}
           | {:type, [String.t()], [{String.t(), [Ast.type()]}]}
+          | {:routes, [Ast.route()]}
           | :app
           | :test
 
@@ -41,8 +42,16 @@ defmodule Kinoko.Lang.Types.Extract do
   def variant_name?(name),
     do: String.contains?(name, ".") and Ast.capitalised?(last_segment(name))
 
+  @doc """
+  What a declaration offers others. A def's is its parameter types, return
+  type and parameter names: a route matches `init`'s parameters by name, so
+  renaming one changes the signature and checks its dependents again.
+  """
   @spec signature(Ast.decl()) :: signature
-  def signature({:def, _, [_, params, ret, _]}), do: {:def, Enum.map(params, &elem(&1, 1)), ret}
+  def signature({:def, _, [_, params, ret, _]}),
+    do: {:def, Enum.map(params, &elem(&1, 1)), ret, Enum.map(params, &elem(&1, 0))}
+
+  def signature({:defroutes, _, [_, routes]}), do: {:routes, routes}
   def signature({:defmodel, _, [_, fields]}), do: {:model, fields}
   def signature({:deftype, _, [_, params, variants]}), do: {:type, params, variants}
   def signature({:defapp, _, _}), do: :app
@@ -67,6 +76,9 @@ defmodule Kinoko.Lang.Types.Extract do
     do: for(s <- ~w(init update view Model Msg), do: "#{name}.#{s}")
 
   defp collect({:deftest, _, [_, body]}), do: expr(body)
+
+  defp collect({:defroutes, _, [_, routes]}),
+    do: Enum.flat_map(routes, fn {_, app} -> [app, "#{app}.init"] end)
 
   defp type_deps({:named, n}, params) do
     if n in @builtin_named or n in params, do: [], else: [n]
@@ -105,6 +117,10 @@ defmodule Kinoko.Lang.Types.Extract do
   defp expr({:map, _, entries}), do: Enum.flat_map(entries, fn {k, v} -> expr(k) ++ expr(v) end)
   defp expr({:bin, _, [_, l, r]}), do: expr(l) ++ expr(r)
   defp expr({k, _, [e]}) when k in [:not, :neg, :always, :sometimes], do: expr(e)
+
+  defp expr({:call, _, ["Cmd.navigate", [{:name, _, [app]} | args]]}),
+    do: [app, "#{app}.init" | exprs(args)]
+
   defp expr({:call, _, [n, args]}), do: name_deps(n) ++ exprs(args)
   defp expr({:field, _, [e, _]}), do: expr(e)
 

@@ -8,7 +8,7 @@ defmodule Kinoko.Lang.Types.JsxApp do
   `m` is left to its context. TS's `Html` takes no parameter; this is Rust's.
   """
 
-  alias Kinoko.Lang.Types.{Check, Patterns, Quote}
+  alias Kinoko.Lang.Types.{Check, Patterns, Quote, Routes}
   alias Kinoko.Lang.Types.Check.Ctx
 
   import Kinoko.Lang.Types.Check.Tree, only: [ty: 1, res: 1, put_ann: 3]
@@ -188,7 +188,8 @@ defmodule Kinoko.Lang.Types.JsxApp do
   @doc """
   `defapp App` (TS's `checkApp`): `App.Model` a model, `App.Msg` a type,
   and `App.init`, `App.update` and `App.view` defs of exactly the types the
-  runtime calls them at. Every part is looked up as a dependency, a missing
+  runtime calls them at. `init` may take Int, String or Uuid parameters,
+  which a route fills from the URL. Every part is looked up as a dependency, a missing
   one too.
   """
   def check_app(ctx, app) do
@@ -213,7 +214,7 @@ defmodule Kinoko.Lang.Types.JsxApp do
     step = {:tuple, [model_t, {:applied, "Cmd", [msg_t]}]}
 
     ctx
-    |> app_def(init, "#{app}.init", {:arrow, [], step})
+    |> app_init(init, "#{app}.init", step)
     |> app_def(update, "#{app}.update", {:arrow, [msg_t, model_t], step})
     |> app_def(view, "#{app}.view", {:arrow, [model_t], html(msg_t)})
   end
@@ -230,10 +231,29 @@ defmodule Kinoko.Lang.Types.JsxApp do
     end
   end
 
+  # `init` may take parameters, each of a type a route fills from a URL
+  # (`Kinoko.Lang.Types.Routes.route_param_types/0`); it returns `step`.
+  defp app_init(ctx, {:def, params, _, names} = init, name, step) do
+    ctx = app_def(ctx, init, name, {:arrow, params, step})
+
+    names
+    |> Enum.zip(params)
+    |> Enum.reject(fn {_, t} -> Routes.route_param_type?(t) end)
+    |> Enum.reduce(ctx, fn {n, t}, ctx ->
+      message =
+        "`#{name}` parameter `#{n} : #{Quote.type(t)}` — init takes only Int, String or Uuid " <>
+          "parameters, which a route fills from the URL"
+
+      Ctx.error(ctx, "bad-app-shape", message)
+    end)
+  end
+
+  defp app_init(ctx, init, name, step), do: app_def(ctx, init, name, {:arrow, [], step})
+
   # `name`, when declared, is a def of exactly type `expected`.
   defp app_def(ctx, nil, _name, _expected), do: ctx
 
-  defp app_def(ctx, {:def, params, ret}, name, expected) do
+  defp app_def(ctx, {:def, params, ret, _names}, name, expected) do
     actual = {:arrow, params, ret}
 
     if fits_shape?(actual, expected) do

@@ -7,7 +7,19 @@ defmodule Kinoko.Lang.Types.Check.Decl do
   """
 
   alias Kinoko.Lang.Ast
-  alias Kinoko.Lang.Types.{Check, Exhaustive, Extract, Hints, Infer, Patterns, Quote, Stdlib}
+
+  alias Kinoko.Lang.Types.{
+    Check,
+    Exhaustive,
+    Extract,
+    Hints,
+    Infer,
+    Patterns,
+    Quote,
+    Routes,
+    Stdlib
+  }
+
   alias Kinoko.Lang.Types.Check.Ctx
 
   # ---------- entry points (`Kinoko.Lang.Types.Check` delegates here) ----------
@@ -111,6 +123,9 @@ defmodule Kinoko.Lang.Types.Check.Decl do
 
   defp check_kind(ctx, {:defapp, _, [name]} = d), do: {d, Check.check_app(ctx, name)}
 
+  defp check_kind(ctx, {:defroutes, _, [_, routes]} = d),
+    do: {d, Routes.check_routes(ctx, routes)}
+
   # A test's body is checked as a def's with no parameters, its value
   # unconstrained.
   defp check_kind(ctx, {:deftest, m, [name, body]}) do
@@ -195,7 +210,7 @@ defmodule Kinoko.Lang.Types.Check.Decl do
         "`#{name}` is in the reserved `#{root}` namespace — pick another name"
       )
       |> when_true(
-        not String.contains?(name, ".") and kind != :defapp,
+        not String.contains?(name, ".") and kind not in [:defapp, :defroutes],
         "`#{name}` has no module — every name is qualified: name it `Mod.#{name}`"
       )
       |> case_convention(kind, name, last)

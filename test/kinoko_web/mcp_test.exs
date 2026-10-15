@@ -101,7 +101,7 @@ defmodule KinokoWeb.McpTest do
       {200, %{"result" => %{"instructions" => text}}} = rpc(conn, "initialize", %{})
 
       for name <- Kinoko.Lang.Types.Stdlib.names(),
-          match?({:def, _, _}, Kinoko.Lang.Types.Stdlib.signature(name)) do
+          match?({:def, _, _, _}, Kinoko.Lang.Types.Stdlib.signature(name)) do
         assert text =~ name <> "(", "missing #{name}"
       end
 

@@ -190,7 +190,7 @@ defmodule Kinoko.Lang.CodegenTest do
       mod = load(image)
       committed = Lang.committed(universe(@split))
 
-      defs = for {n, %{signature: {:def, _, _}}} <- committed, do: n
+      defs = for {n, %{signature: {:def, _, _, _}}} <- committed, do: n
       assert Enum.sort(Map.keys(mod.__yabu__(:names))) == Enum.sort(defs)
       assert mod.__yabu__(:names) == image.names
       assert mod.__yabu__(:image) == image.hash

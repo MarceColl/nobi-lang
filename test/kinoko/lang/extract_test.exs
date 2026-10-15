@@ -12,7 +12,9 @@ defmodule Kinoko.Lang.ExtractTest do
   describe "signature/1" do
     test "def signature is annotation-derived" do
       [d] = parse!("def Foo.add(a : Int, b : Int) : Int do a + b end")
-      assert Extract.signature(d) == {:def, [{:named, "Int"}, {:named, "Int"}], {:named, "Int"}}
+
+      assert Extract.signature(d) ==
+               {:def, [{:named, "Int"}, {:named, "Int"}], {:named, "Int"}, ["a", "b"]}
     end
 
     test "model and type signatures" do
@@ -134,13 +136,14 @@ defmodule Kinoko.Lang.ExtractTest do
       b = {:var, "b"}
 
       assert Stdlib.signatures()["List.map"] ==
-               {:def, [{:applied, "List", [a]}, {:arrow, [a], b}], {:applied, "List", [b]}}
+               {:def, [{:applied, "List", [a]}, {:arrow, [a], b}], {:applied, "List", [b]},
+                ["a1", "a2"]}
 
       assert Stdlib.signatures()["String.from_int"] ==
-               {:def, [{:named, "Int"}], {:named, "String"}}
+               {:def, [{:named, "Int"}], {:named, "String"}, ["a1"]}
 
       assert Stdlib.signatures()["JSON.stringify"] ==
-               {:def, [a], {:applied, "Result", [{:named, "String"}, {:named, "String"}]}}
+               {:def, [a], {:applied, "Result", [{:named, "String"}, {:named, "String"}]}, ["a1"]}
 
       assert Stdlib.signatures()["Option"] ==
                {:type, ["T"], [{"Some", [{:var, "T"}]}, {"None", []}]}

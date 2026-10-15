@@ -47,7 +47,7 @@ defmodule Kinoko.Lang.Rt.Stdlib do
   alias Kinoko.Lang.Rt.Json
   alias Kinoko.Lang.Types.Stdlib, as: Signatures
 
-  @table (for {name, {:def, params, _}} <- Signatures.signatures(), into: %{} do
+  @table (for {name, {:def, params, _, _}} <- Signatures.signatures(), into: %{} do
             fun = name |> String.replace(".", "_") |> String.downcase() |> String.to_atom()
             {name, {__MODULE__, fun, length(params)}}
           end)
@@ -356,7 +356,7 @@ defmodule Kinoko.Lang.Rt.Stdlib do
   def cmd_none, do: Rt.cmd_none()
   def cmd_batch(cmds), do: Rt.cmd_batch(cmds)
 
-  @effects for {name, {:def, params, _}} <- Signatures.signatures(),
+  @effects for {name, {:def, params, _, _}} <- Signatures.signatures(),
                String.starts_with?(name, "Cmd."),
                name not in ["Cmd.none", "Cmd.batch"],
                do: {name, length(params)}

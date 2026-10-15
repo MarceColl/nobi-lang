@@ -17,7 +17,13 @@ defmodule Kinoko.Lang.Ast do
           | {:tuple, [type]}
           | {:var, String.t()}
   @type node_ :: {atom, meta, list}
-  @type decl :: {:def | :defmodel | :deftype | :defapp | :deftest, meta, nonempty_list}
+  @type decl ::
+          {:def | :defmodel | :deftype | :defapp | :deftest | :defroutes, meta, nonempty_list}
+
+  @typedoc "A route pattern's segment; the pattern `/` has none."
+  @type segment :: {:lit, String.t()} | {:param, String.t()}
+  @typedoc "One route of a `defroutes`: its pattern's segments and the app it opens."
+  @type route :: {[segment], String.t()}
 
   # {atom, symbol, precedence}, in `BinOp::ALL` order. Every operator is
   # left-associative.
@@ -50,7 +56,8 @@ defmodule Kinoko.Lang.Ast do
   def name({_kind, _meta, [name | _]}) when is_binary(name), do: name
 
   @node_kinds ~w(int str bool name list map tuple bin not neg call field construct update case
-                 if fn block always sometimes jsx annot def defmodel deftype defapp deftest)a
+                 if fn block always sometimes jsx annot def defmodel deftype defapp deftest
+                 defroutes)a
 
   @doc """
   `tree` with no `line:` or `col:` in any node's meta: what its CID names,

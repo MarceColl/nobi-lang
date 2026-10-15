@@ -77,11 +77,11 @@ defmodule Kinoko.Exec.StdlibTest do
       rows = Enum.map(YabuGolden.stdlib(), & &1["name"])
       sigs = Sigs.signatures()
 
-      for name <- rows, do: assert(match?({:def, _, _}, sigs[name]), name)
+      for name <- rows, do: assert(match?({:def, _, _, _}, sigs[name]), name)
 
       exempt? = &String.starts_with?(&1, ["Cmd.", "JSON.", "Tx.", "Map."])
 
-      for {name, {:def, _, _}} <- sigs,
+      for {name, {:def, _, _, _}} <- sigs,
           not exempt?.(name),
           do: assert(name in rows, "#{name}: a stdlib def without examples")
     end
@@ -170,7 +170,7 @@ defmodule Kinoko.Exec.StdlibTest do
       ]
 
       effect_rows =
-        for {"Cmd." <> _ = n, {:def, _, _}} <- Sigs.signatures(),
+        for {"Cmd." <> _ = n, {:def, _, _, _}} <- Sigs.signatures(),
             n not in ["Cmd.none", "Cmd.batch"],
             do: n
 

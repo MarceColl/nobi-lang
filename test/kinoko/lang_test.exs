@@ -170,7 +170,7 @@ defmodule Kinoko.LangTest do
       assert typed != nil
     end
 
-    assert {:def, [{:named, _} | _], _} = committed["Counter.update"].signature
+    assert {:def, [{:named, _} | _], _, ["msg", "model"]} = committed["Counter.update"].signature
   end
 
   # ---------- durable state, restore, prepare, snapshot ----------
@@ -424,7 +424,7 @@ defmodule Kinoko.LangTest do
   test "Format.signature renders each kind of signature" do
     alias Kinoko.Lang.Format
 
-    assert Format.signature("A.f", {:def, [{:named, "Int"}], {:named, "String"}}) ==
+    assert Format.signature("A.f", {:def, [{:named, "Int"}], {:named, "String"}, ["n"]}) ==
              "A.f(Int) : String"
 
     assert Format.signature("A.M", {:model, [{"n", {:named, "Int"}}]}) == "model {n : Int}"
@@ -434,5 +434,8 @@ defmodule Kinoko.LangTest do
 
     assert Format.signature("A", :app) == "app"
     assert Format.signature("A.t", :test) == "test"
+
+    assert Format.signature("R", {:routes, [{[], "A"}, {[{:lit, "p"}, {:param, "id"}], "B"}]}) ==
+             ~s(routes {"/" -> A, "/p/:id" -> B})
   end
 end

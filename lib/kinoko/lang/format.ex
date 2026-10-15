@@ -55,6 +55,15 @@ defmodule Kinoko.Lang.Format do
     "def #{name}(#{params(ps)}) : #{type(ret)} do\n#{block_lines(body, @indent)}\nend"
   end
 
+  def decl({:defroutes, _, [name, routes]}) do
+    lines =
+      Enum.map(routes, fn {segs, app} ->
+        "#{@indent}#{quote_str(route_pattern(segs))} -> #{app}\n"
+      end)
+
+    "defroutes #{name} do\n#{lines}end"
+  end
+
   def decl({:deftest, _, [name, body]}) do
     "deftest #{name} do\n#{block_lines(body, @indent)}\nend"
   end
@@ -73,11 +82,12 @@ defmodule Kinoko.Lang.Format do
   @doc """
   A signature (`Kinoko.Lang.Types.Extract.signature/1`) of the declaration
   `name`, as one line: a def as `Name(T1, T2) : Ret`; a model as
-  `model {f : T, ...}`; a type as `type Name<P> = V(T) | W`; apps and tests
+  `model {f : T, ...}`; a type as `type Name<P> = V(T) | W`; a route table as
+  `routes {"/" -> App, ...}`; apps and tests
   as `app` / `test`.
   """
   @spec signature(String.t(), term()) :: String.t()
-  def signature(name, {:def, params, ret}), do: "#{name}(#{types(params)}) : #{type(ret)}"
+  def signature(name, {:def, params, ret, _names}), do: "#{name}(#{types(params)}) : #{type(ret)}"
 
   def signature(_, {:model, fields}),
     do: "model {" <> Enum.map_join(fields, ", ", fn {f, t} -> "#{f} : #{type(t)}" end) <> "}"
@@ -92,8 +102,26 @@ defmodule Kinoko.Lang.Format do
       end)
   end
 
+  def signature(_, {:routes, routes}),
+    do:
+      "routes {" <>
+        Enum.map_join(routes, ", ", fn {segs, app} ->
+          "#{quote_str(route_pattern(segs))} -> #{app}"
+        end) <>
+        "}"
+
   def signature(_, :app), do: "app"
   def signature(_, :test), do: "test"
+
+  @doc "A route's segments as the pattern written: `[]` is `/`."
+  @spec route_pattern([Ast.segment()]) :: String.t()
+  def route_pattern(segs) do
+    "/" <>
+      Enum.map_join(segs, "/", fn
+        {:lit, s} -> s
+        {:param, n} -> ":" <> n
+      end)
+  end
 
   @spec pattern(term) :: String.t()
   def pattern(:wild), do: "_"

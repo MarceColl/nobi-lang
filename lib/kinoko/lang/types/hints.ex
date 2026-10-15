@@ -253,6 +253,10 @@ defmodule Kinoko.Lang.Types.Hints do
 
   def misuse_hint(found, :test), do: "`#{found}` is a test, not a value"
 
-  def misuse_hint(found, {:def, _, _}),
+  def misuse_hint(found, {:routes, _}),
+    do:
+      "`#{found}` is a route table — a deployment serves it; open one of its apps with `Cmd.navigate`"
+
+  def misuse_hint(found, {:def, _, _, _}),
     do: "`#{found}` is what you want — every name is fully qualified, so write `#{found}`"
 end

@@ -33,7 +33,7 @@ defmodule Kinoko.Exec.Show do
   @elided "…"
 
   # The stdlib def each of `Rt.Stdlib`'s functions is.
-  @stdlib for {name, {:def, _, _}} <- StdlibSigs.signatures(),
+  @stdlib for {name, {:def, _, _, _}} <- StdlibSigs.signatures(),
               {_, f, a} <- [Stdlib.function_for(name)],
               into: %{},
               do: {{f, a}, name}

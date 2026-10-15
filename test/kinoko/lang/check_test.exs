@@ -1420,7 +1420,7 @@ defmodule Kinoko.Lang.CheckTest do
     Map.put(
       Stdlib.signatures(),
       "Fake.make",
-      {:def, [{:var, "a"}], {:applied, "Map", [{:var, "a"}, @int]}}
+      {:def, [{:var, "a"}], {:applied, "Map", [{:var, "a"}, @int]}, ["x"]}
     )
   end
 

@@ -138,7 +138,7 @@ defmodule KinokoWeb.Mcp.Instructions do
   defp stdlib do
     defs =
       for name <- Stdlib.names(),
-          {:def, _, _} = sig <- [Stdlib.signature(name)],
+          {:def, _, _, _} = sig <- [Stdlib.signature(name)],
           Rt.function_for(name) != nil,
           do: "  " <> Format.signature(name, sig)
 

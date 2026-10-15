@@ -72,7 +72,7 @@ defmodule Kinoko.Lang.HintsTest do
   # another but for case, whole and by their last segment; that overrides a
   # stdlib name; and whose namespaces hold eight, nine and twelve names.
   defp mixed_table do
-    def_ = {:def, [], {:named, "Int"}}
+    def_ = {:def, [], {:named, "Int"}, []}
 
     defs =
       ~w(App.length Shop.item A.thing A.shop B.Thing C.THING List.map Cmd.Store.GET Ünï.cödé)

@@ -28,7 +28,7 @@ defmodule Kinoko.Lang.MapStdlibTest do
     test "every Map def is a stdlib name, provided by the language" do
       for name <- ~w(Map.get Map.put Map.delete Map.has_key Map.size Map.keys Map.values
                      Map.to_list Map.from_list) do
-        assert {:def, _, _} = Sigs.signature(name), name
+        assert {:def, _, _, _} = Sigs.signature(name), name
         assert Sigs.provided?(name), name
         assert name in Sigs.names(), name
         assert {Stdlib, _, _} = Stdlib.function_for(name), name

@@ -87,7 +87,7 @@ defmodule Kinoko.Lang.InferTest do
 
   describe "instantiate" do
     test "List.map's scheme gets distinct uvars each time" do
-      {:def, params, ret} = Map.fetch!(Stdlib.signatures(), "List.map")
+      {:def, params, ret, _names} = Map.fetch!(Stdlib.signatures(), "List.map")
       scheme = {:arrow, params, ret}
       {t1, st} = Infer.instantiate(Infer.new(), scheme)
       {t2, _st} = Infer.instantiate(st, scheme)

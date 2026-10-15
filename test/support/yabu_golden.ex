@@ -83,7 +83,7 @@ defmodule YabuGolden do
   @doc "A def's declared `{params, ret}`."
   def def_signature(sigs, name) do
     case Map.get(sigs, name) do
-      {:def, params, ret} -> {params, ret}
+      {:def, params, ret, _} -> {params, ret}
       other -> raise "`#{name}` is no def of the program: #{inspect(other)}"
     end
   end
@@ -259,7 +259,7 @@ defmodule YabuGolden do
 
       name when is_binary(name) ->
         case Map.get(sigs, name) do
-          {:def, _, _} -> {:def_ref, name}
+          {:def, _, _, _} -> {:def_ref, name}
           _ -> ctor(name, sigs)
         end
 

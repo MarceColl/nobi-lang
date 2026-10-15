@@ -35,7 +35,19 @@ defmodule Kinoko.Lang.Types.Check do
   """
 
   alias Kinoko.Lang.Ast
-  alias Kinoko.Lang.Types.{Exhaustive, Extract, Hints, Infer, JsxApp, Keys, Patterns, Quote}
+
+  alias Kinoko.Lang.Types.{
+    Exhaustive,
+    Extract,
+    Hints,
+    Infer,
+    JsxApp,
+    Keys,
+    Patterns,
+    Quote,
+    Routes
+  }
+
   alias Kinoko.Lang.Types.Check.{Ctx, Decl}
 
   import Kinoko.Lang.Types.Check.Tree,
@@ -275,7 +287,7 @@ defmodule Kinoko.Lang.Types.Check do
   # scheme variables are freshened.
   defp resolve_def(ctx, name) do
     case Ctx.dget(ctx, name) do
-      {{:def, params, ret}, ctx} ->
+      {{:def, params, ret, _names}, ctx} ->
         none = MapSet.new()
 
         {ps, {mapping, ctx}} =
@@ -479,6 +491,8 @@ defmodule Kinoko.Lang.Types.Check do
 
   # `name(args)`: the target must resolve to something callable with as
   # many arguments as are given, each checked against its parameter.
+  defp synth_call(ctx, {:call, _, ["Cmd.navigate", _]} = e), do: Routes.synth_navigate(ctx, e)
+
   defp synth_call(ctx, {:call, m, [name, args]} = e) do
     case resolve_name(ctx, name, true) do
       {nil, ctx} ->

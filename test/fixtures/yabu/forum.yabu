@@ -1,0 +1,125 @@
+defmodel Forum.Topic do
+  id : Uuid
+  title : String
+  replies : Int
+end
+
+defmodel Forum.Threads.Model do
+  topics : List<Forum.Topic>
+  filter : String
+end
+
+deftype Forum.Threads.Msg do
+  Filter(String) | Open(Uuid) | Settings
+end
+
+def Forum.Threads.init() : (Forum.Threads.Model, Cmd<Forum.Threads.Msg>) do
+  (%Forum.Threads.Model{topics: [], filter: ""}, Cmd.none())
+end
+
+def Forum.Threads.update(msg : Forum.Threads.Msg, model : Forum.Threads.Model) : (Forum.Threads.Model, Cmd<Forum.Threads.Msg>) do
+  case msg do
+    Forum.Threads.Msg.Filter(text) -> (%Forum.Threads.Model{model | filter: text}, Cmd.none())
+    Forum.Threads.Msg.Open(id) -> (model, Cmd.navigate(Forum.Post, id))
+    Forum.Threads.Msg.Settings -> (model, Cmd.navigate(Forum.Settings))
+  end
+end
+
+def Forum.Threads.view_topic(topic : Forum.Topic) : Html<Forum.Threads.Msg> do
+  <li class="flex justify-between py-2">
+    <button class="text-left font-medium hover:underline" on-click={Forum.Threads.Msg.Open(topic.id)}>{topic.title}</button>
+    <span class="text-sm text-gray-500">{topic.replies}</span>
+  </li>
+end
+
+def Forum.Threads.view(model : Forum.Threads.Model) : Html<Forum.Threads.Msg> do
+  shown = List.filter(model.topics, fn (topic : Forum.Topic) -> String.contains(topic.title, model.filter) end)
+  <main id="threads" class="mx-auto max-w-xl p-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold">Threads</h1>
+      <button id="open-settings" on-click={Forum.Threads.Msg.Settings}>Settings</button>
+    </header>
+    <input id="filter" placeholder="Filter" value={model.filter} on-change={Forum.Threads.Msg.Filter} />
+    <ul>{List.map(shown, Forum.Threads.view_topic)}</ul>
+  </main>
+end
+
+defapp Forum.Threads
+
+defmodel Forum.Post.Model do
+  post_id : Uuid
+  draft : String
+  replies : List<String>
+end
+
+deftype Forum.Post.Msg do
+  Draft(String) | Reply | Back
+end
+
+def Forum.Post.init(id : Uuid) : (Forum.Post.Model, Cmd<Forum.Post.Msg>) do
+  (%Forum.Post.Model{post_id: id, draft: "", replies: []}, Cmd.none())
+end
+
+def Forum.Post.update(msg : Forum.Post.Msg, model : Forum.Post.Model) : (Forum.Post.Model, Cmd<Forum.Post.Msg>) do
+  case msg do
+    Forum.Post.Msg.Draft(text) -> (%Forum.Post.Model{model | draft: text}, Cmd.none())
+    Forum.Post.Msg.Reply ->
+      if model.draft == "" do
+        (model, Cmd.none())
+      else
+        (%Forum.Post.Model{model | replies: List.append(model.replies, model.draft), draft: ""}, Cmd.none())
+      end
+    Forum.Post.Msg.Back -> (model, Cmd.navigate(Forum.Threads))
+  end
+end
+
+def Forum.Post.view(model : Forum.Post.Model) : Html<Forum.Post.Msg> do
+  <main id="post" data-post={model.post_id} class="mx-auto max-w-xl p-6">
+    <button id="back" on-click={Forum.Post.Msg.Back}>All threads</button>
+    <h1 class="text-xl font-bold">Post</h1>
+    <ul>{List.map(model.replies, fn (reply : String) -> <li class="py-1">{reply}</li> end)}</ul>
+    <input id="draft" value={model.draft} on-change={Forum.Post.Msg.Draft} />
+    <button id="reply" on-click={Forum.Post.Msg.Reply}>Reply</button>
+  </main>
+end
+
+defapp Forum.Post
+
+defmodel Forum.Settings.Model do
+  name : String
+  saved : Bool
+end
+
+deftype Forum.Settings.Msg do
+  Name(String) | Save | Done
+end
+
+def Forum.Settings.init() : (Forum.Settings.Model, Cmd<Forum.Settings.Msg>) do
+  (%Forum.Settings.Model{name: "", saved: false}, Cmd.none())
+end
+
+def Forum.Settings.update(msg : Forum.Settings.Msg, model : Forum.Settings.Model) : (Forum.Settings.Model, Cmd<Forum.Settings.Msg>) do
+  case msg do
+    Forum.Settings.Msg.Name(text) -> (%Forum.Settings.Model{model | name: text, saved: false}, Cmd.none())
+    Forum.Settings.Msg.Save -> (%Forum.Settings.Model{model | saved: true}, Cmd.none())
+    Forum.Settings.Msg.Done -> (model, Cmd.navigate(Forum.Threads))
+  end
+end
+
+def Forum.Settings.view(model : Forum.Settings.Model) : Html<Forum.Settings.Msg> do
+  <main id="settings" class="mx-auto max-w-xl p-6">
+    <h1 class="text-2xl font-bold">Settings</h1>
+    <input id="name" placeholder="Display name" value={model.name} on-change={Forum.Settings.Msg.Name} />
+    <button id="save" on-click={Forum.Settings.Msg.Save}>Save</button>
+    <span id="saved">{if model.saved do "Saved" else "" end}</span>
+    <button id="done" on-click={Forum.Settings.Msg.Done}>Done</button>
+  </main>
+end
+
+defapp Forum.Settings
+
+defroutes Forum do
+  "/" -> Forum.Threads
+  "/post/:id" -> Forum.Post
+  "/settings" -> Forum.Settings
+end
