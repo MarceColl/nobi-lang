@@ -17,7 +17,12 @@ defmodule Kinoko.Lang.Codegen do
   - `__yabu__/1` answers `names` (`%{def => {fun, arity}}`), `tests`
     (`%{test => fun}`), `image` (the hash), `models`
     (`%{model => [{field, type}]}`, declaration order: what JSON needs) and
-    `types` (`%{deftype => {params, [{variant, [type]}]}}`).
+    `types` (`%{deftype => {params, [{variant, [type]}]}}`) and `routes`
+    (`%{routes_name => [%{segments, app, params}]}`, declaration order, the
+    first match wins): `segments` are `{:lit, s} | {:param, name}`, `params`
+    is the target app's `init` parameters in order as `{name, type_name}`
+    (`"Int" | "String" | "Uuid"`), read from the committed signatures. Match
+    a path with `Kinoko.Lang.Routes`.
 
   Calls between defs are local calls, so a module is one consistent
   snapshot. A def used as a value is the external fun `fun Mod:dN/K`, the
@@ -114,6 +119,12 @@ defmodule Kinoko.Lang.Codegen do
           {name, %{signature: {:type, params, variants}}} <- committed,
           into: %{},
           do: {name, {params, variants}}
+        ),
+      routes:
+        for(
+          {name, %{signature: {:routes, routes}}} <- committed,
+          into: %{},
+          do: {name, Enum.map(routes, &route_entry(&1, committed))}
         )
     }
 
@@ -124,6 +135,21 @@ defmodule Kinoko.Lang.Codegen do
       ] ++ functions ++ [yabu(meta), {:eof, @a}]
 
     {module, forms, names, tests}
+  end
+
+  # A route with its target's init parameters (the image typechecks, so the
+  # target and its init exist; a missing one yields no params).
+  defp route_entry({segments, app}, committed) do
+    params =
+      case Map.get(committed, app <> ".init") do
+        %{signature: {:def, types, _, names}} ->
+          for {n, {:named, t}} <- Enum.zip(names, types), do: {n, t}
+
+        _ ->
+          []
+      end
+
+    %{segments: segments, app: app, params: params}
   end
 
   # Counted before any `dN` atom is made: every image reuses `d0`, `d1`, …,
@@ -156,7 +182,7 @@ defmodule Kinoko.Lang.Codegen do
 
   defp yabu(meta) do
     clauses =
-      for key <- [:names, :tests, :image, :models, :types] do
+      for key <- [:names, :tests, :image, :models, :types, :routes] do
         {:clause, @a, [Expr.lit(key)], [], [Expr.lit(Map.fetch!(meta, key))]}
       end
 

@@ -18,6 +18,11 @@ defmodule Kinoko.Lang.Rt do
   | function | Erlang fun |
   | Cmd | `{:cmd, :none}`, `{:cmd, {:batch, [bare]}}`, `{:cmd, {:effect, name, model \\| nil, [args]}}` |
 
+  `Cmd.navigate(App, args…)` is `{:cmd, {:effect, "Cmd.navigate", nil,
+  [app | args]}}`: the target app's name (a binary) followed by `init`'s
+  arguments positionally. The host turns it into a URL with
+  `Kinoko.Lang.Routes.path/3`.
+
   A batch holds its commands *bare*: `:none`, `{:batch, _}` or
   `{:effect, ...}`, never re-wrapped in `{:cmd, _}`.
 

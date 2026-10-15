@@ -95,7 +95,7 @@ defmodule Kinoko.Lang.CodegenTest do
     @allowed ~w(attribute module export function clause call remote var atom integer
                 string bin bin_element default utf8 integer tuple cons nil map
                 map_field_assoc match case fun clauses block op andalso orelse not
-                eof true false rec uuid cmd none batch effect names image models types tests
+                eof true false rec uuid cmd none batch effect names image models types routes tests segments app params lit param
                 _ - =:= =/= < > =< >= named applied arrow maps from_list)a
 
     test "no atom in the forms comes from user text" do
