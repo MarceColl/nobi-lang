@@ -17,7 +17,8 @@ defmodule Kinoko.Lang.Universe do
 
   What a check says is kept as a check against the database's lookup words
   it; what an unbound name says is worded again from the whole signature
-  table (`sigs`: the stdlib's and committed code's, the patch over them),
+  table (`signatures/1`: the stdlib's and committed code's, the patch over
+  them),
   built once per staging that needs it (`Kinoko.Lang.Types.Hints.reword/2`).
   So a failing declaration is checked once, through the database, never
   again for its messages.
@@ -77,6 +78,9 @@ defmodule Kinoko.Lang.Universe do
             staged: %{},
             given: %{},
             order: [],
+            # Committed code's signatures only: the stdlib is read live
+            # (`signatures/1`), so a universe built before an upgrade sees
+            # the stdlib as it is now.
             sigs: %{},
             salsa: nil,
             cas: MapSet.new(),
@@ -105,7 +109,7 @@ defmodule Kinoko.Lang.Universe do
 
   @doc "An empty universe: nothing committed, staged or promoted."
   @spec new() :: t()
-  def new, do: %__MODULE__{sigs: Stdlib.signatures(), salsa: Salsa.new(Db)}
+  def new, do: %__MODULE__{salsa: Salsa.new(Db)}
 
   @doc "Every promoted round, oldest first. Only ever appended to."
   @spec history(t()) :: [round]
@@ -126,9 +130,13 @@ defmodule Kinoko.Lang.Universe do
   @spec degraded(t()) :: [reason] | nil
   def degraded(%__MODULE__{degraded: degraded}), do: degraded
 
-  @doc "The stdlib's signatures and committed code's."
+  @doc """
+  The stdlib's signatures and committed code's. The stdlib's are the live
+  table's: no committed name is in a stdlib namespace (they are reserved),
+  so the stdlib's rows replace only stale copies of themselves.
+  """
   @spec signatures(t()) :: map()
-  def signatures(%__MODULE__{sigs: sigs}), do: sigs
+  def signatures(%__MODULE__{sigs: sigs}), do: Map.merge(sigs, Stdlib.signatures())
 
   @doc """
   What storage keeps (see "Shapes"): history and each staged patch's names
@@ -532,20 +540,14 @@ defmodule Kinoko.Lang.Universe do
     {u, checks}
   end
 
-  # Remove `name` from committed code: the stdlib's signature of it is what
-  # is left, if the stdlib has one.
+  # Remove `name` from committed code (the stdlib's signature of it, if
+  # any, is `signatures/1`'s).
   defp apply_entry({:gone, name}, {u, checks}) do
-    sigs =
-      case Stdlib.signature(name) do
-        nil -> Map.delete(u.sigs, name)
-        sig -> Map.put(u.sigs, name, sig)
-      end
-
     u = %{
       u
       | committed: Map.delete(u.committed, name),
         salsa: Salsa.unset(u.salsa, :committed, {:name, name}),
-        sigs: sigs
+        sigs: Map.delete(u.sigs, name)
     }
 
     {u, checks}
@@ -610,7 +612,7 @@ defmodule Kinoko.Lang.Universe do
       # when one of them has an unbound name to word.
       table =
         if Enum.any?(broken, fn {_, errors} -> Enum.any?(errors, & &1.unbound) end),
-          do: Hints.table(over(u.sigs, changes))
+          do: Hints.table(over(signatures(u), changes))
 
       reasons =
         Enum.flat_map(broken, fn

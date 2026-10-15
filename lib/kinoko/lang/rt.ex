@@ -214,8 +214,8 @@ defmodule Kinoko.Lang.Rt do
   @doc """
   A map's entries in Yabu key order (`compare/2`). All-Int and all-String
   keys order the same in Yabu and in Erlang's term order, so a plain sort
-  serves (native, uncharged: each key was charged when inserted); only
-  other keys take the charged comparator.
+  serves (native and uncharged, bounded by the key's size); only other
+  keys take the charged comparator.
   """
   def sorted_entries(map) when is_map(map) do
     pairs = Map.to_list(map)

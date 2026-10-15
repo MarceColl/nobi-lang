@@ -1411,4 +1411,14 @@ defmodule Kinoko.Lang.UniverseTest do
 
     assert Universe.replay(rounds) == %{"M.b" => "3"}
   end
+
+  # A universe built before an upgrade holds a stale copy of the stdlib (or
+  # none of it): it still checks against the stdlib as it is now.
+  test "a universe whose table lacks a stdlib row reads the live stdlib" do
+    stale = %{Universe.new() | sigs: Map.delete(Stdlib.signatures(), "Map.size")}
+
+    assert {:ok, _, {:named, "Int"}} = Kinoko.Lang.check_expr(stale, "Map.size(%{1 => 2})")
+    assert Universe.signatures(stale)["Map.size"] == Stdlib.signature("Map.size")
+    assert Universe.signatures(Universe.new()) == Stdlib.signatures()
+  end
 end
