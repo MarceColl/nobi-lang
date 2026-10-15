@@ -329,6 +329,7 @@ defmodule KinokoWeb.McpTest do
     end
 
     test "the universe argument defaults to main", %{conn: conn} do
+      stop_on_exit("main")
       {_text, false} = call(conn, "symbols", %{})
       {_text, false} = call(conn, "eval", %{"expression" => "1 + 1"})
     end

@@ -16,6 +16,27 @@ defmodule Kinoko.UniverseHelpers do
     name
   end
 
+  @doc """
+  Stops, when the test exits, every universe's CodeDb running then: any
+  key under `"universe:"` in `Kinoko.Elm.Registry`, whoever started it (a
+  test that reaches `"main"` through a default argument included). Run for
+  every sync `Kinoko.DataCase` / `KinokoWeb.ConnCase` test; it runs before
+  the sandbox owner stops, so no CodeDb outlives its test's data.
+  """
+  def stop_universes_on_exit, do: on_exit(&stop_all/0)
+
+  @doc "Stops every running universe's CodeDb for good."
+  def stop_all do
+    for {key, pid} <- running(), String.starts_with?(key, "universe:") do
+      DynamicSupervisor.terminate_child(Kinoko.Elm.Supervisor, pid)
+    end
+
+    :ok
+  end
+
+  defp running,
+    do: Registry.select(Kinoko.Elm.Registry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+
   @doc "Stops the CodeDb of `name` (if running) when the test exits."
   def stop_on_exit(name), do: on_exit(fn -> stop(name) end)
 

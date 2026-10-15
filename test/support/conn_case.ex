@@ -33,6 +33,7 @@ defmodule KinokoWeb.ConnCase do
 
   setup tags do
     Kinoko.DataCase.setup_sandbox(tags)
+    unless tags[:async], do: Kinoko.UniverseHelpers.stop_universes_on_exit()
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

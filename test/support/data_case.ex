@@ -32,6 +32,13 @@ defmodule Kinoko.DataCase do
     :ok
   end
 
+  # Sync tests may reach a universe (some only through a default name, such
+  # as "main"); none of its CodeDbs may outlive the test.
+  setup tags do
+    unless tags[:async], do: Kinoko.UniverseHelpers.stop_universes_on_exit()
+    :ok
+  end
+
   @doc """
   Sets up the sandbox based on the test tags.
   """
