@@ -36,3 +36,7 @@ config :phoenix, :plug_init_mode, :runtime
 # Enable helpful, but potentially expensive runtime checks
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
+
+# The SQL sandbox owns DB connections in test, so the boot-time
+# Universe.Registry.ensure_main task is skipped; tests call it explicitly.
+config :kinoko, :ensure_main_at_boot, false
