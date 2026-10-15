@@ -47,7 +47,7 @@ defmodule Kinoko.ElmGenServerTest do
 
       pid = start(req: [plug: plug])
       first = Task.async(fn -> ElmGenServer.call(pid, :fetch) end)
-      assert_receive {:request_started, request}
+      assert_receive {:request_started, request}, 2_000
 
       # The server keeps serving while the request is in flight.
       second = Task.async(fn -> ElmGenServer.call(pid, :fetch) end)
