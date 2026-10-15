@@ -28,6 +28,7 @@
   - **Merge** stages one universe's committed code into another as a patch; conflicts come back as reasons.
   - `Kinoko.Universe` is the system's interface to universes: list, create, stage, read, eval, call, test. It is the only thing callers use.
   - The in-memory value is `Kinoko.Lang.Universe`, which is internal.
+  - **Degraded**: a universe whose committed code no longer typechecks when it boots (the checker changed under stored code). It opens anyway, with committed code kept as stored and the failing symbols and reasons recorded: reading, staging and unstaging work, but nothing runs (`eval`, `call` and `test` answer `degraded`) until a patch that makes the whole image typecheck promotes. `Kinoko.Universe.health/1` (MCP `health`, `Y.health()`) reports it. Only type errors degrade; corrupt storage (a CAS row missing, text that does not parse) still refuses to boot.
 - **CodeDb**: the process that keeps one universe alive (`Kinoko.CodeDb`, a PersistentElmGenServer). It serializes check, promote and persist for that universe.
   - It is an implementation detail of `Kinoko.Universe`, which starts it on demand when a universe isn't running and routes to it.
   - Its `update/2` just applies `Kinoko.Lang` to the universe it holds.

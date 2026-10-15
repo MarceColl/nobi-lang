@@ -180,7 +180,8 @@ defmodule Kinoko.PersistentElmGenServer do
   `durable/1` is `Kinoko.Lang.durable/1` (commits and staged patches as
   names and CIDs, no text), and its `decode/1` fetches the declarations by
   CID from the CAS and rebuilds the universe with `Kinoko.Lang.restore/3`,
-  which checks the code again on every boot.
+  which checks the code again on every boot (code that no longer
+  typechecks boots degraded; only corrupt storage refuses).
   """
 
   use GenServer
