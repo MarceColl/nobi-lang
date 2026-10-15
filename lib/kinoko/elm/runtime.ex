@@ -38,6 +38,8 @@ defmodule Kinoko.Elm.Runtime do
     # effect id => {started_at_us, description}, until its msg comes back
     pending: %{},
     perform?: true,
+    # (state, seq -> any), called after each update and before its effects; nil = none
+    on_step: nil,
     # seq of the last recorded msg; init is 0
     seq: -1,
     # {seq, state} while time traveling
@@ -53,24 +55,29 @@ defmodule Kinoko.Elm.Runtime do
   `init_msg` is what the timeline shows for it. With `perform: false`, process
   effects are dropped and only host effects are returned — used for a LiveView's
   disconnected render, whose process is thrown away.
+
+  `on_step: fn state, seq -> ... end` is called with the live state after `init`
+  and every `update`, before that step's effects are performed. If it raises,
+  nothing is performed. Time travel does not affect it.
   """
   @spec init(module(), term(), (-> {term(), term()}), keyword()) :: {t(), host_effects()}
   def init(module, init_msg, init_fun, opts \\ []) do
     runtime = %__MODULE__{
       module: module,
       started_at: System.monotonic_time(:microsecond),
-      perform?: Keyword.get(opts, :perform, true)
+      perform?: Keyword.get(opts, :perform, true),
+      on_step: Keyword.get(opts, :on_step)
     }
 
     {state, effects} = expect_step!(module, :init, init_fun.())
-    runtime |> record_msg(init_msg, nil, state) |> perform(effects)
+    runtime |> record_msg(init_msg, nil, state) |> notify() |> perform(effects)
   end
 
   @doc "Routes `msg` through the module's `update/2`."
   @spec step(t(), term(), map() | nil) :: {t(), host_effects()}
   def step(%__MODULE__{module: module} = runtime, msg, origin \\ nil) do
     {state, effects} = expect_step!(module, :update, module.update(msg, runtime.state))
-    runtime |> record_msg(msg, origin, state) |> perform(effects)
+    runtime |> record_msg(msg, origin, state) |> notify() |> perform(effects)
   end
 
   @doc "Handles a raw process message."
@@ -141,6 +148,13 @@ defmodule Kinoko.Elm.Runtime do
     seq = runtime.seq + 1
     entry = %{kind: :msg, seq: seq, msg: msg, origin: origin, state: state}
     record(%{runtime | seq: seq, state: state}, entry)
+  end
+
+  defp notify(%__MODULE__{on_step: nil} = runtime), do: runtime
+
+  defp notify(%__MODULE__{on_step: hook} = runtime) do
+    hook.(runtime.state, runtime.seq)
+    runtime
   end
 
   defp record(runtime, entry) do
