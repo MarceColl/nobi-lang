@@ -6,21 +6,37 @@ defmodule Kinoko.PersistentElmGenServerTest do
   alias Kinoko.PersistentElmGenServer, as: Server
 
   alias Kinoko.{
+    PersistentCached,
     PersistentCounter,
     PersistentCounterUnmigrated,
     PersistentCounterV2,
-    PersistentPoison
+    PersistentPoison,
+    PersistentTraced
   }
 
   @moduletag :capture_log
 
   defp start(key, opts \\ []), do: start_supervised!({PersistentCounter, [key: key] ++ opts})
 
-  defp start_as(module, key), do: start_supervised!({module, key: key})
+  defp start_as(module, key, opts \\ []), do: start_supervised!({module, [key: key] ++ opts})
 
   defp stop(key), do: :ok = stop_supervised({PersistentCounter, key})
 
   defp seqs(key), do: key |> Store.history(1000) |> Enum.map(& &1.seq)
+
+  # Appends a row as if `module` had written `state` at `version`.
+  defp put_row(module, key, seq, version, state),
+    do: Store.append(key, seq, inspect(module), version, :erlang.term_to_binary(state))
+
+  defp counter_state(count), do: %{count: count, resumed: 0, notify: nil, extra: nil}
+
+  defp next_message do
+    receive do
+      msg -> msg
+    after
+      1000 -> flunk("no message")
+    end
+  end
 
   # start_supervised wraps a failed init as {:error, {{exception, stack}, child}}.
   defp boot_error!(module, key) do
@@ -87,10 +103,26 @@ defmodule Kinoko.PersistentElmGenServerTest do
   end
 
   test "the state is written before the step's effects run" do
-    start("c")
-    Server.cast("c", {:inc_then_send, self()})
-    assert_receive {:sent, 1}
-    assert {:ok, %{seq: 1}} = Store.latest("c")
+    start_as(PersistentTraced, "t", args: self())
+    assert next_message() == {:encoding, 0, 0}
+    assert next_message() == :init_ran
+
+    Server.cast("t", {:inc_then_send, self()})
+    assert next_message() == {:encoding, 1, 0}
+    assert next_message() == {:sent, 1}
+    assert {:ok, %{seq: 1}} = Store.latest("t")
+  end
+
+  test "on boot, the resumed state is written before resume's effects run" do
+    start_as(PersistentTraced, "t", args: self())
+    assert next_message() == {:encoding, 0, 0}
+    assert next_message() == :init_ran
+    :ok = stop_supervised({PersistentTraced, "t"})
+
+    start_as(PersistentTraced, "t", args: self())
+    assert next_message() == {:encoding, 0, 1}
+    assert next_message() == :resumed
+    assert seqs("t") == [1, 0]
   end
 
   test "keep: 3 prunes to the newest 3 rows" do
@@ -111,6 +143,46 @@ defmodule Kinoko.PersistentElmGenServerTest do
     assert length(seqs) == 100
   end
 
+  test "boot prunes to keep, so a crash-looping key stays bounded" do
+    for seq <- 0..9, do: put_row(PersistentCounter, "c", seq, 1, counter_state(seq))
+
+    start("c", keep: 3)
+    # pruned to 7..9 on boot, then resume writes seq 10
+    assert seqs("c") == [10, 9, 8, 7]
+    assert Server.call("c", :count) == 9
+  end
+
+  test "a failed prune logs a warning and the step's effects still run" do
+    Kinoko.Repo.query!("""
+    CREATE FUNCTION elm_states_refuse_delete() RETURNS trigger AS $$
+    BEGIN RAISE EXCEPTION 'prune refused'; END $$ LANGUAGE plpgsql
+    """)
+
+    Kinoko.Repo.query!("""
+    CREATE TRIGGER elm_states_refuse_delete BEFORE DELETE ON elm_states
+    FOR EACH ROW WHEN (OLD.key = 'pf') EXECUTE FUNCTION elm_states_refuse_delete()
+    """)
+
+    pid = start("pf", keep: 2)
+    # init + 2 incs = 3 appends; the prune after the 2nd had nothing to delete
+    Server.call("pf", :inc)
+    Server.call("pf", :inc)
+
+    {reply, log} =
+      ExUnit.CaptureLog.with_log(fn ->
+        # the 4th append prunes, which would delete 2 rows, and fails
+        Server.cast("pf", {:inc_then_send, self()})
+        assert_receive {:sent, 3}
+        Server.call("pf", :inc)
+      end)
+
+    assert reply == 4
+    assert log =~ ~s(could not prune "pf" to 2 rows)
+    assert log =~ "prune refused"
+    assert Server.whereis("pf") == pid
+    assert seqs("pf") == [4, 3, 2, 1, 0]
+  end
+
   test "resume runs on reboot and init does not" do
     start("c", args: [notify: self()])
     assert_receive :init_ran
@@ -124,9 +196,7 @@ defmodule Kinoko.PersistentElmGenServerTest do
   end
 
   test "a version bump calls migrate/2 with the stored version" do
-    start("c")
-    Server.call("c", :inc)
-    stop("c")
+    put_row(PersistentCounterV2, "c", 0, 1, %{count: 1})
 
     start_as(PersistentCounterV2, "c")
     assert %{count: 1, migrated_from: 1} = Server.call("c", :state)
@@ -134,13 +204,60 @@ defmodule Kinoko.PersistentElmGenServerTest do
   end
 
   test "the default migrate/2 refuses to boot, naming the versions" do
-    start("c")
-    stop("c")
+    put_row(PersistentCounterUnmigrated, "c", 0, 1, %{count: 1})
 
     message = boot_error!(PersistentCounterUnmigrated, "c")
     assert message =~ "Kinoko.PersistentCounterUnmigrated"
     assert message =~ "version 1"
     assert message =~ "migrate/2"
+  end
+
+  test "a state stored at a newer version than the module's says so" do
+    put_row(PersistentCounter, "c", 0, 5, counter_state(1))
+
+    message = boot_error!(PersistentCounter, "c")
+    assert message =~ "version 5"
+    assert message =~ "newer than its own version 1"
+    assert message =~ "rolled back"
+  end
+
+  test "a raise in migrate/2 fails boot with the key, seq and versions" do
+    # PersistentPoison (version 2) migrates only from version 1
+    put_row(PersistentPoison, "p", 4, 3, %{count: 1, poison: false})
+
+    message = boot_error!(PersistentPoison, "p")
+    assert message =~ ~s[could not migrate the state stored under "p" (seq 4)]
+    assert message =~ "from version 3 to version 2"
+  end
+
+  test "a key written by another module refuses to boot" do
+    start("c")
+    stop("c")
+
+    message = boot_error!(PersistentCounterV2, "c")
+    assert message =~ ~s("c" holds a state written by "Kinoko.PersistentCounter")
+    assert message =~ "not by Kinoko.PersistentCounterV2"
+    assert [%{module: "Kinoko.PersistentCounter"} | _] = Store.history("c")
+  end
+
+  test "only the durable projection is compared and stored" do
+    start_as(PersistentCached, "k")
+    Server.cast("k", :inc)
+    assert %{count: 1} = Server.call("k", :state)
+    assert seqs("k") == [1, 0]
+
+    Server.cast("k", {:put_cache, :warm})
+    assert %{cache: :warm} = Server.call("k", :state)
+    assert seqs("k") == [1, 0]
+
+    assert {:ok, %{state: stored}} = Store.latest("k")
+    assert :erlang.binary_to_term(stored) == %{count: 1}
+
+    :ok = stop_supervised({PersistentCached, "k"})
+    start_as(PersistentCached, "k")
+    assert Server.call("k", :state) == %{count: 1, cache: {:rebuilt, 1}}
+    # the rebuilt state's projection equals the stored one: no write on boot
+    assert seqs("k") == [1, 0]
   end
 
   test "a duplicate key gives :already_started and writes nothing" do
@@ -157,7 +274,14 @@ defmodule Kinoko.PersistentElmGenServerTest do
     # term_to_binary of an atom, built by hand so the atom is never created:
     # 131 = version, 119 = SMALL_ATOM_UTF8_EXT, then length and name
     name = "kinoko_persistent_test_no_such_atom"
-    Store.append("c", 0, 1, <<131, 119, byte_size(name), name::binary>>)
+
+    Store.append(
+      "c",
+      0,
+      "Kinoko.PersistentCounter",
+      1,
+      <<131, 119, byte_size(name), name::binary>>
+    )
 
     message = boot_error!(PersistentCounter, "c")
     assert message =~ ~s(could not decode the state stored under "c")
@@ -212,12 +336,45 @@ defmodule Kinoko.PersistentElmGenServerTest do
 
   # Review Focus 5
   test "a migrated state that fails encode crashes boot with a clear error" do
-    Store.append("p", 0, 1, :erlang.term_to_binary(%{count: 3, poison: true}))
+    put_row(PersistentPoison, "p", 0, 1, %{count: 3, poison: true})
 
     message = boot_error!(PersistentPoison, "p")
     assert message =~ "Kinoko.PersistentPoison.encode/1"
     assert message =~ "store is down"
     assert [%{seq: 0, version: 1}] = Store.history("p")
+  end
+
+  test "start/3 runs the server under Kinoko.Elm.Supervisor, which restarts it" do
+    on_exit(fn ->
+      if pid = Server.whereis("sup"),
+        do: DynamicSupervisor.terminate_child(Kinoko.Elm.Supervisor, pid)
+    end)
+
+    assert {:ok, pid} = Server.start(PersistentCounter, [], key: "sup")
+    assert {:error, {:already_started, ^pid}} = Server.start(PersistentCounter, [], key: "sup")
+    assert {:undefined, pid, :worker, [Kinoko.PersistentElmGenServer]} in children()
+
+    Server.call("sup", :inc)
+    Server.call("sup", :inc)
+    Process.exit(pid, :kill)
+
+    new_pid = await_restart("sup", pid)
+    assert {:undefined, new_pid, :worker, [Kinoko.PersistentElmGenServer]} in children()
+    assert Server.call("sup", :count) == 2
+    assert %{resumed: 1} = Server.call("sup", :state)
+
+    :ok = DynamicSupervisor.terminate_child(Kinoko.Elm.Supervisor, new_pid)
+  end
+
+  defp children, do: DynamicSupervisor.which_children(Kinoko.Elm.Supervisor)
+
+  test "an unsupported host effect names PersistentElmGenServer" do
+    pid = start("c")
+    ref = Process.monitor(pid)
+    Server.cast("c", {:effect, Kinoko.Elm.Effect.navigate("/x")})
+
+    assert_receive {:DOWN, ^ref, :process, ^pid, {%ArgumentError{message: message}, _}}
+    assert message == ~s({:navigate, "/x"} is not supported in a PersistentElmGenServer)
   end
 
   test "whereis/1 resolves a key, nil when nothing runs" do

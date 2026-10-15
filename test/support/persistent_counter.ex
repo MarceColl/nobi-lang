@@ -39,6 +39,7 @@ defmodule Kinoko.PersistentCounter do
   def update(:inc, s), do: {%{s | count: s.count + 1}, Fx.none()}
   def update(:noop, s), do: {s, Fx.none()}
   def update({:put_extra, extra}, s), do: {%{s | extra: extra}, Fx.none()}
+  def update({:effect, effect}, s), do: {s, effect}
 
   def update({:inc_then_send, pid}, s) do
     s = %{s | count: s.count + 1}

@@ -11,6 +11,13 @@ defmodule Kinoko.Application do
       KinokoWeb.Telemetry,
       Kinoko.Repo,
       {Registry, keys: :unique, name: Kinoko.Elm.Registry},
+      # Home of PersistentElmGenServer.start/3. Those servers read Postgres on
+      # boot, so during a DB outage they crash and fail to restart in a loop.
+      # The tolerant intensity keeps that loop inside this supervisor instead
+      # of exhausting it (and then Kinoko.Supervisor, 3 restarts in 5 s) and
+      # taking the whole application down.
+      {DynamicSupervisor,
+       name: Kinoko.Elm.Supervisor, strategy: :one_for_one, max_restarts: 1_000, max_seconds: 60},
       {DNSCluster, query: Application.get_env(:kinoko, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Kinoko.PubSub},
       # Start a worker by calling: Kinoko.Worker.start_link(arg)

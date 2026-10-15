@@ -3,7 +3,9 @@ defmodule Kinoko.Elm.Store do
   Append-only persistence of Elm-style server state snapshots.
 
   Rows are keyed by `(key, seq)` and never updated; `prune/2` is the only
-  delete. State is an opaque binary (maps out, binaries in).
+  delete. State is an opaque binary (maps out, binaries in). Each row also
+  carries the name of the module that wrote it, as a string (it is never
+  turned back into an atom).
   """
 
   import Ecto.Query
@@ -11,24 +13,32 @@ defmodule Kinoko.Elm.Store do
   alias Kinoko.Repo
 
   @doc "Appends a snapshot. Raises on failure, including a duplicate `(key, seq)`."
-  @spec append(String.t(), non_neg_integer(), pos_integer(), binary()) :: :ok
-  def append(key, seq, version, state) when is_binary(state) do
+  @spec append(String.t(), non_neg_integer(), String.t(), pos_integer(), binary()) :: :ok
+  def append(key, seq, module, version, state) when is_binary(module) and is_binary(state) do
     Repo.insert_all("elm_states", [
-      %{key: key, seq: seq, version: version, state: state, inserted_at: DateTime.utc_now()}
+      %{
+        key: key,
+        seq: seq,
+        module: module,
+        version: version,
+        state: state,
+        inserted_at: DateTime.utc_now()
+      }
     ])
 
     :ok
   end
 
   @spec latest(String.t()) ::
-          {:ok, %{seq: integer(), version: integer(), state: binary()}} | :none
+          {:ok, %{seq: integer(), module: String.t(), version: integer(), state: binary()}}
+          | :none
   def latest(key) do
     query =
       from s in "elm_states",
         where: s.key == ^key,
         order_by: [desc: s.seq],
         limit: 1,
-        select: %{seq: s.seq, version: s.version, state: s.state}
+        select: %{seq: s.seq, module: s.module, version: s.version, state: s.state}
 
     case Repo.one(query) do
       nil -> :none
@@ -44,7 +54,13 @@ defmodule Kinoko.Elm.Store do
         where: s.key == ^key,
         order_by: [desc: s.seq],
         limit: ^limit,
-        select: %{seq: s.seq, version: s.version, state: s.state, inserted_at: s.inserted_at}
+        select: %{
+          seq: s.seq,
+          module: s.module,
+          version: s.version,
+          state: s.state,
+          inserted_at: s.inserted_at
+        }
     )
   end
 
