@@ -40,6 +40,14 @@ defmodule KinokoWeb.ElmLiveView do
     * `params: true` — route `handle_params` to `update/2`
     * `debug: true` — assign `@elm_debug` and enable time travel; render it
       with `<KinokoWeb.ElmLiveView.debugger debug={@elm_debug} />`
+    * `inline_mount: true` — async effects issued while mounting (by `init`
+      and, with `params: true`, the first `handle_params`) run inline, in
+      both renders (`Kinoko.Elm.Runtime.init/4`'s `:inline`, at most
+      32 of them): the static render then holds what the
+      first steps fetch, and the connected render starts from the same
+      state instead of flashing an empty one. Process effects keep their
+      usual treatment (dropped in the static render). After mounting, async
+      effects run in their own process as usual.
 
   ## Time travel
 
@@ -56,6 +64,8 @@ defmodule KinokoWeb.ElmLiveView do
 
   alias Kinoko.Elm.{Effect, Runtime, Timeline}
 
+  @inline_budget 32
+
   @callback init(params :: map() | atom(), session :: map()) ::
               {model :: term(), Effect.effects()}
   @callback update(msg :: term(), model :: term()) :: {model :: term(), Effect.effects()}
@@ -64,6 +74,7 @@ defmodule KinokoWeb.ElmLiveView do
   defmacro __using__(opts) do
     params? = Keyword.get(opts, :params, false)
     debug? = Keyword.get(opts, :debug, false)
+    inline? = Keyword.get(opts, :inline_mount, false)
 
     quote do
       use KinokoWeb, :live_view
@@ -71,7 +82,12 @@ defmodule KinokoWeb.ElmLiveView do
 
       @impl Phoenix.LiveView
       def mount(params, session, socket),
-        do: KinokoWeb.ElmLiveView.__mount__(__MODULE__, params, session, socket, unquote(debug?))
+        do:
+          KinokoWeb.ElmLiveView.__mount__(__MODULE__, params, session, socket,
+            debug: unquote(debug?),
+            inline: unquote(inline?),
+            params: unquote(params?)
+          )
 
       @impl Phoenix.LiveView
       def handle_event(event, params, socket),
@@ -83,7 +99,7 @@ defmodule KinokoWeb.ElmLiveView do
       if unquote(params?) do
         @impl Phoenix.LiveView
         def handle_params(params, uri, socket),
-          do: KinokoWeb.ElmLiveView.__step__({:params, params, uri}, socket)
+          do: KinokoWeb.ElmLiveView.__params__(params, uri, socket)
       end
 
       @impl Phoenix.LiveView
@@ -92,14 +108,37 @@ defmodule KinokoWeb.ElmLiveView do
   end
 
   @doc false
-  def __mount__(module, params, session, socket, debug?) do
+  def __mount__(module, params, session, socket, opts) do
+    inline? = opts[:inline]
+
     {runtime, effects} =
       Runtime.init(module, {:init, params}, fn -> module.init(params, session) end,
-        perform: connected?(socket)
+        perform: connected?(socket),
+        inline: if(inline?, do: @inline_budget, else: 0)
       )
 
-    socket = put_private(socket, :elm_debug?, debug?)
+    # Without `params: true` there is no handle_params: mounting ends here.
+    inline_params? = inline? && opts[:params]
+    runtime = if inline_params?, do: runtime, else: Runtime.stop_inline(runtime)
+
+    socket =
+      socket
+      |> put_private(:elm_debug?, opts[:debug])
+      |> put_private(:elm_inline_params?, inline_params?)
+
     {:ok, apply_effects(put_runtime(socket, runtime), effects)}
+  end
+
+  @doc false
+  def __params__(params, uri, socket) do
+    {:noreply, socket} = __step__({:params, params, uri}, socket)
+
+    if socket.private.elm_inline_params? do
+      socket = put_private(socket, :elm_inline_params?, false)
+      {:noreply, put_private(socket, :elm, Runtime.stop_inline(socket.private.elm))}
+    else
+      {:noreply, socket}
+    end
   end
 
   @doc false

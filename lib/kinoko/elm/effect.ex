@@ -16,7 +16,8 @@ defmodule Kinoko.Elm.Effect do
 
   ## Commands — no response
 
-    * `reply/2`, `send_to/2`, `dispatch/1`, `after_ms/2`, `broadcast/3` — any host
+    * `reply/2`, `send_to/2`, `dispatch/1`, `after_ms/2`, `broadcast/3`,
+      `subscribe/3` — any host
     * `stop/1` — `Kinoko.ElmGenServer` only
     * `navigate/1`, `patch/1`, `redirect/1`, `push_event/2`, `flash/2` —
       `KinokoWeb.ElmLiveView` only
@@ -33,6 +34,7 @@ defmodule Kinoko.Elm.Effect do
           | {:reply, GenServer.from(), term()}
           | {:send, Process.dest() | :self, term()}
           | {:broadcast, atom(), String.t(), term()}
+          | {:subscribe, atom(), String.t(), term()}
           | {:after_ms, non_neg_integer(), term()}
           | {:stop, term()}
           | {:navigate, String.t()}
@@ -75,6 +77,15 @@ defmodule Kinoko.Elm.Effect do
   """
   def broadcast(pubsub, topic, msg) when is_atom(pubsub) and is_binary(topic),
     do: {:broadcast, pubsub, topic, msg}
+
+  @doc """
+  Subscribes the host process to `topic` of the `Phoenix.PubSub` named
+  `pubsub` (its broadcasts then arrive as msgs), then routes `then_msg`
+  back into `update/2` unless it is `nil`. A process effect: not performed
+  where process effects are dropped (a LiveView's static render).
+  """
+  def subscribe(pubsub, topic, then_msg \\ nil) when is_atom(pubsub) and is_binary(topic),
+    do: {:subscribe, pubsub, topic, then_msg}
 
   @doc "Routes `msg` back into `update/2` after the current update."
   def dispatch(msg), do: {:send, :self, msg}

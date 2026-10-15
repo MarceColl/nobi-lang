@@ -80,6 +80,14 @@ defmodule KinokoWeb.Router do
         match :*, "/#{prefix}", ReservedController, :not_found
         match :*, "/#{prefix}/*rest", ReservedController, :not_found
       end
+    end
+
+    pipeline :deployment do
+      plug KinokoWeb.DeploymentStatus
+    end
+
+    scope "/", KinokoWeb do
+      pipe_through [:browser, :deployment]
 
       live "/*path", DeploymentLive
     end

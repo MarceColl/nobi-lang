@@ -43,6 +43,8 @@ defmodule Kinoko.Elm.Runtime do
     on_step: nil,
     # seq of the last recorded msg; init is 0
     seq: -1,
+    # async effects left to run inline (see `init/4`'s `:inline`)
+    inline: 0,
     # {seq, state} while time traveling
     viewing: nil
   ]
@@ -66,6 +68,14 @@ defmodule Kinoko.Elm.Runtime do
   `fun.(state, seq, acc)` returns the next `acc`, which the runtime keeps for
   the following step. `Kinoko.PersistentElmGenServer` keeps its last written
   state and seq that way.
+
+  `inline: n` runs the next `n` async effects inline: the request is
+  executed in the caller and its msg stepped before `init`/`step` returns,
+  whether or not process effects are performed. A host uses it so a render
+  already holds what its first steps fetch (e.g. a LiveView's static
+  render, whose process is thrown away). Past `n`, async effects go back to
+  their normal treatment; `stop_inline/1` ends it early. `update/2` stays
+  pure either way: only where the effect runs changes.
   """
   @spec init(module(), term(), (-> {term(), term()}), keyword()) :: {t(), host_effects()}
   def init(module, init_msg, init_fun, opts \\ []) do
@@ -73,6 +83,7 @@ defmodule Kinoko.Elm.Runtime do
       module: module,
       started_at: System.monotonic_time(:microsecond),
       perform?: Keyword.get(opts, :perform, true),
+      inline: Keyword.get(opts, :inline, 0),
       on_step: Keyword.get(opts, :on_step)
     }
 
@@ -106,6 +117,10 @@ defmodule Kinoko.Elm.Runtime do
   end
 
   def info(runtime, msg), do: step(runtime, msg)
+
+  @doc "Stops running async effects inline (see `init/4`'s `:inline`)."
+  @spec stop_inline(t()) :: t()
+  def stop_inline(runtime), do: %{runtime | inline: 0}
 
   @doc "Timeline entries, oldest first. See `Kinoko.Elm.Timeline`."
   def timeline(runtime), do: :queue.to_list(runtime.timeline)
@@ -183,25 +198,38 @@ defmodule Kinoko.Elm.Runtime do
   ## process, and everything else is a non-blocking send.
 
   defp perform(runtime, effects) do
-    {runtime, host} =
+    {runtime, host, inline} =
       effects
       |> List.wrap()
       |> List.flatten()
-      |> Enum.reduce({runtime, []}, fn effect, {runtime, host} ->
+      |> Enum.reduce({runtime, [], []}, fn effect, {runtime, host, inline} ->
         id = runtime.next_id
         description = Timeline.describe(effect)
 
         runtime =
           record(%{runtime | next_id: id + 1}, %{kind: :effect, id: id, effect: description})
 
-        case dispatch(effect, id, runtime.perform?) do
-          :ok -> {runtime, host}
-          :pending -> {track(runtime, id, description), host}
-          :host -> {runtime, [effect | host]}
+        case effect do
+          {:async, request, to_msg} when runtime.inline > 0 ->
+            msg = to_msg.(execute(request))
+            {%{runtime | inline: runtime.inline - 1}, host, [{id, description, msg} | inline]}
+
+          _ ->
+            case dispatch(effect, id, runtime.perform?) do
+              :ok -> {runtime, host, inline}
+              :pending -> {track(runtime, id, description), host, inline}
+              :host -> {runtime, [effect | host], inline}
+            end
         end
       end)
 
-    {runtime, Enum.reverse(host)}
+    # Inline results are stepped after this step's effects, in order.
+    inline
+    |> Enum.reverse()
+    |> Enum.reduce({runtime, Enum.reverse(host)}, fn {id, description, msg}, {runtime, host} ->
+      {runtime, more} = step(runtime, msg, %{id: id, effect: description, took_us: 0})
+      {runtime, host ++ more}
+    end)
   end
 
   defp track(runtime, id, description) do
@@ -209,7 +237,7 @@ defmodule Kinoko.Elm.Runtime do
     %{runtime | pending: Map.put(runtime.pending, id, {started_at, description})}
   end
 
-  @process_effects [:async, :reply, :send, :after_ms, :broadcast]
+  @process_effects [:async, :reply, :send, :after_ms, :broadcast, :subscribe]
 
   defp dispatch(effect, _id, _perform? = false) when elem(effect, 0) in @process_effects, do: :ok
 
@@ -235,6 +263,18 @@ defmodule Kinoko.Elm.Runtime do
   defp dispatch({:broadcast, pubsub, topic, msg}, _id, true) do
     Phoenix.PubSub.broadcast(pubsub, topic, msg)
     :ok
+  end
+
+  # Subscribes this process (the host), then routes `msg` back, if any.
+  defp dispatch({:subscribe, pubsub, topic, msg}, id, true) do
+    :ok = Phoenix.PubSub.subscribe(pubsub, topic)
+
+    if msg == nil do
+      :ok
+    else
+      send(self(), {__MODULE__, id, msg})
+      :pending
+    end
   end
 
   defp dispatch({:after_ms, ms, msg}, id, true) do

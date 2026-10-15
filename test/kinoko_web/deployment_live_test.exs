@@ -65,14 +65,31 @@ defmodule KinokoWeb.DeploymentLiveTest do
     {view, html}
   end
 
+  # A miss answers 404, which `live/2` does not connect from (a browser
+  # does): such pages are checked on the static render.
+  defp static_404(conn, name, path) do
+    conn |> on_host(name) |> get(path) |> html_response(404) |> LazyHTML.from_document()
+  end
+
+  defp has?(doc, selector), do: LazyHTML.query(doc, selector) |> Enum.count() > 0
+
   defp text(view, selector) do
     view |> element(selector) |> render() |> LazyHTML.from_fragment() |> LazyHTML.text()
   end
 
-  defp click(view, id), do: render_click(view, "yabu", %{"click" => id})
+  # Yabu runs in steps off the LiveView process: an event returns before
+  # its step lands, so these wait until no step is in flight.
+  defp click(view, id) do
+    render_click(view, "yabu", %{"click" => id})
+    settled(view)
+  end
 
-  defp change(view, id, value),
-    do: render_change(view, "yabu", %{"_target" => ["yabu", id], "yabu" => %{id => value}})
+  defp change(view, id, value) do
+    render_change(view, "yabu", %{"_target" => ["yabu", id], "yabu" => %{id => value}})
+    settled(view)
+  end
+
+  defp settled(view), do: eventually(view, &(&1 =~ ~s(aria-busy="false")))
 
   # The handler id a rendered element carries.
   defp click_id(view, selector) do
@@ -98,15 +115,26 @@ defmodule KinokoWeb.DeploymentLiveTest do
     id
   end
 
-  # Commits reach the LiveView over PubSub; wait (bounded) until `check`
-  # holds for its render.
-  defp eventually(view, check, tries \\ 500) do
+  # Steps and commits land asynchronously; poll the render until `check`
+  # holds, for at most `ms`.
+  defp eventually(view, check, ms \\ 5_000),
+    do: eventually(view, check, System.monotonic_time(:millisecond) + ms, nil)
+
+  defp eventually(view, check, deadline, _last) do
     html = render(view)
 
     cond do
-      check.(html) -> html
-      tries == 0 -> flunk("never held; last render:\n#{html}")
-      true -> eventually(view, check, tries - 1)
+      check.(html) ->
+        html
+
+      System.monotonic_time(:millisecond) > deadline ->
+        flunk("never held; last render:\n#{html}")
+
+      true ->
+        receive do
+        after
+          2 -> eventually(view, check, deadline, html)
+        end
     end
   end
 
@@ -135,14 +163,13 @@ defmodule KinokoWeb.DeploymentLiveTest do
     end
 
     test "a bad param is a 404", %{conn: conn, u: u} do
-      {view, _html} = open(conn, u, "/post/notauuid")
-      assert has_element?(view, "#deployment-not-found")
-      refute has_element?(view, "#post")
+      doc = static_404(conn, u, "/post/notauuid")
+      assert has?(doc, "#deployment-not-found")
+      refute has?(doc, "#post")
     end
 
     test "an unknown path is a 404", %{conn: conn, u: u} do
-      {view, _html} = open(conn, u, "/nowhere")
-      assert has_element?(view, "#deployment-not-found")
+      assert conn |> static_404(u, "/nowhere") |> has?("#deployment-not-found")
     end
 
     test "a click and an input change update the model", %{conn: conn, u: u} do
@@ -159,11 +186,11 @@ defmodule KinokoWeb.DeploymentLiveTest do
       {view, _html} = open(conn, u, "/")
       click(view, click_id(view, "#open-settings"))
       assert_patch(view, "/settings")
-      assert has_element?(view, "#settings")
+      eventually(view, &(&1 =~ ~s(id="settings")))
 
       click(view, click_id(view, "#done"))
       assert_patch(view, "/")
-      assert has_element?(view, "#threads")
+      eventually(view, &(&1 =~ ~s(id="threads")))
     end
 
     test "Cmd.navigate with arguments builds the route's URL", %{conn: conn, u: u} do
@@ -172,21 +199,36 @@ defmodule KinokoWeb.DeploymentLiveTest do
 
       click(view, click_id(view, "#go"))
       assert_patch(view, "/post/#{@uuid}")
-      assert has_element?(view, ~s(#post[data-post="#{@uuid}"]))
+      eventually(view, &(&1 =~ ~s(data-post="#{@uuid}")))
+    end
+  end
+
+  describe "the static render's status" do
+    test "a served path is 200, a miss 404, with the page rendered", %{conn: conn} do
+      u = deploy(@forum, "Forum")
+      assert conn |> on_host(u) |> get("/") |> html_response(200) =~ ~s(id="threads")
+
+      html = conn |> on_host(u) |> get("/post/notauuid") |> html_response(404)
+      assert html =~ ~s(id="deployment-not-found")
+
+      html = %{conn | host: "nobody-here.localhost"} |> get("/") |> html_response(404)
+      assert html =~ ~s(id="no-deployment")
+
+      empty = fresh_universe("dl")
+      :ok = Deployment.create(empty, empty, "Main")
+      assert conn |> on_host(empty) |> get("/") |> html_response(404) =~ ~s(id="no-routes")
     end
   end
 
   describe "pages" do
     test "an unknown host gets the no-deployment page", %{conn: conn} do
-      {:ok, view, _html} = live(%{conn | host: "nobody-here.localhost"}, "/")
-      assert has_element?(view, "#no-deployment")
+      assert conn |> static_404("nobody-here", "/") |> has?("#no-deployment")
     end
 
     test "a deployment whose route table does not exist yet", %{conn: conn} do
       u = fresh_universe("dl")
       :ok = Deployment.create(u, u, "Main")
-      {view, _html} = open(conn, u, "/")
-      assert has_element?(view, "#no-routes")
+      assert conn |> static_404(u, "/") |> has?("#no-routes")
     end
 
     test "reserved prefixes never reach the catch-all", %{conn: conn} do
@@ -197,6 +239,11 @@ defmodule KinokoWeb.DeploymentLiveTest do
 
     test "/mcp still answers", %{conn: conn} do
       assert conn |> get("/mcp") |> response(405)
+    end
+
+    test "Kinoko's own pages live under /_", %{conn: conn} do
+      assert {:ok, _view, _html} = live(conn, "/_/elm")
+      assert {:ok, _view, _html} = live(conn, "/_/sim")
     end
   end
 
@@ -292,6 +339,26 @@ defmodule KinokoWeb.DeploymentLiveTest do
       assert has_element?(view, ~s(#name[value=""]))
     end
 
+    test "events while a step is in flight queue up: a double click is two updates", %{
+      conn: conn,
+      u: u
+    } do
+      {view, _html} = open(conn, u, "/")
+      inc = click_id(view, "#inc")
+      render_click(view, "yabu", %{"click" => inc})
+      render_click(view, "yabu", %{"click" => inc})
+      render_click(view, "yabu", %{"click" => inc})
+      eventually(view, &(&1 =~ ~s(<span id="count">3</span>)))
+    end
+
+    test "a step result that is not the one in flight is dropped", %{conn: conn, u: u} do
+      {view, _html} = open(conn, u, "/")
+      before = render(view)
+      send(view.pid, {:stepped, 999, {:ok, %{page: :not_found}}})
+      send(view.pid, {:yabu_callback, -1, {:ok, {:var, "Lab.Msg", "Inc", []}}})
+      assert render(view) == before
+    end
+
     test "an id from a stale render only means what the current render says", %{
       conn: conn,
       u: u
@@ -302,6 +369,53 @@ defmodule KinokoWeb.DeploymentLiveTest do
       # Re-rendering keeps ids for the same tree, so the old id is still Inc.
       click(view, inc)
       assert text(view, "#count") == "2"
+    end
+  end
+
+  # ---------- update is pure ----------
+
+  describe "update/2" do
+    alias KinokoWeb.DeploymentLive
+
+    defp following(head) do
+      {m, _} = DeploymentLive.init(%{}, %{})
+      d = %{name: "x", universe: "x", routes: "Main", commit: nil, hosts: []}
+      %{m | deployment: d, target: "x", head: head, subscribed?: true, page: :app}
+    end
+
+    test "a head that moved since opening is processed as a commit (subscribe race)" do
+      {m, fx} = DeploymentLive.update({:head, {:ok, 3}}, following(2))
+      assert m.head == 3 and m.inflight == 1 and m.queue == []
+      assert [{:async, {:task, _}, _}] = List.flatten([fx])
+
+      {m, fx} = DeploymentLive.update({:head, {:ok, 2}}, following(2))
+      assert m.inflight == nil and List.flatten([fx]) == []
+    end
+
+    test "msgs arriving during a step wait their turn, commits once" do
+      {m, _} = DeploymentLive.update({:committed, "x", %{commit: 3}}, following(2))
+      assert m.inflight == 1
+      {m, fx} = DeploymentLive.update({:committed, "x", %{commit: 4}}, m)
+      {m, _} = DeploymentLive.update({:committed, "x", %{commit: 5}}, m)
+      assert List.flatten([fx]) == [] and m.queue == [:commit]
+
+      # The step lands; the queued commit starts.
+      {m, fx} = DeploymentLive.update({:stepped, 1, {:ok, %{}}}, m)
+      assert m.inflight == 2 and m.queue == []
+      assert [{:async, {:task, _}, _}] = List.flatten([fx])
+    end
+
+    test "a crashed step shows a generic banner, never the crash" do
+      {m, _} = DeploymentLive.update({:committed, "x", %{commit: 3}}, following(2))
+
+      {m, _} =
+        ExUnit.CaptureLog.with_log(fn ->
+          DeploymentLive.update({:stepped, 1, {:error, {:secret, self()}}}, m)
+        end)
+        |> elem(0)
+
+      assert m.error.code == "internal"
+      refute m.error.message =~ "secret"
     end
   end
 

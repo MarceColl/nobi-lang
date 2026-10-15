@@ -407,6 +407,26 @@ defmodule Kinoko.Universe do
   end
 
   @doc """
+  The `Kinoko.PubSub` topic `subscribe/1` subscribes to, for a host that
+  subscribes through its own effect (`Kinoko.Elm.Effect.subscribe/3`).
+  Pure: the universe is not checked.
+  """
+  @spec topic(name) :: String.t()
+  def topic(universe) when is_binary(universe), do: CodeDb.topic(universe)
+
+  @doc """
+  The newest commit's number (`length(history(universe))`, 0 for none), or
+  an error.
+  """
+  @spec head(name) :: non_neg_integer() | error
+  def head(universe) do
+    case history(universe) do
+      history when is_list(history) -> length(history)
+      error -> error
+    end
+  end
+
+  @doc """
   A pinned view of the universe as of commit `commit` (1-based into
   `history/1`): `{:ok, at}`, an opaque `Kinoko.Universe.At` that `call/4`,
   `apply/4`, `eval/3`, `test/3`, `apps/1` and `routes/1` take in place of
