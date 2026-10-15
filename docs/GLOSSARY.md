@@ -22,11 +22,16 @@
 - **Commit**: one promotion. It records which patch ids promoted and what each did to each symbol (`live cid` or `gone`).
 - **History**: the append-only list of commits.
 - **Committed code**: history replayed, giving symbol → CID.
-- **Universe**: a named code state: history, committed code and staged patches. Branches are universes: `main`, `feature-x`.
+- **Universe**: a named code state: history and staged patches. Branches are universes: `main`, `feature-x`.
+  - A universe stores symbol → CID references only. The definitions live in the CAS.
   - **Fork** starts a universe from another's history.
   - **Merge** stages one universe's committed code into another as a patch; conflicts come back as reasons.
-  - In code, a universe is a pure value (`Kinoko.Lang.Universe`).
-- **CodeDb**: the process that owns one universe (`Kinoko.CodeDb`). It serializes every change, persists it, and is what the REPL and MCP talk to. Its `update/2` just applies `Kinoko.Lang` to the universe it holds.
+  - `Kinoko.Universe` is the system's interface to universes: list, create, stage, read, eval, call, test. It is the only thing callers use.
+  - The in-memory value is `Kinoko.Lang.Universe`, which is internal.
+- **CodeDb**: the process that keeps one universe alive (`Kinoko.CodeDb`, a PersistentElmGenServer). It serializes check, promote and persist for that universe.
+  - It is an implementation detail of `Kinoko.Universe`, which starts it on demand when a universe isn't running and routes to it.
+  - Its `update/2` just applies `Kinoko.Lang` to the universe it holds.
+- **CAS**: the content-addressed store, a global, append-only `declarations(cid, text)` table shared by every universe. It has no process: writes are concurrent and idempotent.
 - **Salsa / memo**: the incremental type-check cache inside a universe. It is derived and never persisted.
 
 ## Execution
@@ -47,7 +52,7 @@
 
 ## System
 
-- **MCP**: the protocol agents use to drive a CodeDb. The **REPL** (`Y.…` in iex) is the human front end to the same operations.
+- **MCP**: the protocol agents use to drive universes, through `Kinoko.Universe`. The **REPL** (`Y.…` in iex) is the human front end to the same operations.
 - **Deploy**: send a universe's code to a remote **endpoint** as source plus CIDs. The remote compares CIDs and rebuilds only what is new.
 - **Rollback**: load an older commit's image.
 - **Oracle / goldens**: the TS and Rust answers the port is tested against.

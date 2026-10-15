@@ -1,14 +1,14 @@
-# CodeDb, CAS and MCP — design (piece 3)
+# Universe, CodeDb, CAS and MCP — design (piece 3)
 
 Piece 3 of 7. It builds on piece 1 (`Kinoko.Lang`), piece 4 (`Kinoko.Exec`) and piece 2 (`PersistentElmGenServer`). Terms are defined in `docs/GLOSSARY.md`.
 
 ## Goal
 
-Universes become the system's single point of interaction. A named universe (`"main"` by default) is owned by one **CodeDb** process, persisted, and reached by the REPL and by agents over **MCP** through the same functions. Declaration text lives in a global, process-free **CAS**. A universe stores only symbol → CID.
+Universes become the system's single point of interaction. **`Kinoko.Universe`** is the interface: list, create, stage, read, eval, call and test any named universe (`"main"` by default). The REPL and agents over **MCP** use only it. Behind it, each running universe is kept alive by one **CodeDb** process, which Universe starts on demand and routes to. Declaration text lives in a global, process-free **CAS**. A universe stores only symbol → CID.
 
 ## Rules (from Marce, binding)
 
-- `Kinoko.CodeDb` is the only place anything interacts with a universe. `Kinoko.Lang` becomes internal (CodeDb's pure core). `Kinoko.Exec` takes images, not universes.
+- `Kinoko.Universe` is the only place anything interacts with a universe. CodeDb is its implementation detail. `Kinoko.Lang` becomes internal (CodeDb's pure core). `Kinoko.Exec` takes images, not universes.
 - A universe stores only symbol → CID references: commits and staged patches. Definitions live in the CAS.
 - The CAS is not serialized: plain functions over the Repo, callable from any process.
 - Every derived computation (type checks, signatures) goes through salsa.
@@ -25,11 +25,11 @@ Universes become the system's single point of interaction. A named universe (`"m
 
 ```
 REPL (Y.*) ──┐                 caller process                          CodeDb "main" (PersistentElmGenServer)
-MCP /mcp  ───┼─▶ CodeDb.stage(u, id, src):                             update({:stage, id, entries}, universe)
+MCP /mcp  ───┼─▶ Universe.stage(u, id, src):                           update({:stage, id, entries}, universe)
              │     parse → canonical text → cid   (pure)                 └─ Lang: salsa check + promote (pure)
              │     Cas.put(texts)                  (Repo, concurrent)   durable: %{commits, staged} (symbol→cid only)
              │     GenServer.call({:stage, id, [{sym, cid, decl}]})  ─▶  written before the reply (piece 2)
-             └─▶ CodeDb.eval(u, src):
+             └─▶ Universe.eval(u, src):
                    {sigs, committed} = call(:snapshot)  ─────────────▶  read-only call
                    check expr against sigs             (pure, caller)
                    Exec.load(committed) → image        (cached by image hash)
@@ -51,11 +51,27 @@ MCP /mcp  ───┼─▶ CodeDb.stage(u, id, src):                          
 - **`restore`** becomes `restore(commits, staged, decls)`, where `decls :: %{cid => decl}` is the parsed declarations for every CID referenced. It replays the commits, rebuilds committed code, then restages the staged patches in their original order. It returns `{:ok, u} | {:error, [reason]}`.
 - **`stage_entries(u, id, entries)`** stages already-parsed entries, `{:live, decl}` or `{:gone, symbol}`. The string-taking `Lang.stage/4` stays for internal tests only.
 - **`durable(u) :: %{commits: [commit], staged: [{id, [{symbol, cid | :gone}]}]}`**: the symbol → CID projection only. Staged patches keep their staging order.
-- The moduledoc states that `Kinoko.Lang` is internal and that callers use `Kinoko.CodeDb`.
+- The moduledoc states that `Kinoko.Lang` is internal and that callers use `Kinoko.Universe`.
 
-### `Kinoko.CodeDb` (new, `lib/kinoko/code_db.ex`, plus `code_db/server.ex`)
+### Universe registry (new table, behind `Kinoko.Universe`)
 
-- **Process:** a `PersistentElmGenServer` under `Kinoko.Elm.Supervisor`, keyed `"universe:" <> name`. It starts lazily on first use, through `whereis` or else `start/3`.
+- **Table:** `universes(name text primary key, parent text null, forked_at_commit integer null, created_at timestamptz not null default now())`. It answers "which universes exist", including ones that aren't running.
+- `parent` and `forked_at_commit` stay null until piece 6 (fork lineage).
+- Like the CAS, it has no process. Create is an insert, and two concurrent creates of one name give one `:ok` and one `{:error, :exists}`.
+- **Explicit creation:** `main` is created at application boot, idempotently. Any other name must be created first. Using an unknown name returns `{:error, :no_such_universe}`.
+
+### `Kinoko.Universe` (new, `lib/kinoko/universe.ex`): the interface
+
+A stateless module that routes. Callers never see processes or registries.
+
+- **Existence** is checked against the `universes` table, cached per call path as cheaply as possible, for example only when no CodeDb is running for the name.
+- **Writes** find the universe's CodeDb or start it, via `Kinoko.Elm.Registry` and `PersistentElmGenServer.start/3`, then call it.
+- **Reads** call the CodeDb.
+- **`eval`, `call` and `test`** take a snapshot from the CodeDb and run in the caller.
+
+### `Kinoko.CodeDb` (new, `lib/kinoko/code_db.ex`): the process
+
+- **Process:** a `PersistentElmGenServer` under `Kinoko.Elm.Supervisor`, keyed `"universe:" <> name`. Only `Kinoko.Universe` starts it or talks to it.
 - **`durable/1` = `Lang.durable/1`.**
   - `encode` is `term_to_binary(durable, compressed: 6)`.
   - `decode` uses `binary_to_term(.., [:safe])`, collects every CID referenced, calls `Cas.get`, parses each text, and calls `Lang.restore`. A missing CID or a parse failure raises with the CID, so the boot refuses.
@@ -65,21 +81,25 @@ MCP /mcp  ───┼─▶ CodeDb.stage(u, id, src):                          
   - read requests: `:symbols`, `{:read, symbol}`, `:staged`, `:history`, `:snapshot`.
 
   `:snapshot` returns `%{committed: %{symbol => %{cid, typed, signature}}, signatures: sigs}`, everything a caller needs to type-check an expression and build an image.
-- **Public API.** Every function takes the universe name first, default `"main"`:
+### Public API (`Kinoko.Universe`)
 
-  ```elixir
-  CodeDb.stage(universe \\ "main", id, source, opts \\ [remove: [symbol]]) :: {:promoted, [id]} | {:staged, [reason]}
-  CodeDb.unstage(universe, id) :: :ok | :not_found
-  CodeDb.staged(universe)   :: [%{id, source, reasons}]
-  CodeDb.read(universe, symbol) :: {:ok, text} | :error
-  CodeDb.symbols(universe)  :: [%{symbol, cid, signature}]
-  CodeDb.history(universe)  :: [commit]
-  CodeDb.eval(universe, expr_source, opts) :: {:ok, value, type} | {:error, reason}
-  CodeDb.call(universe, symbol, args, opts) :: {:ok, value} | {:error, reason}
-  CodeDb.test(universe, symbol, opts) :: :ok | {:error, reason}
-  ```
+Every function takes the universe name first. A name with no universe gives `{:error, :no_such_universe}`.
 
-- **`stage` runs its first half in the caller**, then calls the server:
+```elixir
+Universe.list() :: [%{name, parent, created_at}]
+Universe.create(name) :: :ok | {:error, :exists | :bad_name}
+Universe.stage(universe, id, source, opts \\ [remove: [symbol]]) :: {:promoted, [id]} | {:staged, [reason]}
+Universe.unstage(universe, id) :: :ok | :not_found
+Universe.staged(universe)   :: [%{id, source, reasons}]
+Universe.read(universe, symbol) :: {:ok, text} | :error
+Universe.symbols(universe)  :: [%{symbol, cid, signature}]
+Universe.history(universe)  :: [commit]
+Universe.eval(universe, expr_source, opts) :: {:ok, value, type} | {:error, reason}
+Universe.call(universe, symbol, args, opts) :: {:ok, value} | {:error, reason}
+Universe.test(universe, symbol, opts) :: :ok | {:error, reason}
+```
+
+- **`Universe.stage` runs its first half in the caller**, then calls the CodeDb:
   1. parse, canonicalize and hash, with no server involved;
   2. `Cas.put`;
   3. `GenServer.call({:stage, id, entries})`.
@@ -92,11 +112,11 @@ MCP /mcp  ───┼─▶ CodeDb.stage(u, id, src):                          
 
 - `load`, `call`, `eval` and `test` take a committed map or an image, never a universe.
 - `eval` takes the signatures for checking: `Exec.eval(snapshot, source, opts)`.
-- Moduledoc: hosts reach it through CodeDb.
+- Moduledoc: hosts reach it through `Kinoko.Universe`.
 
 ### `Kinoko.Repl` (changed)
 
-The Agent is gone. `Y.*` calls `Kinoko.CodeDb` on `"main"`, or another universe via `Y.use(name)`. Your session state survives restarts, and agents see the same `main`.
+The Agent is gone. `Y.*` calls `Kinoko.Universe` on `"main"`, or another universe via `Y.use(name)`. Your session state survives restarts, and agents see the same `main`.
 
 ### MCP (new, `lib/kinoko_web/controllers/mcp_controller.ex` plus `lib/kinoko_web/mcp/*`)
 
@@ -106,6 +126,8 @@ The Agent is gone. `Y.*` calls `Kinoko.CodeDb` on `"main"`, or another universe 
   - `notifications/initialized`, answered with 202 and an empty body;
   - `tools/list`, `tools/call` and `ping`.
 - **Tools.** Each has a JSON schema and an optional `universe` argument, default `"main"`:
+  - `list_universes`;
+  - `create_universe`: `name`;
   - `stage_patch`: `id`, `source`, optional `remove`;
   - `unstage`: `id`;
   - `list_staged`;
@@ -115,7 +137,7 @@ The Agent is gone. `Y.*` calls `Kinoko.CodeDb` on `"main"`, or another universe 
   - `test`: `symbol`;
   - `history`.
 
-  Each one maps onto one `CodeDb` function. Results are text content, readable by agents, and a promotion and a staging read differently. A tool error is `isError: true` with the reasons.
+  Each one maps onto one `Kinoko.Universe` function. Results are text content, readable by agents, and a promotion and a staging read differently. A tool error is `isError: true` with the reasons.
 - **Instructions:** adapted from the TS MCP's server instructions. They cover the syntax you cannot guess, the stage → read verdict → restage loop, and "a patch replaces the declarations it names whole". The stdlib list is generated from `Rt.Stdlib`, so it never drifts.
 - **Robustness:** malformed JSON gives `-32700`; unknown methods `-32601`; invalid params `-32602`. A tool that raises becomes `isError: true`, never a 500.
 
@@ -136,7 +158,9 @@ The Agent is gone. `Y.*` calls `Kinoko.CodeDb` on `"main"`, or another universe 
 
 - **CAS:** put is idempotent, `get` returns only the CIDs that exist, and concurrent puts of the same CID both succeed.
 - **Lang:** `durable` holds only symbol → CID; `restore(commits, staged, decls)` round-trips (committed code, staged patches and reasons all equal) and refuses a missing CID; `read` and `staged` render through `Format`; all existing piece-1 tests stay green.
-- **CodeDb:**
+- **Universe and CodeDb:**
+  - list and create; an unknown name gives `:no_such_universe`; `main` exists after boot; concurrent creates give exactly one `:ok`;
+  - a stopped universe is restarted on demand by the next call;
   - stage, promote and read;
   - a broken patch is staged with reasons, fixed, then promoted;
   - a restart keeps both commits and staged patches, and the memo refills;
@@ -153,7 +177,7 @@ The Agent is gone. `Y.*` calls `Kinoko.CodeDb` on `"main"`, or another universe 
   - a raising tool becomes `isError`.
 
   Plus one end-to-end script that drives the counter corpus through `/mcp` like an agent would.
-- **REPL:** the walkthrough runs on CodeDb, and a restart in the middle of a session keeps the state.
+- **REPL:** the walkthrough runs on `Kinoko.Universe`, and a restart in the middle of a session keeps the state.
 
 ## Done when
 
