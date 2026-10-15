@@ -38,7 +38,8 @@ config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
 # The SQL sandbox owns DB connections in test, so the boot-time
-# Universe.Registry.ensure_main task is skipped; tests call it explicitly.
+# Universe.Registry.ensure_main and Deployment.ensure_local tasks are skipped;
+# tests call them explicitly.
 config :kinoko, :ensure_main_at_boot, false
 
 # Mount the unauthenticated /mcp endpoint (off in prod until it has auth).

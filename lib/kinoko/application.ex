@@ -48,6 +48,11 @@ defmodule Kinoko.Application do
         Supervisor.child_spec({Task, &Kinoko.Universe.Registry.ensure_main_at_boot/0},
           id: :ensure_main,
           restart: :temporary
+        ),
+        # After main exists: the `local` deployment serves it.
+        Supervisor.child_spec({Task, &Kinoko.Deployment.ensure_local_at_boot/0},
+          id: :ensure_local,
+          restart: :temporary
         )
       ]
     else
