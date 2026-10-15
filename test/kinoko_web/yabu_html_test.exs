@@ -120,23 +120,96 @@ defmodule KinokoWeb.YabuHtmlTest do
     assert handlers == %{"e0" => msg}
   end
 
-  test "on-change wraps the input in its own phx-change form carrying h" do
+  test "standalone on-change gets a minimal form wrapper, named yabu[id]" do
     fun = fn s -> {:var, "T.Msg", "Set", [s]} end
     {doc, handlers} = render(el("input", [{"value", "v"}, {"on-change", fun}]))
 
     assert attr(doc, "form", "phx-change") == ["yabu"]
-    assert attr(doc, "form input[type=hidden]", "name") == ["h"]
-    assert attr(doc, "form input[type=hidden]", "value") == ["e0"]
-    assert attr(doc, "form input:not([type=hidden])", "name") == ["value"]
-    assert attr(doc, "form input:not([type=hidden])", "value") == ["v"]
+    assert attr(doc, "form input", "name") == ["yabu[e0]"]
+    assert attr(doc, "form input", "value") == ["v"]
+    assert LazyHTML.query(doc, "input[type=hidden]") |> Enum.count() == 0
     assert handlers == %{"e0" => {:change, fun}}
   end
 
-  test "on-submit puts h in a hidden field" do
+  test "on-change inside a form: no wrapper, the form gets phx-change" do
+    {doc, handlers} =
+      render(
+        el("form", [], [
+          el("input", [{"on-change", fn s -> s end}]),
+          el("textarea", [{"on-change", fn s -> s end}])
+        ])
+      )
+
+    assert LazyHTML.query(doc, "form") |> Enum.count() == 1
+    assert attr(doc, "form", "phx-change") == ["yabu"]
+    assert attr(doc, "input", "name") == ["yabu[e0]"]
+    assert attr(doc, "textarea", "name") == ["yabu[e1]"]
+    assert Map.keys(handlers) == ["e0", "e1"]
+  end
+
+  test "on-change inside an on-submit form: one form, both bindings" do
+    {doc, handlers} =
+      render(el("form", [{"on-submit", :go}], [el("input", [{"on-change", fn s -> s end}])]))
+
+    assert LazyHTML.query(doc, "form") |> Enum.count() == 1
+    assert attr(doc, "form", "phx-submit") == ["yabu"]
+    assert attr(doc, "form", "phx-change") == ["yabu"]
+    assert attr(doc, "form input[name=yabu_submit]", "value") == ["e0"]
+    assert attr(doc, "form input[name='yabu[e1]']", "name") == ["yabu[e1]"]
+    assert handlers["e0"] == :go
+  end
+
+  test "on-submit puts its id in the yabu_submit hidden field" do
     {doc, handlers} = render(el("form", [{"on-submit", :msg}], [el("button", [], [txt("x")])]))
     assert attr(doc, "form", "phx-submit") == ["yabu"]
+    assert attr(doc, "form", "phx-change") == []
+    assert attr(doc, "form input[type=hidden]", "name") == ["yabu_submit"]
     assert attr(doc, "form input[type=hidden]", "value") == ["e0"]
     assert handlers == %{"e0" => :msg}
+  end
+
+  test "attribute names are validated strictly" do
+    bad = [
+      "aria-x onclick=alert(1);x",
+      "aria-x\nonclick",
+      "aria-x=\"y",
+      "data-x onclick=1",
+      "data-phx-click",
+      "data-yabu-submit",
+      "data-",
+      "aria-",
+      "formaction",
+      "srcdoc",
+      "xlink:href",
+      "class onclick=1"
+    ]
+
+    for name <- bad do
+      {doc, _} = render(el("div", [{name, "1"}]))
+      assert doc |> LazyHTML.query("div") |> LazyHTML.attributes() == [[]], inspect(name)
+    end
+
+    {doc, _} = render(el("div", [{"aria-label", "l"}, {"data-foo-1", "d"}]))
+    assert attr(doc, "div", "aria-label") == ["l"]
+    assert attr(doc, "div", "data-foo-1") == ["d"]
+  end
+
+  test "invalid UTF-8 in href/src is dropped, not raised" do
+    {doc, _} = render(el("a", [{"href", <<0xFF, 0xFE>>}, {"title", <<0xFF>>}]))
+    assert attr(doc, "a", "href") == []
+    assert attr(doc, "a", "title") == []
+  end
+
+  test "no whitespace leaks into textarea or pre" do
+    {doc, _} = render(el("textarea", [], [txt("hi")]))
+    assert LazyHTML.text(LazyHTML.query(doc, "textarea")) == "hi"
+    {doc, _} = render(el("pre", [], [txt("a"), txt("b")]))
+    assert LazyHTML.text(LazyHTML.query(doc, "pre")) == "ab"
+  end
+
+  test "svg tags are not allowed" do
+    {doc, _} = render(el("div", [], [el("svg", [], [el("path")])]))
+    assert LazyHTML.query(doc, "svg") |> Enum.count() == 0
   end
 
   test "unknown events and mistyped handlers are ignored" do
