@@ -37,4 +37,23 @@ defmodule Kinoko.Elm.StoreTest do
     assert Store.prune("b", 1) == 1
     assert [%{seq: 0}] = Store.history("a")
   end
+
+  test "prune edge cases: unknown key, keep >= rows" do
+    assert Store.prune("none", 3) == 0
+    for i <- 0..2, do: Store.append("a", i, 1, <<i>>)
+    assert Store.prune("a", 3) == 0
+    assert Store.prune("a", 10) == 0
+    assert length(Store.history("a")) == 3
+    assert Store.prune("a", 1) == 2
+    assert [%{seq: 2}] = Store.history("a")
+  end
+
+  test "state binaries round-trip byte for byte" do
+    bin = :erlang.term_to_binary(%{bytes: <<0, 255, 0, 1>>, text: "ñ\0x", n: 1.5})
+    big = :crypto.strong_rand_bytes(2_000_000)
+    Store.append("a", 0, 1, bin)
+    Store.append("b", 0, 1, big)
+    assert {:ok, %{state: ^bin}} = Store.latest("a")
+    assert {:ok, %{state: ^big}} = Store.latest("b")
+  end
 end

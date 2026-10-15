@@ -44,7 +44,7 @@ defmodule Kinoko.ElmGenServer do
 
   use GenServer
 
-  alias Kinoko.Elm.{Effect, Runtime, Timeline}
+  alias Kinoko.Elm.{Effect, Host, Runtime, Timeline}
 
   @callback init(args :: term()) :: {state :: term(), Effect.effects()}
   @callback update(msg :: term(), state :: term()) :: {state :: term(), Effect.effects()}
@@ -77,29 +77,15 @@ defmodule Kinoko.ElmGenServer do
   ## GenServer callbacks
 
   @impl true
-  def init({module, args}) do
-    case module |> Runtime.init({:init, args}, fn -> module.init(args) end) |> host() do
-      {:noreply, runtime} -> {:ok, runtime}
-      {:stop, reason, _runtime} -> {:stop, reason}
-    end
-  end
+  def init({module, args}),
+    do: module |> Runtime.init({:init, args}, fn -> module.init(args) end) |> Host.init()
 
   @impl true
-  def handle_call(request, from, runtime),
-    do: runtime |> Runtime.step({:call, from, request}) |> host()
+  def handle_call(request, from, runtime), do: Host.handle_call(request, from, runtime)
 
   @impl true
-  def handle_cast(msg, runtime), do: runtime |> Runtime.step(msg) |> host()
+  def handle_cast(msg, runtime), do: Host.handle_cast(msg, runtime)
 
   @impl true
-  def handle_info(msg, runtime), do: runtime |> Runtime.info(msg) |> host()
-
-  # The only host effect a GenServer understands is stop.
-  defp host({runtime, effects}) do
-    Enum.reduce(effects, {:noreply, runtime}, fn
-      {:stop, reason}, {:noreply, runtime} -> {:stop, reason, runtime}
-      {:stop, _reason}, stopping -> stopping
-      other, _ -> raise ArgumentError, "#{inspect(other)} is not supported in an ElmGenServer"
-    end)
-  end
+  def handle_info(msg, runtime), do: Host.handle_info(msg, runtime)
 end

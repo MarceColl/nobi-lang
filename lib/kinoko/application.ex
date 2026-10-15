@@ -10,6 +10,7 @@ defmodule Kinoko.Application do
     children = [
       KinokoWeb.Telemetry,
       Kinoko.Repo,
+      {Registry, keys: :unique, name: Kinoko.Elm.Registry},
       {DNSCluster, query: Application.get_env(:kinoko, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Kinoko.PubSub},
       # Start a worker by calling: Kinoko.Worker.start_link(arg)

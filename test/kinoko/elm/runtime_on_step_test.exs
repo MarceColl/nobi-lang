@@ -54,4 +54,32 @@ defmodule Kinoko.Elm.RuntimeOnStepTest do
 
     assert_received {:hooked, 2, 2}
   end
+
+  test "a {fun/3, acc} hook threads its accumulator through every step" do
+    test_pid = self()
+
+    hook = fn state, seq, acc ->
+      send(test_pid, {:hooked, state, seq, acc})
+      acc + 1
+    end
+
+    {rt, _} = start({hook, 10})
+    {rt, _} = Runtime.step(rt, :inc)
+    {_rt, _} = Runtime.step(rt, :inc)
+
+    assert_received {:hooked, 0, 0, 10}
+    assert_received {:hooked, 1, 1, 11}
+    assert_received {:hooked, 2, 2, 12}
+  end
+
+  test "the hook fires even with perform: false" do
+    test_pid = self()
+    hook = fn state, seq -> send(test_pid, {:hooked, state, seq}) end
+    {rt, _} = Runtime.init(Mod, :init, &Mod.init/0, on_step: hook, perform: false)
+    {_rt, _} = Runtime.step(rt, {:inc_then_ping, test_pid})
+
+    assert_received {:hooked, 0, 0}
+    assert_received {:hooked, 1, 1}
+    refute_received :effect
+  end
 end

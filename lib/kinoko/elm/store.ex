@@ -51,22 +51,18 @@ defmodule Kinoko.Elm.Store do
   @doc "Deletes all but the newest `keep` rows for `key`; returns rows deleted."
   @spec prune(String.t(), pos_integer()) :: non_neg_integer()
   def prune(key, keep) when is_integer(keep) and keep > 0 do
-    case latest(key) do
-      :none ->
-        0
+    newest =
+      from s in "elm_states",
+        where: s.key == ^key,
+        order_by: [desc: s.seq],
+        limit: ^keep,
+        select: s.seq
 
-      {:ok, %{seq: top}} ->
-        newest =
-          from s in "elm_states",
-            where: s.key == ^key,
-            order_by: [desc: s.seq],
-            limit: ^keep,
-            select: s.seq
+    {n, _} =
+      Repo.delete_all(
+        from s in "elm_states", where: s.key == ^key and s.seq not in subquery(newest)
+      )
 
-        cutoff = newest |> Repo.all() |> List.last() || top
-
-        {n, _} = Repo.delete_all(from s in "elm_states", where: s.key == ^key and s.seq < ^cutoff)
-        n
-    end
+    n
   end
 end

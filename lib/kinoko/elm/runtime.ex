@@ -38,7 +38,8 @@ defmodule Kinoko.Elm.Runtime do
     # effect id => {started_at_us, description}, until its msg comes back
     pending: %{},
     perform?: true,
-    # (state, seq -> any), called after each update and before its effects; nil = none
+    # (state, seq -> any) or {(state, seq, acc -> acc), acc}, called after each
+    # update and before its effects; nil = none
     on_step: nil,
     # seq of the last recorded msg; init is 0
     seq: -1,
@@ -58,7 +59,13 @@ defmodule Kinoko.Elm.Runtime do
 
   `on_step: fn state, seq -> ... end` is called with the live state after `init`
   and every `update`, before that step's effects are performed. If it raises,
-  nothing is performed. Time travel does not affect it.
+  nothing is performed. Time travel does not affect it, and it fires with
+  `perform: false` too (only the effects are dropped, never the hook).
+
+  A hook that needs memory between steps passes `on_step: {fun, acc}` instead:
+  `fun.(state, seq, acc)` returns the next `acc`, which the runtime keeps for
+  the following step. `Kinoko.PersistentElmGenServer` keeps its last written
+  state and seq that way.
   """
   @spec init(module(), term(), (-> {term(), term()}), keyword()) :: {t(), host_effects()}
   def init(module, init_msg, init_fun, opts \\ []) do
@@ -151,6 +158,10 @@ defmodule Kinoko.Elm.Runtime do
   end
 
   defp notify(%__MODULE__{on_step: nil} = runtime), do: runtime
+
+  defp notify(%__MODULE__{on_step: {hook, acc}} = runtime) do
+    %{runtime | on_step: {hook, hook.(runtime.state, runtime.seq, acc)}}
+  end
 
   defp notify(%__MODULE__{on_step: hook} = runtime) do
     hook.(runtime.state, runtime.seq)
