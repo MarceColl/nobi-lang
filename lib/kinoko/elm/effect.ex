@@ -7,7 +7,8 @@ defmodule Kinoko.Elm.Effect do
   ## Async — the result comes back as a msg
 
   Each takes a pure `to_msg` closure that turns the result into the msg routed
-  back to `update/2`. Results arrive in completion order.
+  back to `update/2`. Results arrive in completion order. A `to_msg` that
+  raises gives the msg `{:effect_error, description, reason}` instead.
 
     * `http(req_options, to_msg)` — `to_msg.({:ok, %Req.Response{}} | {:error, exception})`
     * `now(to_msg)` — `to_msg.(%DateTime{})` in UTC
@@ -17,7 +18,7 @@ defmodule Kinoko.Elm.Effect do
   ## Commands — no response
 
     * `reply/2`, `send_to/2`, `dispatch/1`, `after_ms/2`, `broadcast/3`,
-      `subscribe/3` — any host
+      `subscribe/3`, `unsubscribe/2` — any host
     * `stop/1` — `Kinoko.ElmGenServer` only
     * `navigate/1`, `patch/1`, `redirect/1`, `push_event/2`, `flash/2` —
       `KinokoWeb.ElmLiveView` only
@@ -35,6 +36,7 @@ defmodule Kinoko.Elm.Effect do
           | {:send, Process.dest() | :self, term()}
           | {:broadcast, atom(), String.t(), term()}
           | {:subscribe, atom(), String.t(), term()}
+          | {:unsubscribe, atom(), String.t()}
           | {:after_ms, non_neg_integer(), term()}
           | {:stop, term()}
           | {:navigate, String.t()}
@@ -86,6 +88,13 @@ defmodule Kinoko.Elm.Effect do
   """
   def subscribe(pubsub, topic, then_msg \\ nil) when is_atom(pubsub) and is_binary(topic),
     do: {:subscribe, pubsub, topic, then_msg}
+
+  @doc """
+  Unsubscribes the host process from `topic` of the `Phoenix.PubSub` named
+  `pubsub`. A process effect, like `subscribe/3`.
+  """
+  def unsubscribe(pubsub, topic) when is_atom(pubsub) and is_binary(topic),
+    do: {:unsubscribe, pubsub, topic}
 
   @doc "Routes `msg` back into `update/2` after the current update."
   def dispatch(msg), do: {:send, :self, msg}

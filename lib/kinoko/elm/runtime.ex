@@ -34,6 +34,7 @@ defmodule Kinoko.Elm.Runtime do
     :started_at,
     timeline: :queue.new(),
     timeline_len: 0,
+    timeline_limit: @timeline_limit,
     next_id: 1,
     # effect id => {started_at_us, description}, until its msg comes back
     pending: %{},
@@ -76,6 +77,14 @@ defmodule Kinoko.Elm.Runtime do
   render, whose process is thrown away). Past `n`, async effects go back to
   their normal treatment; `stop_inline/1` ends it early. `update/2` stays
   pure either way: only where the effect runs changes.
+
+  `timeline_limit: n` keeps at most `n` timeline entries (default
+  #{@timeline_limit}); each msg entry holds that step's whole state, so a
+  host that never shows a timeline passes `0` and keeps none (time travel
+  then has no history).
+
+  If an async effect's `to_msg` raises (or throws, or exits), its msg is
+  `{:effect_error, description, reason}` instead, inline or not.
   """
   @spec init(module(), term(), (-> {term(), term()}), keyword()) :: {t(), host_effects()}
   def init(module, init_msg, init_fun, opts \\ []) do
@@ -83,6 +92,7 @@ defmodule Kinoko.Elm.Runtime do
       module: module,
       started_at: System.monotonic_time(:microsecond),
       perform?: Keyword.get(opts, :perform, true),
+      timeline_limit: Keyword.get(opts, :timeline_limit, @timeline_limit),
       inline: Keyword.get(opts, :inline, 0),
       on_step: Keyword.get(opts, :on_step)
     }
@@ -183,10 +193,13 @@ defmodule Kinoko.Elm.Runtime do
     runtime
   end
 
+  defp record(%__MODULE__{timeline_limit: limit} = runtime, _entry) when limit <= 0,
+    do: runtime
+
   defp record(runtime, entry) do
     timeline = :queue.in(Map.put(entry, :at, elapsed(runtime)), runtime.timeline)
 
-    if runtime.timeline_len < @timeline_limit do
+    if runtime.timeline_len < runtime.timeline_limit do
       %{runtime | timeline: timeline, timeline_len: runtime.timeline_len + 1}
     else
       %{runtime | timeline: :queue.drop(timeline)}
@@ -211,7 +224,7 @@ defmodule Kinoko.Elm.Runtime do
 
         case effect do
           {:async, request, to_msg} when runtime.inline > 0 ->
-            msg = to_msg.(execute(request))
+            msg = result_msg(request, to_msg, description)
             {%{runtime | inline: runtime.inline - 1}, host, [{id, description, msg} | inline]}
 
           _ ->
@@ -232,18 +245,22 @@ defmodule Kinoko.Elm.Runtime do
     end)
   end
 
-  defp track(runtime, id, description) do
-    {:value, %{at: started_at}} = :queue.peek_r(runtime.timeline)
-    %{runtime | pending: Map.put(runtime.pending, id, {started_at, description})}
-  end
+  defp track(runtime, id, description),
+    do: %{runtime | pending: Map.put(runtime.pending, id, {elapsed(runtime), description})}
 
-  @process_effects [:async, :reply, :send, :after_ms, :broadcast, :subscribe]
+  @process_effects [:async, :reply, :send, :after_ms, :broadcast, :subscribe, :unsubscribe]
 
   defp dispatch(effect, _id, _perform? = false) when elem(effect, 0) in @process_effects, do: :ok
 
-  defp dispatch({:async, request, to_msg}, id, true) do
+  defp dispatch({:async, request, to_msg} = effect, id, true) do
     server = self()
-    {:ok, _pid} = Task.start(fn -> send(server, {__MODULE__, id, to_msg.(execute(request))}) end)
+    description = Timeline.describe(effect)
+
+    {:ok, _pid} =
+      Task.start(fn ->
+        send(server, {__MODULE__, id, result_msg(request, to_msg, description)})
+      end)
+
     :pending
   end
 
@@ -277,12 +294,25 @@ defmodule Kinoko.Elm.Runtime do
     end
   end
 
+  defp dispatch({:unsubscribe, pubsub, topic}, _id, true),
+    do: Phoenix.PubSub.unsubscribe(pubsub, topic)
+
   defp dispatch({:after_ms, ms, msg}, id, true) do
     Process.send_after(self(), {__MODULE__, id, msg}, ms)
     :pending
   end
 
   defp dispatch(_host_effect, _id, _perform?), do: :host
+
+  # The effect's msg: `to_msg` applied to its result, guarded like the
+  # request itself so a raising `to_msg` still produces a msg.
+  defp result_msg(request, to_msg, description) do
+    to_msg.(execute(request))
+  rescue
+    e -> {:effect_error, description, e}
+  catch
+    kind, reason -> {:effect_error, description, {kind, reason}}
+  end
 
   # Runs inside the effect's own process, never in the host.
   defp execute({:http, req_options}) do

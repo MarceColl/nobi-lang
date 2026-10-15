@@ -48,6 +48,10 @@ defmodule KinokoWeb.ElmLiveView do
       state instead of flashing an empty one. Process effects keep their
       usual treatment (dropped in the static render). After mounting, async
       effects run in their own process as usual.
+    * `timeline_limit: n` — keep at most `n` timeline entries
+      (`Kinoko.Elm.Runtime.init/4`'s option; each holds a whole model).
+      `0` keeps none: a view that never shows its timeline holds one model
+      per connection instead of 200. Not with `debug: true`.
 
   ## Time travel
 
@@ -75,6 +79,7 @@ defmodule KinokoWeb.ElmLiveView do
     params? = Keyword.get(opts, :params, false)
     debug? = Keyword.get(opts, :debug, false)
     inline? = Keyword.get(opts, :inline_mount, false)
+    timeline_limit = Keyword.get(opts, :timeline_limit)
 
     quote do
       use KinokoWeb, :live_view
@@ -86,7 +91,8 @@ defmodule KinokoWeb.ElmLiveView do
           KinokoWeb.ElmLiveView.__mount__(__MODULE__, params, session, socket,
             debug: unquote(debug?),
             inline: unquote(inline?),
-            params: unquote(params?)
+            params: unquote(params?),
+            timeline_limit: unquote(timeline_limit)
           )
 
       @impl Phoenix.LiveView
@@ -112,9 +118,14 @@ defmodule KinokoWeb.ElmLiveView do
     inline? = opts[:inline]
 
     {runtime, effects} =
-      Runtime.init(module, {:init, params}, fn -> module.init(params, session) end,
-        perform: connected?(socket),
-        inline: if(inline?, do: @inline_budget, else: 0)
+      Runtime.init(
+        module,
+        {:init, params},
+        fn -> module.init(params, session) end,
+        [
+          perform: connected?(socket),
+          inline: if(inline?, do: @inline_budget, else: 0)
+        ] ++ if(opts[:timeline_limit], do: [timeline_limit: opts[:timeline_limit]], else: [])
       )
 
     # Without `params: true` there is no handle_params: mounting ends here.
