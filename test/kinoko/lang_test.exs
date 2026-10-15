@@ -311,12 +311,73 @@ defmodule Kinoko.LangTest do
              Lang.restore(commits, [], %{Lang.cid(renamed) => renamed})
   end
 
-  test "restore refuses committed code that does not typecheck" do
-    {:ok, [broken]} = Lang.parse("def M.b() : Int do\n  M.missing()\nend")
-    commits = [%{ids: ["p"], entries: [{:live, "M.b", Lang.cid(broken)}]}]
+  # Committed code as stored that no longer typechecks (checker drift):
+  # `M.b` calls a `M.missing` nothing defines; `M.a` is fine.
+  defp drifted do
+    {:ok, [a]} = Lang.parse("def M.a() : Int do\n  1\nend")
+    {:ok, [b]} = Lang.parse("def M.b() : Int do\n  M.missing()\nend")
 
-    assert {:error, [%{name: "M.b", code: "unbound"}]} =
-             Lang.restore(commits, [], %{Lang.cid(broken) => broken})
+    commits = [
+      %{ids: ["p"], entries: [{:live, "M.a", Lang.cid(a)}, {:live, "M.b", Lang.cid(b)}]}
+    ]
+
+    {commits, %{Lang.cid(a) => a, Lang.cid(b) => b}}
+  end
+
+  test "restore opens committed code that does not typecheck degraded, as stored" do
+    {commits, decls} = drifted()
+
+    assert {:degraded, u, [%{name: "M.b", code: "unbound"}] = reasons} =
+             Lang.restore(commits, [], decls)
+
+    assert Lang.health(u) == {:degraded, reasons}
+    assert Enum.map(Lang.symbols(u), & &1.name) == ["M.a", "M.b"]
+    assert {:ok, "def M.b" <> _} = Lang.read(u, "M.b")
+    assert Lang.history(u) == commits
+    assert Lang.durable(u) == %{commits: commits, staged: []}
+  end
+
+  test "a degraded universe promotes only a patch that makes the whole image typecheck" do
+    {commits, decls} = drifted()
+    {:degraded, u, _} = Lang.restore(commits, [], decls)
+
+    # Sound on its own, but the image still fails: staged, with the image's reasons.
+    assert {u, {:staged, [%{name: "M.b", code: "unbound"}]}} =
+             Lang.stage(u, "other", "def M.z() : Int do\n  2\nend")
+
+    assert {:degraded, _} = Lang.health(u)
+    assert [%{name: "M.b"}] = Lang.reasons(u, "other")
+
+    # Unstaging works while degraded.
+    assert {u, true} = Lang.unstage(u, "other")
+    {u, {:staged, _}} = Lang.stage(u, "other", "def M.z() : Int do\n  2\nend")
+
+    # The fix promotes; the held-back patch promotes after it.
+    assert {u, {:promoted, ["fix", "other"]}} =
+             Lang.stage(u, "fix", "def M.missing() : Int do\n  3\nend")
+
+    assert Lang.health(u) == :ok
+    assert Enum.map(Lang.symbols(u), & &1.name) == ["M.a", "M.b", "M.missing", "M.z"]
+    assert [_, %{ids: ["fix"]}, %{ids: ["other"]}] = Lang.history(u)
+    assert {:ok, 3, _} = Kinoko.Exec.eval(Lang.snapshot(u), "M.b()")
+
+    # Restored from what it stores now, it is sound.
+    {:ok, [fix]} = Lang.parse("def M.missing() : Int do\n  3\nend")
+    {:ok, [z]} = Lang.parse("def M.z() : Int do\n  2\nend")
+    decls = Map.merge(decls, %{Lang.cid(fix) => fix, Lang.cid(z) => z})
+    %{commits: commits} = Lang.durable(u)
+    assert {:ok, _} = Lang.restore(commits, [], decls)
+  end
+
+  test "a staged patch that repairs the image promotes while restoring" do
+    {commits, decls} = drifted()
+    {:ok, [fix]} = Lang.parse("def M.missing() : Int do\n  3\nend")
+    decls = Map.put(decls, Lang.cid(fix), fix)
+    staged = [{"fix", [{"M.missing", Lang.cid(fix)}]}]
+
+    assert {:ok, u} = Lang.restore(commits, staged, decls)
+    assert Lang.health(u) == :ok
+    assert [_, %{ids: ["fix"]}] = Lang.history(u)
   end
 
   test "prepare parses, gives each declaration's CID and canonical text, and stages nothing" do

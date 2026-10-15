@@ -24,6 +24,18 @@ defmodule Kinoko.Lang.Universe do
 
   A universe is a value; every operation returns the new one.
 
+  ## Degraded
+
+  `restore/3` rebuilds committed code from storage and checks it again. When
+  it no longer typechecks (the checker changed under stored code), the
+  universe is restored *degraded* rather than refused: committed code is
+  kept exactly as stored, its failing declarations unchecked (`typed: nil`),
+  and `degraded/1` gives the reasons. Staging, unstaging and reading work as
+  ever, but while degraded a patch promotes only when the whole image, every
+  committed declaration with the patch applied over it, typechecks; its
+  reasons are the image's. The first round that promotes leaves the universe
+  sound again, and every staged patch is tried anew.
+
   Other pieces of Kinoko go through `Kinoko.Lang`, never through this
   module: its documented functions back the façade, and the `@doc false`
   ones are the promotion search's (`Kinoko.Lang.Universe.Search`) and the
@@ -68,7 +80,8 @@ defmodule Kinoko.Lang.Universe do
             sigs: %{},
             salsa: nil,
             cas: MapSet.new(),
-            kept: 0
+            kept: 0,
+            degraded: nil
 
   @type t :: %__MODULE__{}
   @type id :: String.t()
@@ -105,6 +118,13 @@ defmodule Kinoko.Lang.Universe do
   @doc "What each staged patch holds, as it was staged."
   @spec staged(t()) :: %{id => [entry]}
   def staged(%__MODULE__{given: given}), do: given
+
+  @doc """
+  `nil`, or the reasons committed code does not typecheck: the universe was
+  restored degraded (see "Degraded") and nothing has promoted since.
+  """
+  @spec degraded(t()) :: [reason] | nil
+  def degraded(%__MODULE__{degraded: degraded}), do: degraded
 
   @doc "The stdlib's signatures and committed code's."
   @spec signatures(t()) :: map()
@@ -160,7 +180,7 @@ defmodule Kinoko.Lang.Universe do
 
   def stage(%__MODULE__{} = u, id, entries) when is_binary(id) do
     u = put(u, id, entries)
-    {promoted, u} = settle(u, id, &Search.search/3)
+    {promoted, u} = settle(u, id, &find/3)
 
     {verdict, u} =
       if id in promoted do
@@ -203,13 +223,17 @@ defmodule Kinoko.Lang.Universe do
   each staged patch is staged again, in order, through `stage/3`, so its
   reasons are worked out afresh.
 
-  `{:error, reasons}` says why not: a CID with no declaration (`name: nil`,
-  the message naming the CID), a declaration that is not the CID or the
-  name it is given for (`Kinoko.Lang.Cid.of/1` is worked out again), all
-  `"restore"`; or the reasons committed code does not typecheck.
+  `{:degraded, u, reasons}`: committed code no longer typechecks; `u` is
+  restored degraded (see "Degraded"), `reasons` why (also `degraded/1`).
+  Should a staged patch repair it while restaging, the result is `{:ok, u}`.
+
+  `{:error, reasons}` says why storage cannot be restored at all: a CID with
+  no declaration (`name: nil`, the message naming the CID), a declaration
+  that is not the CID or the name it is given for (`Kinoko.Lang.Cid.of/1`
+  is worked out again), all `"restore"`.
   """
   @spec restore([round], [{id, [{String.t(), String.t() | :gone}]}], %{String.t() => Ast.decl()}) ::
-          {:ok, t()} | {:error, [reason]}
+          {:ok, t()} | {:degraded, t(), [reason]} | {:error, [reason]}
   def restore(commits, staged, decls) do
     code =
       commits |> replay() |> Enum.sort() |> Enum.map(fn {name, cid} -> {:live, name, cid} end)
@@ -257,25 +281,105 @@ defmodule Kinoko.Lang.Universe do
     code = for {_, cid} <- Enum.sort(replay(commits)), do: {:live, Map.fetch!(decls, cid)}
     {u, verdict} = if code == [], do: {new(), nil}, else: stage(new(), @restore, code)
 
-    case verdict do
-      {:staged, reasons} ->
-        {:error, reasons}
+    u =
+      case verdict do
+        {:staged, reasons} -> %{commit_as_stored(u, @restore) | degraded: reasons}
+        _ -> u
+      end
 
-      _ ->
-        u = %{u | history: Enum.reverse(commits)}
+    u = %{u | history: Enum.reverse(commits)}
 
-        u =
-          Enum.reduce(patches, u, fn {id, entries}, u ->
-            entries =
-              Enum.map(entries, fn
-                {:live, _, cid} -> {:live, Map.fetch!(decls, cid)}
-                gone -> gone
-              end)
-
-            u |> stage(id, entries) |> elem(0)
+    u =
+      Enum.reduce(patches, u, fn {id, entries}, u ->
+        entries =
+          Enum.map(entries, fn
+            {:live, _, cid} -> {:live, Map.fetch!(decls, cid)}
+            gone -> gone
           end)
 
-        {:ok, u}
+        u |> stage(id, entries) |> elem(0)
+      end)
+
+    case u.degraded do
+      nil -> {:ok, u}
+      reasons -> {:degraded, u, reasons}
+    end
+  end
+
+  # Commit the staged patch `id` as it is, typecheck or not: each
+  # declaration as checked in the image the patch makes, unchecked
+  # (`typed: nil`) where that check fails. Only for restoring storage whose
+  # code no longer typechecks; no round is kept.
+  defp commit_as_stored(u, id) do
+    ctx = Db.ctx([id])
+    patch = Map.fetch!(u.staged, id)
+
+    {checked, u} =
+      Enum.map_reduce(patch, u, fn {:live, name, cid, decl}, u ->
+        {outcome, salsa} = Db.checked(u.salsa, ctx, cid, decl)
+        {{name, cid, decl, outcome}, %{u | salsa: salsa}}
+      end)
+
+    {_, u} = take(u, id)
+
+    Enum.reduce(checked, u, fn {name, cid, decl, outcome}, u ->
+      {sig, salsa} = Db.signature(u.salsa, cid)
+
+      %{
+        u
+        | sigs: Map.put(u.sigs, name, sig),
+          salsa: Salsa.set(salsa, :committed, {:name, name}, cid),
+          committed:
+            Map.put(u.committed, name, %{
+              cid: cid,
+              decl: decl,
+              typed: outcome.typed,
+              deps: outcome.deps
+            })
+      }
+    end)
+  end
+
+  # What to promote: the search's pick, or, while degraded, the patch
+  # staged as `root` if the whole image typechecks with it.
+  defp find(%__MODULE__{degraded: nil} = u, root, changed), do: Search.search(u, root, changed)
+  defp find(u, root, _changed), do: repair(u, root)
+
+  # `{{[id], checks}, u}` when every committed declaration, with the patch
+  # `id` applied over them, typechecks (checks of all of them); else `{nil, u}`.
+  defp repair(u, id) do
+    patch = Map.get(u.staged, id)
+
+    if patch == nil or twice(patch) != [] do
+      {nil, u}
+    else
+      ctx = Db.ctx([id])
+      own = Map.new(patch, &{entry_name(&1), &1})
+
+      image =
+        (Map.keys(u.committed) ++ Map.keys(own))
+        |> Enum.uniq()
+        |> Enum.sort()
+        |> Enum.flat_map(fn name ->
+          case own do
+            %{^name => {:live, _, _, _} = e} -> [e]
+            %{^name => {:gone, _}} -> []
+            _ -> [declared(name, u.committed[name])]
+          end
+        end)
+
+      Enum.reduce_while(image, {%{}, u}, fn {:live, name, cid, decl}, {checks, u} ->
+        {outcome, salsa} = Db.checked(u.salsa, ctx, cid, decl)
+        u = %{u | salsa: salsa}
+
+        if outcome.typed == nil,
+          do: {:halt, {nil, u}},
+          else: {:cont, {Map.put(checks, name, outcome), u}}
+      end)
+      |> case do
+        {nil, u} -> {nil, u}
+        {checks, u} -> {{MapSet.new([id]), checks}, u}
+      end
     end
   end
 
@@ -386,8 +490,20 @@ defmodule Kinoko.Lang.Universe do
           end)
 
         round = %{ids: ids, entries: Enum.map(applied, &applied/1)}
-        u = %{u | committed: committed, history: [round | u.history]}
         changed = MapSet.new(applied, &entry_name/1)
+
+        # A round promoted while degraded checked the whole image: the
+        # universe is sound again, and every committed or staged name counts
+        # as changed, so every patch the degradation held back is tried.
+        changed =
+          if u.degraded do
+            staged = for {_, patch} <- u.staged, e <- patch, do: entry_name(e)
+            MapSet.union(changed, MapSet.new(Map.keys(committed) ++ staged))
+          else
+            changed
+          end
+
+        u = %{u | committed: committed, history: [round | u.history], degraded: nil}
         settle(u, @change, changed, promoted ++ ids, find)
     end
   end
@@ -460,8 +576,9 @@ defmodule Kinoko.Lang.Universe do
     touched = MapSet.new(patch, &entry_name/1)
     own = for {:live, _, _, _} = e <- patch, do: e
 
+    # While degraded, the patch must make the whole image typecheck.
     others =
-      if defines_stdlib?(patch),
+      if defines_stdlib?(patch) or u.degraded != nil,
         do: for({name, c} <- u.committed, name not in touched, do: declared(name, c)),
         else: dependents(u.committed, patch)
 

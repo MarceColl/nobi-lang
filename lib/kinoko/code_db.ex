@@ -2,8 +2,11 @@ defmodule Kinoko.CodeDb do
   @moduledoc """
   The process that keeps one universe alive: a `Kinoko.PersistentElmGenServer`
   under `Kinoko.Elm.Supervisor`, keyed `"universe:" <> name` (`key/1`) and
-  started with `Kinoko.PersistentElmGenServer.start/3`, whose state is a
-  `Kinoko.Lang` universe.
+  started with `Kinoko.PersistentElmGenServer.start/3`. Its state is
+  `%{u: u, hash: hash}`: a `Kinoko.Lang` universe and the hash of its
+  committed image (`Kinoko.Lang.image_hash/1`), kept so a caller can find an
+  image already loaded without copying the committed code out
+  (`:image_key`). The hash is worked out again only when a stage promotes.
 
   **Internal.** Only `Kinoko.Universe` starts it or talks to it.
 
@@ -19,20 +22,37 @@ defmodule Kinoko.CodeDb do
     * `{:read, symbol}` → `{:ok, text} | :error`
     * `:staged` → `[%{id, source, removes, reasons}]`, in staging order
     * `:history` → `[commit]`, oldest first
-    * `:snapshot` → `Kinoko.Lang.snapshot/1`
+    * `:definers` → `%{symbol => [id]}`: the staged patches defining each
+      symbol, in staging order
+    * `:health` → `:ok | {:degraded, [reason]}` (`Kinoko.Lang.health/1`)
+    * `:image_key` → `{:ok, hash, signatures}`: the committed image's hash
+      and the signatures to check an expression against; cheap
+    * `:snapshot` → `{:ok, Kinoko.Lang.snapshot/1}`: the whole committed code
+    * anything else → `{:error, :unknown_request}`
+
+  While the universe is degraded, `:image_key` and `:snapshot` answer
+  `{:degraded, reasons}`: its committed code cannot run.
 
   ## Storage
 
   `durable/1` is `Kinoko.Lang.durable/1`: commits and staged patches as names
   and CIDs, never text. `decode/1` fetches the declarations by CID from
   `Kinoko.Cas`, parses them and rebuilds the universe with
-  `Kinoko.Lang.restore/3`, which checks the code again. A CID missing from
-  the CAS, or a text that does not parse to one declaration, raises naming
-  the CID, so the boot refuses. The salsa memo is never stored; it refills
-  lazily.
+  `Kinoko.Lang.restore/3`, which checks the code again.
+
+    * Committed code that no longer typechecks (the checker changed under
+      it) boots **degraded** (logged), never refused: see `Kinoko.Lang.health/1`.
+    * A CID missing from the CAS, or a text that does not parse to one
+      declaration, is corrupt storage: it raises naming the CID, so the boot
+      refuses. (A restart by the supervisor that refuses is dropped, not
+      retried: see `Kinoko.PersistentElmGenServer`.)
+
+  The salsa memo is never stored; it refills lazily.
   """
 
   use Kinoko.PersistentElmGenServer
+
+  require Logger
 
   alias Kinoko.{Cas, Lang}
   alias Kinoko.Elm.Effect, as: Fx
@@ -42,16 +62,34 @@ defmodule Kinoko.CodeDb do
   def key(name), do: "universe:" <> name
 
   @impl true
-  def init(_args), do: {Lang.new(), Fx.none()}
+  def init(_args), do: {state(Lang.new()), Fx.none()}
+
+  defp state(u), do: %{u: u, hash: Lang.image_hash(u)}
 
   @impl true
-  def update({:call, from, request}, u) do
-    {u, reply} = handle(request, u)
-    {u, Fx.reply(from, reply)}
+  # The cached hash: no committed code is walked or copied.
+  def update({:call, from, :image_key}, %{u: u, hash: hash} = s) do
+    reply =
+      case Lang.health(u) do
+        :ok -> {:ok, hash, Lang.signatures(u)}
+        degraded -> degraded
+      end
+
+    {s, Fx.reply(from, reply)}
+  end
+
+  def update({:call, from, request}, %{u: u} = s) do
+    {s, reply} =
+      case handle(request, u) do
+        {u, {:promoted, _} = reply} -> {state(u), reply}
+        {u, reply} -> {%{s | u: u}, reply}
+      end
+
+    {s, Fx.reply(from, reply)}
   end
 
   # A stray message (a cast, an info) changes nothing.
-  def update(_msg, u), do: {u, Fx.none()}
+  def update(_msg, s), do: {s, Fx.none()}
 
   defp handle({:stage, id, entries}, u), do: Lang.stage_entries(u, id, entries)
 
@@ -79,10 +117,31 @@ defmodule Kinoko.CodeDb do
   end
 
   defp handle(:history, u), do: {u, Lang.history(u)}
-  defp handle(:snapshot, u), do: {u, Lang.snapshot(u)}
+
+  defp handle(:definers, u) do
+    definers =
+      for {id, entries} <- Lang.durable(u).staged,
+          {symbol, cid} when is_binary(cid) <- entries,
+          reduce: %{} do
+        acc -> Map.update(acc, symbol, [id], &(&1 ++ [id]))
+      end
+
+    {u, definers}
+  end
+
+  defp handle(:health, u), do: {u, Lang.health(u)}
+
+  defp handle(:snapshot, u) do
+    case Lang.health(u) do
+      :ok -> {u, {:ok, Lang.snapshot(u)}}
+      degraded -> {u, degraded}
+    end
+  end
+
+  defp handle(_request, u), do: {u, {:error, :unknown_request}}
 
   @impl true
-  def durable(u), do: Lang.durable(u)
+  def durable(%{u: u}), do: Lang.durable(u)
 
   @impl true
   def encode(durable), do: :erlang.term_to_binary(durable, compressed: 6)
@@ -103,7 +162,15 @@ defmodule Kinoko.CodeDb do
 
     case Lang.restore(commits, staged, decls) do
       {:ok, u} ->
-        u
+        state(u)
+
+      {:degraded, u, reasons} ->
+        Logger.warning(
+          "a universe boots degraded: its committed code no longer typechecks (" <>
+            Enum.map_join(reasons, "; ", &"#{&1.name} [#{&1.code}] #{&1.message}") <> ")"
+        )
+
+        state(u)
 
       {:error, reasons} ->
         raise "the universe does not restore: " <> Enum.map_join(reasons, "; ", & &1.message)

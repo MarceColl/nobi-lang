@@ -922,8 +922,8 @@ defmodule Kinoko.Lang.UniverseTest do
 
   # What storage keeps, history and the declarations by CID, restores the
   # same universe: committed code with each check, the signatures, and
-  # history. Storage that is not what history replays to, or code that does
-  # not typecheck, is refused, saying why.
+  # history. Storage that is not what history replays to is refused, saying
+  # why; code that does not typecheck is restored degraded.
   test "rust only: restoring history and the code it replays to gives the same universe" do
     sources = [
       "def M.a() : Int do 1 end\ndef M.b() : Int do M.a() end",
@@ -970,8 +970,11 @@ defmodule Kinoko.Lang.UniverseTest do
 
     [{:live, broken}] = patch("def M.b() : Int do M.missing() end")
     history = [%{ids: ["p"], entries: [{:live, "M.b", Cid.of(broken)}]}]
-    {:error, why} = Universe.restore(history, [], %{Cid.of(broken) => broken})
+    # Code that no longer typechecks is restored degraded, as stored.
+    {:degraded, degraded, why} = Universe.restore(history, [], %{Cid.of(broken) => broken})
     sole(why, "M.b", "unbound")
+    assert Universe.degraded(degraded) == why
+    assert Universe.history(degraded) == history
   end
 
   # ---------- TS's universe.test.ts, the cases that agree with the spec ----------

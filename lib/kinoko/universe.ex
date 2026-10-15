@@ -22,7 +22,25 @@ defmodule Kinoko.Universe do
       out). A write's outcome is then unknown: restage the same id, which is
       idempotent.
 
+  `eval/3`, `call/4` and `test/3` also return
+  `{:error, %{code: "degraded", message: m}}` while the universe is
+  degraded (`health/1`), `m` naming the declarations that fail.
+
   The caller never crashes on any of them.
+
+  ## Degraded
+
+  A universe whose committed code no longer typechecks when it boots (the
+  checker changed under stored code) is not refused: it opens **degraded**
+  (`Kinoko.Lang.restore/3`). Its committed code is kept exactly as stored
+  and `health/1` says which declarations fail and why. `stage/4`,
+  `unstage/2`, `staged/1`, `read/2`, `symbols/1` and `history/1` work as
+  ever; a patch promotes only when the whole image typechecks with it, and
+  the first that does makes the universe healthy again. Until then its code
+  cannot run: `eval/3`, `call/4` and `test/3` answer `"degraded"`.
+
+  Only type errors degrade. A declaration missing from the CAS or CAS text
+  that does not parse is corrupt storage: the boot refuses (`"internal"`).
 
   ## Where the work happens
 
@@ -31,8 +49,11 @@ defmodule Kinoko.Universe do
   promotes and persists. A patch that does not parse never reaches the
   CodeDb as a stage: it drops what its id staged before (`{:unstage, id}`)
   and returns `{:staged, [parse reason]}`. `eval/3`, `call/4` and `test/3`
-  take a snapshot from the CodeDb and run in the caller through
-  `Kinoko.Exec`, so a long evaluation never blocks the universe.
+  run in the caller through `Kinoko.Exec`, so a long evaluation never
+  blocks the universe. They first ask the CodeDb for its image's hash and
+  signatures only (`:image_key`), and take the whole committed code
+  (`:snapshot`) only when no image of that hash is loaded yet
+  (`Kinoko.Exec.loaded/1`).
   """
 
   alias Kinoko.{Cas, CodeDb, Exec, Lang}
@@ -47,13 +68,35 @@ defmodule Kinoko.Universe do
           {:error, :bad_name | :no_such_universe}
           | {:error, %{code: String.t(), message: String.t()}}
 
-  @doc "Every universe, by name: `[%{name, parent, forked_at_commit, created_at}]`."
-  @spec list() :: [map()]
-  def list, do: Registry.list()
+  @doc """
+  Every universe, by name: `[%{name, parent, forked_at_commit, created_at}]`,
+  or `{:error, %{code: "unavailable", ...}}` when the database cannot be read.
+  """
+  @spec list() :: [map()] | error
+  def list do
+    Registry.list()
+  rescue
+    e -> {:error, unavailable("the universes could not be listed: " <> Exception.message(e))}
+  end
 
-  @doc "Creates an empty universe: `:ok | {:error, :exists | :bad_name}`."
-  @spec create(name) :: :ok | {:error, :exists | :bad_name}
-  def create(name), do: Registry.create(name)
+  @doc """
+  Creates an empty universe: `:ok | {:error, :exists | :bad_name}`, or
+  `{:error, %{code: "unavailable", ...}}` when the database cannot be written
+  (whether it was created is then unknown: create it again).
+  """
+  @spec create(name) :: :ok | {:error, :exists | :bad_name} | error
+  def create(name) do
+    Registry.create(name)
+  rescue
+    e -> {:error, unavailable("universe #{name} could not be created: " <> Exception.message(e))}
+  end
+
+  @doc """
+  `:ok`, or `{:degraded, [reason]}` while the universe's committed code does
+  not typecheck (see "Degraded"; each reason names a failing declaration).
+  """
+  @spec health(name) :: :ok | {:degraded, [reason]} | error
+  def health(universe), do: read_request(universe, :health)
 
   @doc """
   Stages `source` under patch `id` (`remove: [symbol]` also stages
@@ -147,9 +190,9 @@ defmodule Kinoko.Universe do
   """
   @spec eval(name, String.t(), keyword()) :: {:ok, term(), term()} | error
   def eval(universe, expr_source, opts \\ []) do
-    with {:ok, snapshot} <- snapshot(universe) do
+    with {:ok, target} <- target(universe) do
       if is_binary(expr_source),
-        do: Exec.eval(snapshot, expr_source, opts),
+        do: universe |> staged_hint(Exec.eval(target, expr_source, opts)),
         else:
           {:error,
            %{code: "parse", message: "an expression is a string, not #{inspect(expr_source)}"}}
@@ -163,9 +206,9 @@ defmodule Kinoko.Universe do
   """
   @spec call(name, String.t(), [term()], keyword()) :: {:ok, term(), term()} | error
   def call(universe, symbol, args, opts \\ []) do
-    with {:ok, snapshot} <- snapshot(universe),
-         {:ok, value} <- Exec.call(snapshot, symbol, args, opts) do
-      {:ok, value, return_type(snapshot, symbol)}
+    with {:ok, target} <- target(universe),
+         {:ok, value} <- staged_hint(universe, Exec.call(run_on(target), symbol, args, opts)) do
+      {:ok, value, return_type(target, symbol)}
     end
   end
 
@@ -179,13 +222,99 @@ defmodule Kinoko.Universe do
   @doc "Runs deftest `symbol` of the current commit, in the caller: `:ok | {:error, %{code, message, ...}}`."
   @spec test(name, String.t(), keyword()) :: :ok | error
   def test(universe, symbol, opts \\ []) do
-    with {:ok, snapshot} <- snapshot(universe), do: Exec.test(snapshot, symbol, opts)
+    with {:ok, target} <- target(universe),
+         do: staged_hint(universe, Exec.test(run_on(target), symbol, opts))
+  end
+
+  # What Exec runs against: the loaded image and the signatures (the fast
+  # path: only the hash and the signatures leave the CodeDb), else the
+  # whole snapshot, whose image Exec then loads.
+  defp target(universe) do
+    case read_request(universe, :image_key) do
+      {:ok, hash, sigs} ->
+        case Exec.loaded(hash) do
+          {:ok, image} -> {:ok, %{image: image, signatures: sigs}}
+          :error -> snapshot(universe)
+        end
+
+      other ->
+        runnable(universe, other)
+    end
   end
 
   defp snapshot(universe) do
     case read_request(universe, :snapshot) do
-      {:error, _} = error -> error
-      snapshot -> {:ok, snapshot}
+      {:ok, snapshot} -> {:ok, snapshot}
+      other -> runnable(universe, other)
+    end
+  end
+
+  defp runnable(universe, {:degraded, reasons}), do: {:error, degraded(universe, reasons)}
+  defp runnable(_universe, {:error, _} = error), do: error
+
+  defp run_on(%{image: image}), do: image
+  defp run_on(snapshot), do: snapshot
+
+  defp degraded(universe, reasons) do
+    failing =
+      reasons
+      |> Enum.map(&Map.get(&1, :name))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Enum.map_join(", ", &"`#{&1}`")
+
+    %{
+      code: "degraded",
+      message:
+        "universe #{universe} is degraded: its committed code no longer typechecks " <>
+          "(failing: #{failing}), so nothing runs until a patch that fixes it promotes. " <>
+          "health shows why.",
+      reasons: reasons
+    }
+  end
+
+  # An error naming a symbol that only a staged patch defines says so: the
+  # code runs against committed code, where it does not exist yet.
+  defp staged_hint(universe, {:error, %{code: code, message: message} = error} = result)
+       when code in ["unbound", "runtime"] and is_binary(message) do
+    case read_request(universe, :definers) do
+      definers when is_map(definers) and map_size(definers) > 0 ->
+        hint = &hinted(&1, definers)
+        error = %{error | message: hint.(message)}
+
+        error =
+          case error do
+            %{reasons: reasons} when is_list(reasons) ->
+              %{error | reasons: Enum.map(reasons, &Map.update!(&1, :message, hint))}
+
+            _ ->
+              error
+          end
+
+        {:error, error}
+
+      _ ->
+        result
+    end
+  end
+
+  defp staged_hint(_universe, result), do: result
+
+  defp hinted(message, definers) do
+    staged =
+      for {symbol, ids} <- Enum.sort(definers),
+          String.contains?(message, "`#{symbol}`"),
+          do: {symbol, "staged under #{Enum.map_join(ids, ", ", &"`#{&1}`")}, not promoted"}
+
+    case staged do
+      [] ->
+        message
+
+      [{_symbol, note}] ->
+        "#{message} (#{note})"
+
+      many ->
+        "#{message} (" <> Enum.map_join(many, "; ", fn {s, note} -> "`#{s}` #{note}" end) <> ")"
     end
   end
 

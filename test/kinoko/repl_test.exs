@@ -199,4 +199,17 @@ defmodule Kinoko.ReplTest do
     assert Y.history() == []
     assert Universe.staged(Y.current()) == []
   end
+
+  test "health says healthy, or degraded with the reasons", %{u: u} do
+    assert capture_io(fn -> assert Y.health() == :ok end) =~ "ok: #{u} is healthy"
+
+    stop(u)
+    store_commit(u, "def A.f() : Int do\n  A.g()\nend")
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      out = capture_io(fn -> assert {:degraded, [%{name: "A.f"}]} = Y.health() end)
+      assert out =~ "degraded: #{u}"
+      assert out =~ "A.f: [unbound]"
+    end)
+  end
 end

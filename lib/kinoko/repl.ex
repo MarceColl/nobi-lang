@@ -106,10 +106,16 @@ defmodule Kinoko.Repl do
   @doc "Prints every universe, marking the current one."
   @spec universes() :: :ok
   def universes do
-    for %{name: name} <- Universe.list(),
-        do: IO.puts(if(name == current(), do: "#{name} (current)", else: name))
+    case Universe.list() do
+      {:error, error} ->
+        fail(error)
 
-    :ok
+      universes ->
+        for %{name: name} <- universes,
+            do: IO.puts(if(name == current(), do: "#{name} (current)", else: name))
+
+        :ok
+    end
   end
 
   @doc "Create an empty universe (it does not switch to it: `use/1`)."
@@ -126,6 +132,32 @@ defmodule Kinoko.Repl do
 
       {:error, :bad_name} ->
         print_error(:bad_name, name)
+
+      {:error, error} ->
+        fail(error)
+    end
+  end
+
+  @doc """
+  Prints whether the current universe is healthy or degraded (its committed
+  code no longer typechecks; see `Kinoko.Universe.health/1`), and returns
+  `:ok | {:degraded, reasons}`.
+  """
+  @spec health() :: :ok | {:degraded, [map()]} | {:error, term()}
+  def health do
+    case Universe.health(current()) do
+      :ok ->
+        IO.puts("ok: #{current()} is healthy")
+        :ok
+
+      {:degraded, reasons} = degraded ->
+        IO.puts("degraded: #{current()}'s committed code no longer typechecks")
+        Enum.each(reasons, &IO.puts("  #{&1.name || "-"}: [#{&1.code}] #{&1.message}"))
+        IO.puts("stage a patch that fixes these; eval, call and test resume once it promotes")
+        degraded
+
+      {:error, error} ->
+        fail(error)
     end
   end
 

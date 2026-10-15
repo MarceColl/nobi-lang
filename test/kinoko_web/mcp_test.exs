@@ -8,7 +8,7 @@ defmodule KinokoWeb.McpTest do
   @g "def A.g() : Int do\n  1\nend"
   @f "def A.f() : Int do\n  A.g()\nend"
 
-  @tool_names ~w(list_universes create_universe stage_patch unstage list_staged read symbols eval test history)
+  @tool_names ~w(list_universes create_universe stage_patch unstage list_staged read symbols eval test history health)
 
   # ---------- helpers ----------
 
@@ -316,7 +316,8 @@ defmodule KinokoWeb.McpTest do
             {"symbols", %{}},
             {"eval", %{"expression" => "1"}},
             {"test", %{"symbol" => "A.t"}},
-            {"history", %{}}
+            {"history", %{}},
+            {"health", %{}}
           ] do
         assert err!(conn, tool, Map.put(args, "universe", nope)) =~ "no such universe: #{nope}"
         assert err!(conn, tool, Map.put(args, "universe", "Not A Name")) =~ "bad universe name"
@@ -401,6 +402,26 @@ defmodule KinokoWeb.McpTest do
       assert err!(conn, "eval", %{"universe" => u, "expression" => "1 +"}) =~ "[parse]"
     end
 
+    test "an error lists each reason once, and none that repeats the error line", %{
+      conn: conn,
+      u: u
+    } do
+      text = err!(conn, "eval", %{"universe" => u, "expression" => "A.zz() + A.zz()"})
+      assert [_head] = String.split(text, "\n")
+
+      text = err!(conn, "eval", %{"universe" => u, "expression" => "A.zz() + A.yy()"})
+      assert [head, reason] = String.split(text, "\n")
+      assert head =~ "A.zz"
+      assert reason =~ "A.yy"
+    end
+
+    test "eval of a symbol only a staged patch defines says it is staged", %{conn: conn, u: u} do
+      ok!(conn, "stage_patch", %{"universe" => u, "id" => "wip", "source" => @f})
+
+      assert err!(conn, "eval", %{"universe" => u, "expression" => "A.f()"}) =~
+               "(staged under `wip`, not promoted)"
+    end
+
     test "test runs a deftest; failures and unknown tests are isError", %{conn: conn, u: u} do
       assert ok!(conn, "stage_patch", %{"universe" => u, "id" => "split", "source" => @split}) ==
                "promoted: split"
@@ -417,6 +438,34 @@ defmodule KinokoWeb.McpTest do
                "Split.lies: FAILED"
 
       assert err!(conn, "test", %{"universe" => u, "symbol" => "Split.nope"}) =~ "Split.nope"
+    end
+  end
+
+  describe "health" do
+    test "a healthy universe", %{conn: conn, u: u} do
+      assert ok!(conn, "health", %{"universe" => u}) =~ "ok: #{u} is healthy"
+    end
+
+    test "a degraded universe says so in health, list_universes and symbols; a fix heals it",
+         %{conn: conn, u: u} do
+      store_commit(u, @f)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        text = ok!(conn, "health", %{"universe" => u})
+        assert text =~ "degraded: #{u}"
+        assert text =~ "- A.f [unbound]"
+      end)
+
+      assert ok!(conn, "list_universes", %{}) =~ "#{u} (DEGRADED: A.f"
+      assert ok!(conn, "symbols", %{"universe" => u}) =~ ~r/\ADEGRADED: A.f .*\nA.f\(\) : Int/
+      assert err!(conn, "eval", %{"universe" => u, "expression" => "1"}) =~ "[degraded]"
+
+      assert ok!(conn, "stage_patch", %{"universe" => u, "id" => "fix", "source" => @g}) ==
+               "promoted: fix"
+
+      assert ok!(conn, "health", %{"universe" => u}) =~ "is healthy"
+      refute ok!(conn, "list_universes", %{}) =~ "DEGRADED"
+      assert ok!(conn, "eval", %{"universe" => u, "expression" => "A.f()"}) == "1 : Int"
     end
   end
 

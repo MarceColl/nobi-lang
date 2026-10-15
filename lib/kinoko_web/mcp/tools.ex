@@ -65,6 +65,11 @@ defmodule KinokoWeb.Mcp.Tools do
      %{symbol: %{type: "string", description: "The deftest's fully qualified name."}},
      ["symbol"]},
     {"history", "Every promotion, oldest first: the patch ids and the symbols each changed.", %{},
+     []},
+    {"health",
+     "Whether the universe is healthy, or DEGRADED: its committed code no longer typechecks " <>
+       "(the checker changed under it). A degraded universe reads and stages as ever, but " <>
+       "eval and test refuse until a patch that makes the whole image typecheck promotes.", %{},
      []}
   ]
 
@@ -107,8 +112,9 @@ defmodule KinokoWeb.Mcp.Tools do
 
   defp run("list_universes", _args) do
     case Universe.list() do
+      {:error, error} -> universe_error(error, nil)
       [] -> {:ok, "no universes"}
-      universes -> {:ok, Enum.map_join(universes, "\n", & &1.name)}
+      universes -> {:ok, Enum.map_join(universes, "\n", &universe_line(&1.name))}
     end
   end
 
@@ -118,6 +124,7 @@ defmodule KinokoWeb.Mcp.Tools do
         :ok -> {:ok, "created: #{name}"}
         {:error, :exists} -> {:error, "universe #{name} already exists"}
         {:error, :bad_name} -> universe_error(:bad_name, name)
+        {:error, error} -> universe_error(error, name)
       end
     end
   end
@@ -168,9 +175,19 @@ defmodule KinokoWeb.Mcp.Tools do
   defp run("symbols", args) do
     with {:ok, u} <- universe(args) do
       case Universe.symbols(u) do
-        {:error, error} -> universe_error(error, u)
-        [] -> {:ok, "no symbols (the universe is empty)"}
-        symbols -> {:ok, Enum.map_join(symbols, "\n", &symbol_line/1)}
+        {:error, error} ->
+          universe_error(error, u)
+
+        [] ->
+          {:ok, "no symbols (the universe is empty)"}
+
+        symbols ->
+          lines = Enum.map(symbols, &symbol_line/1)
+
+          case Universe.health(u) do
+            {:degraded, reasons} -> {:ok, Enum.join([degraded_line(reasons) | lines], "\n")}
+            _ -> {:ok, Enum.join(lines, "\n")}
+          end
       end
     end
   end
@@ -209,7 +226,58 @@ defmodule KinokoWeb.Mcp.Tools do
     end
   end
 
+  defp run("health", args) do
+    with {:ok, u} <- universe(args) do
+      case Universe.health(u) do
+        :ok ->
+          {:ok, "ok: #{u} is healthy (its committed code typechecks)"}
+
+        {:degraded, reasons} ->
+          {:ok,
+           Enum.join(
+             [
+               "degraded: #{u}'s committed code no longer typechecks. Reading and staging " <>
+                 "work; eval and test refuse until a patch that fixes every reason below " <>
+                 "promotes (promotion checks the whole image)."
+               | reason_lines(reasons)
+             ],
+             "\n"
+           )}
+
+        {:error, error} ->
+          universe_error(error, u)
+      end
+    end
+  end
+
   ## Text
+
+  # A universe's name, and why it is not healthy when it is not.
+  defp universe_line(name) do
+    case Universe.health(name) do
+      {:degraded, reasons} ->
+        "#{name} (DEGRADED: #{failing(reasons)} no longer typecheck; see health)"
+
+      {:error, %{code: code}} ->
+        "#{name} (cannot open: [#{code}]; see health)"
+
+      _ ->
+        name
+    end
+  end
+
+  defp degraded_line(reasons),
+    do:
+      "DEGRADED: #{failing(reasons)} no longer typecheck, so eval and test refuse " <>
+        "until a fix promotes (see health)."
+
+  defp failing(reasons) do
+    reasons
+    |> Enum.map(&Map.get(&1, :name))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.join(", ")
+  end
 
   defp staged_text(id, reasons) do
     Enum.join(
@@ -257,14 +325,15 @@ defmodule KinokoWeb.Mcp.Tools do
   defp universe_error(:bad_name, u),
     do: {:error, "bad universe name: #{inspect(u)} (names match #{@name_rule})"}
 
-  # The reasons only when they say more than the message (the message is
-  # the first reason's).
+  # The reasons only where they say more than the message (the message is
+  # the first reason's): each said once, and none that repeats the message.
   defp universe_error(%{code: code, message: message} = error, _u) do
     reasons =
-      case Map.get(error, :reasons, []) do
-        [%{code: ^code, message: ^message}] -> []
-        reasons -> reason_lines(reasons)
-      end
+      error
+      |> Map.get(:reasons, [])
+      |> Enum.uniq_by(&{&1.code, &1.message})
+      |> Enum.reject(&(&1.code == code and &1.message == message))
+      |> reason_lines()
 
     {:error, Enum.join(["error: [#{code}] #{message}" | reasons], "\n")}
   end

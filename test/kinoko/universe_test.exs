@@ -230,6 +230,89 @@ defmodule Kinoko.UniverseTest do
     end
   end
 
+  describe "degraded" do
+    test "committed code that no longer typechecks boots degraded, and a fix heals it", %{u: u} do
+      store_commit(u, @f)
+
+      log =
+        capture_log(fn ->
+          assert {:degraded, [%{name: "A.f", code: "unbound"}]} = Universe.health(u)
+        end)
+
+      assert log =~ "degraded"
+
+      # Reading works, as stored.
+      assert [%{symbol: "A.f"}] = Universe.symbols(u)
+      assert {:ok, "def A.f" <> _} = Universe.read(u, "A.f")
+      assert [%{ids: ["old"]}] = Universe.history(u)
+
+      # Nothing runs.
+      assert {:error, %{code: "degraded", message: m}} = Universe.eval(u, "1", [])
+      assert m =~ "`A.f`"
+      assert {:error, %{code: "degraded"}} = Universe.call(u, "A.f", [], [])
+      assert {:error, %{code: "degraded"}} = Universe.test(u, "A.t", [])
+
+      # A sound patch that leaves the image broken stays staged with the
+      # image's reasons; unstaging works.
+      assert {:staged, [%{name: "A.f", code: "unbound"}]} =
+               Universe.stage(u, "other", "def B.x() : Int do\n  2\nend")
+
+      assert [%{id: "other", reasons: [%{name: "A.f"}]}] = Universe.staged(u)
+      assert :ok = Universe.unstage(u, "other")
+
+      # The fix promotes; the universe is healthy and runs.
+      assert {:promoted, ["fix"]} = Universe.stage(u, "fix", @g)
+      assert :ok = Universe.health(u)
+      assert {:ok, 1, _} = Universe.eval(u, "A.f()", [])
+      assert [%{ids: ["old"]}, %{ids: ["fix"]}] = Universe.history(u)
+
+      # And it boots healthy from what it stored.
+      stop(u)
+      assert :ok = Universe.health(u)
+      assert {:ok, 1, _} = Universe.eval(u, "A.f()", [])
+    end
+
+    test "health is :ok for a sound universe", %{u: u} do
+      assert :ok = Universe.health(u)
+      {:promoted, _} = Universe.stage(u, "p1", @g)
+      assert :ok = Universe.health(u)
+      assert {:error, :no_such_universe} = Universe.health("nope-health")
+    end
+  end
+
+  describe "errors" do
+    test "list and create answer unavailable when the database fails" do
+      Repo.query!("ALTER TABLE universes RENAME TO universes_away")
+
+      assert {:error, %{code: "unavailable"}} = Universe.list()
+      assert {:error, %{code: "unavailable"}} = Universe.create("any")
+
+      Repo.query!("ALTER TABLE universes_away RENAME TO universes")
+      assert is_list(Universe.list())
+    end
+
+    test "an eval naming a symbol only a staged patch defines says so", %{u: u} do
+      {:promoted, _} = Universe.stage(u, "p1", @g)
+      {:staged, _} = Universe.stage(u, "wip", "def A.h() : Int do\n  A.nope()\nend")
+
+      assert {:error, %{code: "unbound", message: m}} = Universe.eval(u, "A.h()", [])
+      assert m =~ "(staged under `wip`, not promoted)"
+
+      assert {:error, %{code: "runtime", message: m}} = Universe.call(u, "A.h", [], [])
+      assert m =~ "(staged under `wip`, not promoted)"
+
+      # Nothing staged defines it: the message is as it was.
+      assert {:error, %{code: "unbound", message: m}} = Universe.eval(u, "A.zz()", [])
+      refute m =~ "staged under"
+    end
+
+    test "a CodeDb answers a request it does not know with an error", %{u: u} do
+      [] = Universe.symbols(u)
+      assert {:error, :unknown_request} = Kinoko.PersistentElmGenServer.call(key(u), :bogus)
+      assert [] = Universe.symbols(u)
+    end
+  end
+
   describe "review focus" do
     # 1. Two concurrent stages to the same universe from different processes.
     test "concurrent stages are serialized, each verdict correct, history consistent", %{u: u} do

@@ -287,14 +287,35 @@ defmodule Kinoko.Lang do
   The universe `durable/1` describes, given `decls`, the declaration of each
   CID (`%{cid => decl}`; parsed from the CAS's text). Committed code is
   checked again, then the staged patches are staged again in order, so
-  their reasons are worked out afresh. `{:error, reasons}`: a `"restore"`
-  reason for a CID with no declaration (`name: nil`, the message naming the
-  CID) or a declaration that is not the CID or name it is given for; or the
-  reasons committed code does not typecheck.
+  their reasons are worked out afresh.
+
+  `{:degraded, u, reasons}` when committed code no longer typechecks (the
+  checker changed under it): `u` keeps committed code as stored and
+  `reasons` say which declarations fail and why. A degraded universe
+  stages, unstages and reads as ever, but a patch promotes only when the
+  whole image typechecks with it; the first that does makes it sound again
+  (`health/1`). Its `snapshot/1` is not runnable: check `health/1` first.
+
+  `{:error, reasons}`: storage that cannot be restored at all, a
+  `"restore"` reason for a CID with no declaration (`name: nil`, the message
+  naming the CID) or a declaration that is not the CID or name it is given
+  for.
   """
   @spec restore([map()], [{String.t(), [tuple()]}], %{String.t() => Ast.decl()}) ::
-          {:ok, Universe.t()} | {:error, [reason]}
+          {:ok, Universe.t()} | {:degraded, Universe.t(), [reason]} | {:error, [reason]}
   defdelegate restore(commits, staged, decls), to: Universe
+
+  @doc """
+  `:ok`, or `{:degraded, reasons}` while committed code does not typecheck
+  (`restore/3` restored it degraded and nothing has promoted since).
+  """
+  @spec health(Universe.t()) :: :ok | {:degraded, [reason]}
+  def health(u) do
+    case Universe.degraded(u) do
+      nil -> :ok
+      reasons -> {:degraded, reasons}
+    end
+  end
 
   @doc """
   What `Kinoko.Exec` runs against: `%{committed: committed(u), signatures:
@@ -306,6 +327,13 @@ defmodule Kinoko.Lang do
   @doc "Every promoted round, oldest first: `%{ids: [id], entries: [{:live, name, cid} | {:gone, name}]}`."
   @spec history(Universe.t()) :: [map()]
   defdelegate history(u), to: Universe
+
+  @doc """
+  The hash of the committed code's image (`Kinoko.Lang.Codegen.image_hash/1`):
+  what `image/1` would name its module by, without compiling anything.
+  """
+  @spec image_hash(Universe.t()) :: String.t()
+  def image_hash(u), do: u |> Universe.committed() |> Codegen.image_hash()
 
   @doc """
   The committed code compiled to one Erlang module (`Kinoko.Lang.Codegen`):
@@ -323,16 +351,17 @@ defmodule Kinoko.Lang do
   def image(u), do: u |> committed() |> Codegen.compile()
 
   @doc """
-  The expression `source` checked against the committed signatures (it
+  The expression `source` checked against the committed signatures (of a
+  universe, a snapshot, or any map holding `signatures:`; it
   may stay polymorphic): `{:ok, typed, type}`, or `{:error, [reason]}`
   with a `"parse"` reason or the checker's.
   """
-  @spec check_expr(Universe.t() | snapshot(), String.t()) ::
+  @spec check_expr(Universe.t() | %{signatures: map()}, String.t()) ::
           {:ok, tuple(), term()} | {:error, [reason]}
   def check_expr(u, source) when is_binary(source) do
     sigs =
       case u do
-        %{committed: _, signatures: sigs} -> sigs
+        %{signatures: sigs} when not is_struct(u) -> sigs
         u -> signatures(u)
       end
 

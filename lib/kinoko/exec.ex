@@ -153,6 +153,27 @@ defmodule Kinoko.Exec do
 
   defp key(hash), do: {__MODULE__, :image, hash}
 
+  @doc """
+  The image `load/2` loaded under `hash` (`Kinoko.Lang.image_hash/1`),
+  loaded again if purged since: `{:ok, image}`, or `:error` when no image
+  of that hash is loaded (or it was `unload/1`ed). Compiles nothing: a host
+  that knows its code's hash asks here first and builds a snapshot only on
+  `:error`.
+  """
+  @spec loaded(String.t()) :: {:ok, image} | :error
+  def loaded(hash) when is_binary(hash) do
+    case :persistent_term.get(key(hash), nil) do
+      nil ->
+        :error
+
+      image ->
+        case ensure_loaded(image) do
+          {:ok, image} -> {:ok, image}
+          {:error, _} -> :error
+        end
+    end
+  end
+
   # `f` under the image's lock, which `load/2` and `unload/1` share: a
   # module is never loaded while another caller purges it.
   # (The lock's requester is the caller: `:global` lets one requester hold
@@ -286,6 +307,7 @@ defmodule Kinoko.Exec do
   end
 
   defp image(%{module: _, binary: _} = image, _opts), do: ensure_loaded(image)
+  defp image(%{image: image, signatures: _}, _opts), do: ensure_loaded(image)
 
   defp image(snapshot, opts) when is_map_key(snapshot, :committed) and not is_struct(snapshot),
     do: load(snapshot, opts)
@@ -295,16 +317,21 @@ defmodule Kinoko.Exec do
   @doc """
   The expression `source`, checked against the snapshot's signatures and
   evaluated with it: `{:ok, value, type}` or `{:error, %{code, message}}`.
+  In place of a snapshot, `%{image: image, signatures: sigs}` (a loaded
+  image and the signatures of the code it was made from) evaluates without
+  the committed code.
   An expression that does not parse or check is refused with its first
   reason's code and message (`reasons:` holds them all) before anything
   runs. `always` and `sometimes` in it are evaluated, never scored.
   """
-  @spec eval(Lang.snapshot(), String.t(), keyword()) :: {:ok, term(), term()} | {:error, error}
-  def eval(snapshot, source, opts \\ [])
-      when is_map_key(snapshot, :committed) and not is_struct(snapshot) and is_binary(source) do
-    case Lang.check_expr(snapshot, source) do
+  @spec eval(Lang.snapshot() | %{image: image, signatures: map()}, String.t(), keyword()) ::
+          {:ok, term(), term()} | {:error, error}
+  def eval(target, source, opts \\ [])
+      when (is_map_key(target, :committed) or is_map_key(target, :image)) and
+             not is_struct(target) and is_binary(source) do
+    case Lang.check_expr(target, source) do
       {:ok, typed, type} ->
-        with {:ok, image} <- load(snapshot, opts),
+        with {:ok, image} <- image(target, opts),
              {:ok, forms} <- expr_forms(typed, image),
              {:ok, value} <- run(image, fn -> erl_eval(forms) end, opts) do
           {:ok, value, type}

@@ -54,6 +54,40 @@ defmodule Kinoko.UniverseHelpers do
 
   def pid(name), do: Server.whereis(key(name))
 
+  @doc """
+  Stores `source` as universe `name`'s only commit (id `"old"`), written
+  directly to the CAS and to the CodeDb's row, without checking it: what
+  storage holds after the checker changed under code that used to
+  typecheck. Stop the universe first if it runs.
+  """
+  def store_commit(name, source) do
+    alias Kinoko.{Cas, CodeDb, Lang}
+
+    {:ok, entries, texts} = Lang.prepare(source)
+    :ok = Cas.put(texts)
+
+    live =
+      for {{:live, decl}, {cid, _}} <- Enum.zip(entries, texts),
+          do: {:live, Kinoko.Lang.Ast.name(decl), cid}
+
+    durable = %{commits: [%{ids: ["old"], entries: live}], staged: []}
+
+    seq =
+      case Kinoko.Elm.Store.latest(key(name)) do
+        :none -> 0
+        {:ok, row} -> row.seq + 1
+      end
+
+    :ok =
+      Kinoko.Elm.Store.append(
+        key(name),
+        seq,
+        inspect(CodeDb),
+        CodeDb.version(),
+        CodeDb.encode(durable)
+      )
+  end
+
   @doc "Every stored row of `name`'s CodeDb, newest first."
   def rows(name), do: Kinoko.Elm.Store.history(key(name), 1_000)
 end

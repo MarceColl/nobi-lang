@@ -68,8 +68,8 @@ defmodule Kinoko.CodeDbTest do
       :ok = Cas.put(texts)
     end
 
-    durable = CodeDb.durable(u)
-    restored = durable |> CodeDb.encode() |> CodeDb.decode()
+    durable = Lang.durable(u)
+    %{u: restored} = durable |> CodeDb.encode() |> CodeDb.decode()
     assert Lang.durable(restored) == durable
     assert Lang.staged(restored) == Lang.staged(u)
     assert Lang.symbols(restored) == Lang.symbols(u)
@@ -78,7 +78,7 @@ defmodule Kinoko.CodeDbTest do
   test "decode raises naming the CID when a CAS row is missing" do
     {u, {:promoted, _}} = Lang.stage(Lang.new(), "p1", @g)
     [%{cid: cid}] = Lang.symbols(u)
-    binary = u |> CodeDb.durable() |> CodeDb.encode()
+    binary = u |> Lang.durable() |> CodeDb.encode()
 
     error = assert_raise RuntimeError, fn -> CodeDb.decode(binary) end
     assert error.message =~ cid
@@ -88,7 +88,7 @@ defmodule Kinoko.CodeDbTest do
     {u, {:promoted, _}} = Lang.stage(Lang.new(), "p1", @g)
     [%{cid: cid}] = Lang.symbols(u)
     Cas.put([{cid, "def ((("}])
-    binary = u |> CodeDb.durable() |> CodeDb.encode()
+    binary = u |> Lang.durable() |> CodeDb.encode()
 
     error = assert_raise RuntimeError, fn -> CodeDb.decode(binary) end
     assert error.message =~ cid
@@ -99,7 +99,7 @@ defmodule Kinoko.CodeDbTest do
     {u, {:promoted, _}} = Lang.stage(Lang.new(), "p1", @g)
     [%{cid: cid}] = Lang.symbols(u)
     Cas.put([{cid, @g <> "\n\n" <> @f}])
-    binary = u |> CodeDb.durable() |> CodeDb.encode()
+    binary = u |> Lang.durable() |> CodeDb.encode()
 
     error = assert_raise RuntimeError, fn -> CodeDb.decode(binary) end
     assert error.message =~ cid
