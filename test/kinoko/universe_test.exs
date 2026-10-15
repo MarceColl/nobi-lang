@@ -230,6 +230,20 @@ defmodule Kinoko.UniverseTest do
     end
   end
 
+  # The process running `module`'s code (the eval's worker), once there is one.
+  defp await_running(module) do
+    Enum.find_value(1..500, fn _ ->
+      Enum.find(Process.list(), &running?(&1, module)) || (Process.sleep(2) && nil)
+    end) || flunk("no process ever ran #{module}")
+  end
+
+  defp running?(pid, module) do
+    case Process.info(pid, :current_stacktrace) do
+      {:current_stacktrace, frames} -> Enum.any?(frames, &match?({^module, _, _, _}, &1))
+      nil -> false
+    end
+  end
+
   describe "degraded" do
     test "committed code that no longer typechecks boots degraded, and a fix heals it", %{u: u} do
       store_commit(u, @f)
@@ -423,18 +437,24 @@ defmodule Kinoko.UniverseTest do
       end)
     end
 
-    # 4. A long eval at the same time as a stage.
+    # 4. A long eval at the same time as a stage. The eval's worker is seen
+    # running the image's code before the stage starts, and still running
+    # it after the stage returned: the stage provably happened during it.
     test "a long eval does not block a concurrent stage", %{u: u} do
       {:promoted, _} = Universe.stage(u, "loop", "def A.loop(n : Int) : Int do A.loop(n + 1) end")
       # Compile the image up front, so the eval below is all running.
       {:ok, 1, _} = Universe.eval(u, "1", [])
+      {:ok, hash, _sigs} = Kinoko.PersistentElmGenServer.call(key(u), :image_key)
+      {:ok, %{module: module}} = Exec.loaded(hash)
 
       eval = Task.async(fn -> Universe.eval(u, "A.loop(0)", timeout: 2_000) end)
-      Process.sleep(100)
+      worker = await_running(module)
 
       {us, result} = :timer.tc(fn -> Universe.stage(u, "p1", @g) end)
       assert {:promoted, ["p1"]} = result
       assert us < 1_000_000
+
+      assert running?(worker, module), "the eval finished before the stage returned"
       assert Task.yield(eval, 0) == nil
 
       assert {:error, %{code: "timeout"}} = Task.await(eval, 10_000)
