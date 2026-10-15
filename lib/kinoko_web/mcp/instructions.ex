@@ -59,7 +59,9 @@ defmodule KinokoWeb.Mcp.Instructions do
   - Every Model field must be defaultable (Int, String, Bool, Uuid, List, Map,
     Option, tuple, nested model). A custom deftype can never be a Model field:
     use String / Option<...> / Bool for state like the current screen.
-  - always(...) inside update must hold in every reachable state, init's included.
+  - always(...) is checked when it runs: an `eval` that reaches it, or a `test`.
+    Nothing explores states for you, so drive update through the cases that
+    matter (init's model included) with eval, or write a deftest.
   - `eval` and `test` see only committed code: a staged patch is invisible
     until it promotes.
   - Cmd values (effects) are data here: `eval` shows the Cmd a function returns,

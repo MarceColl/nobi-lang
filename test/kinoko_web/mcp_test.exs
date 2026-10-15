@@ -19,6 +19,8 @@ defmodule KinokoWeb.McpTest do
     |> post("/mcp", body)
   end
 
+  defp rpc_body(method), do: Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => method})
+
   defp rpc(conn, method, params \\ nil, id \\ 1) do
     msg = %{"jsonrpc" => "2.0", "id" => id, "method" => method}
     msg = if params, do: Map.put(msg, "params", params), else: msg
@@ -188,6 +190,85 @@ defmodule KinokoWeb.McpTest do
     end
   end
 
+  describe "request guard" do
+    defp stage_body(u, id),
+      do:
+        Jason.encode!(%{
+          "jsonrpc" => "2.0",
+          "id" => 1,
+          "method" => "tools/call",
+          "params" => %{
+            "name" => "stage_patch",
+            "arguments" => %{"universe" => u, "id" => id, "source" => @g}
+          }
+        })
+
+    test "a foreign Origin is 403 and nothing runs", %{conn: conn, u: u} do
+      conn =
+        conn |> put_req_header("origin", "https://evil.example") |> post_raw(stage_body(u, "g"))
+
+      assert conn.status == 403
+      assert %{"error" => %{"code" => -32600}, "id" => nil} = Jason.decode!(conn.resp_body)
+      assert Kinoko.Universe.symbols(u) == []
+      assert Kinoko.Universe.staged(u) == []
+    end
+
+    test "a cross-site simple request (text/plain) is 415 and nothing runs", %{conn: conn, u: u} do
+      conn =
+        conn
+        |> put_req_header("origin", "https://evil.example")
+        |> put_req_header("content-type", "text/plain")
+        |> post("/mcp", stage_body(u, "g"))
+
+      assert conn.status in [403, 415]
+
+      conn =
+        build_conn()
+        |> put_req_header("content-type", "text/plain")
+        |> post("/mcp", stage_body(u, "g"))
+
+      assert conn.status == 415
+      assert %{"error" => %{"code" => -32600}} = Jason.decode!(conn.resp_body)
+      assert Kinoko.Universe.symbols(u) == []
+    end
+
+    test "local origins, and no Origin at all, are served", %{conn: conn, u: u} do
+      for origin <- ["http://localhost:4000", "http://127.0.0.1:4123", "http://[::1]:4000"] do
+        c = build_conn() |> put_req_header("origin", origin) |> post_raw(rpc_body("ping"))
+        assert c.status == 200, origin
+      end
+
+      c = conn |> post_raw(stage_body(u, "g"))
+      assert c.status == 200
+      assert [%{symbol: "A.g"}] = Kinoko.Universe.symbols(u)
+    end
+
+    test "content type with a charset is accepted", %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json; charset=utf-8")
+        |> post("/mcp", rpc_body("ping"))
+
+      assert conn.status == 200
+    end
+
+    test "MCP-Protocol-Version: a supported one passes, an unknown one is 400", %{conn: conn} do
+      ok =
+        conn |> put_req_header("mcp-protocol-version", "2025-06-18") |> post_raw(rpc_body("ping"))
+
+      assert ok.status == 200
+
+      bad =
+        build_conn()
+        |> put_req_header("mcp-protocol-version", "1999-01-01")
+        |> post_raw(rpc_body("ping"))
+
+      assert bad.status == 400
+      assert %{"error" => %{"code" => -32600, "message" => m}} = Jason.decode!(bad.resp_body)
+      assert m =~ "1999-01-01"
+    end
+  end
+
   # ---------- tools ----------
 
   describe "tools/list" do
@@ -240,6 +321,11 @@ defmodule KinokoWeb.McpTest do
         assert err!(conn, tool, Map.put(args, "universe", nope)) =~ "no such universe: #{nope}"
         assert err!(conn, tool, Map.put(args, "universe", "Not A Name")) =~ "bad universe name"
       end
+    end
+
+    test "list_universes with none says so", %{conn: conn} do
+      Kinoko.Repo.query!("delete from universes")
+      assert ok!(conn, "list_universes", %{}) == "no universes"
     end
 
     test "the universe argument defaults to main", %{conn: conn} do

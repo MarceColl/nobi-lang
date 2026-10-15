@@ -105,8 +105,12 @@ defmodule KinokoWeb.Mcp.Tools do
 
   ## The tools
 
-  defp run("list_universes", _args),
-    do: {:ok, Universe.list() |> Enum.map_join("\n", & &1.name)}
+  defp run("list_universes", _args) do
+    case Universe.list() do
+      [] -> {:ok, "no universes"}
+      universes -> {:ok, Enum.map_join(universes, "\n", & &1.name)}
+    end
+  end
 
   defp run("create_universe", args) do
     with {:ok, name} <- string(args, "name") do

@@ -7,7 +7,8 @@ defmodule KinokoWeb.Mcp.Protocol do
     or a response the client sends back, is `:accepted` (HTTP 202, no body).
   - A body that is not JSON is `-32700`; a batch array, or anything that is
     not a JSON-RPC 2.0 message, is `-32600`. Both have `id: null` and HTTP 400.
-    (MCP 2025-06-18 dropped batching, so a batch is refused, not run.)
+    (MCP 2025-06-18 dropped batching, so a batch is refused, not run, even
+    for a client that negotiated 2025-03-26, which still allowed batches.)
   - An unknown method is `-32601`. Params of the wrong shape and an unknown
     tool are `-32602`.
   - A tool that raises or exits answers an `isError` result naming what
@@ -28,6 +29,10 @@ defmodule KinokoWeb.Mcp.Protocol do
   @invalid_request -32600
   @method_not_found -32601
   @invalid_params -32602
+
+  @doc "The protocol versions this server speaks, newest first."
+  @spec protocol_versions() :: [String.t()]
+  def protocol_versions, do: @protocol_versions
 
   @type answer :: {:reply, 200 | 400, map()} | :accepted
 

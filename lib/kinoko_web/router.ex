@@ -18,6 +18,7 @@ defmodule KinokoWeb.Router do
   # endpoint leaves the body unparsed for this path (see `KinokoWeb.Endpoint`).
   pipeline :mcp do
     plug :accepts, ["json"]
+    plug KinokoWeb.Mcp.Guard
   end
 
   scope "/", KinokoWeb do
