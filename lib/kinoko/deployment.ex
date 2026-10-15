@@ -5,8 +5,14 @@ defmodule Kinoko.Deployment do
   A deployment is `%{name, universe, routes, commit, hosts}`. `routes` names
   the route table (a `defroutes` symbol) the host serves; `commit` is `nil`
   to follow the universe's head, or a 1-based history position it is pinned
-  to; `hosts` are the exact hostnames that reach it. A host
-  `<name>.localhost` reaches deployment `<name>` without being listed.
+  to; `hosts` are the exact hostnames that reach it. Where
+  `:localhost_deployments` is on (it defaults to `:mcp_enabled`: dev and
+  test, never prod), a host `<name>.localhost` reaches deployment `<name>`
+  without being listed.
+
+  `pin/2` and `follow/1` announce the change on `Kinoko.PubSub`, topic
+  `topic(name)`, as `{:deployment_changed, name}`, so pages serving the
+  deployment switch code at once.
 
   Process-free; plain functions over `Kinoko.Repo`. Universes are only ever
   reached through `Kinoko.Universe`. `ensure_local/0` runs at boot (see
@@ -102,8 +108,16 @@ defmodule Kinoko.Deployment do
   end
 
   @doc """
+  The `Kinoko.PubSub` topic on which `pin/2` and `follow/1` broadcast
+  `{:deployment_changed, name}` after the row is written. Pure.
+  """
+  @spec topic(String.t()) :: String.t()
+  def topic(name) when is_binary(name), do: "deployment:" <> name
+
+  @doc """
   The deployment a request host reaches: an exact match against any
-  deployment's `hosts`, else `<name>.localhost` for deployment `<name>`.
+  deployment's `hosts`, else, where `:localhost_deployments` is configured
+  (dev and test only), `<name>.localhost` for deployment `<name>`.
   Case-insensitive; a port and a trailing dot are ignored.
   """
   @spec resolve(String.t()) :: {:ok, t} | :error
@@ -162,10 +176,20 @@ defmodule Kinoko.Deployment do
   end
 
   defp by_localhost(host) do
-    case String.split(host, ".") do
-      [name, "localhost"] -> get(name)
+    case {localhost_deployments?(), String.split(host, ".")} do
+      {true, [name, "localhost"]} -> get(name)
       _ -> :error
     end
+  end
+
+  # `:localhost_deployments`; unset, it follows `:mcp_enabled`, which is
+  # set in dev and test only (never prod), like deployment serving itself.
+  defp localhost_deployments? do
+    Application.get_env(
+      :kinoko,
+      :localhost_deployments,
+      Application.get_env(:kinoko, :mcp_enabled, false)
+    ) == true
   end
 
   defp fetch(name) do
@@ -196,7 +220,7 @@ defmodule Kinoko.Deployment do
         set: [commit: commit, updated_at: DateTime.utc_now()]
       )
 
-    :ok
+    Phoenix.PubSub.broadcast(Kinoko.PubSub, topic(name), {:deployment_changed, name})
   end
 
   defp universe_exists?(universe) do

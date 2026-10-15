@@ -51,6 +51,40 @@ defmodule Kinoko.DeploymentTest do
     assert {:error, :not_found} = Deployment.follow("nope")
   end
 
+  test "pin and follow broadcast deployment_changed on the deployment's topic" do
+    u = fresh_universe()
+    n = dname()
+    assert {:promoted, _} = Universe.stage(u, "one", @v1)
+    :ok = Deployment.create(n, u, "Main")
+    :ok = Phoenix.PubSub.subscribe(Kinoko.PubSub, Deployment.topic(n))
+
+    :ok = Deployment.pin(n, 1)
+    assert_receive {:deployment_changed, ^n}
+    :ok = Deployment.follow(n)
+    assert_receive {:deployment_changed, ^n}
+
+    {:error, :no_such_commit} = Deployment.pin(n, 9)
+    refute_receive {:deployment_changed, _}, 50
+  end
+
+  test "<name>.localhost resolves only where :localhost_deployments is on" do
+    u = fresh_universe()
+    n = dname()
+    :ok = Deployment.create(n, u, "Main", hosts: ["app.example.com"])
+    previous = Application.fetch_env(:kinoko, :localhost_deployments)
+    Application.put_env(:kinoko, :localhost_deployments, false)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, v} -> Application.put_env(:kinoko, :localhost_deployments, v)
+        :error -> Application.delete_env(:kinoko, :localhost_deployments)
+      end
+    end)
+
+    assert :error = Deployment.resolve("#{n}.localhost")
+    assert {:ok, %{name: ^n}} = Deployment.resolve("app.example.com")
+  end
+
   test "resolve: exact host, <name>.localhost, unknown" do
     u = fresh_universe()
     n = dname()
