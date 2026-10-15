@@ -155,10 +155,24 @@ defmodule Kinoko.Universe do
     end
   end
 
-  @doc "Calls def `symbol` of the current commit with `args`, in the caller: `{:ok, value} | {:error, %{code, message}}`."
-  @spec call(name, String.t(), [term()], keyword()) :: {:ok, term()} | error
+  @doc """
+  Calls def `symbol` of the current commit with `args`, in the caller:
+  `{:ok, value, type}` (`type` the def's declared return type, as `eval/3`
+  gives one) or `{:error, %{code, message}}`.
+  """
+  @spec call(name, String.t(), [term()], keyword()) :: {:ok, term(), term()} | error
   def call(universe, symbol, args, opts \\ []) do
-    with {:ok, snapshot} <- snapshot(universe), do: Exec.call(snapshot, symbol, args, opts)
+    with {:ok, snapshot} <- snapshot(universe),
+         {:ok, value} <- Exec.call(snapshot, symbol, args, opts) do
+      {:ok, value, return_type(snapshot, symbol)}
+    end
+  end
+
+  defp return_type(%{signatures: sigs}, symbol) do
+    case sigs do
+      %{^symbol => {:def, _params, ret}} -> ret
+      _ -> nil
+    end
   end
 
   @doc "Runs deftest `symbol` of the current commit, in the caller: `:ok | {:error, %{code, message, ...}}`."

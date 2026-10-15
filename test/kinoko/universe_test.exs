@@ -210,7 +210,7 @@ defmodule Kinoko.UniverseTest do
         end
         """)
 
-      assert {:ok, 8} = Universe.call(u, "M.double", [4], [])
+      assert {:ok, 8, {:named, "Int"}} = Universe.call(u, "M.double", [4], [])
       assert :ok = Universe.test(u, "M.doubles", [])
       assert {:error, %{code: "test"}} = Universe.test(u, "M.wrong", [])
       assert {:error, %{code: "unbound"}} = Universe.eval(u, "M.nope(1)", [])
@@ -219,7 +219,7 @@ defmodule Kinoko.UniverseTest do
       {:staged, _} =
         Universe.stage(u, "m2", "def M.double(n : Int) : Int do\n  M.nope(n)\nend")
 
-      assert {:ok, 8} = Universe.call(u, "M.double", [4], [])
+      assert {:ok, 8, {:named, "Int"}} = Universe.call(u, "M.double", [4], [])
     end
 
     test "see a newly promoted commit", %{u: u} do

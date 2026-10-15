@@ -12,7 +12,6 @@ defmodule Kinoko.ReplTest do
   setup do
     name = fresh_universe("repl")
     capture_io(fn -> assert Y.use(name) == :ok end)
-    on_exit(fn -> Process.delete({Kinoko.Repl, :universe}) end)
     %{u: name}
   end
 
@@ -134,6 +133,24 @@ defmodule Kinoko.ReplTest do
 
     # And the next anonymous id continues the numbering.
     assert capture_io(fn -> Y.load("def A.two() : Int do 2 end") end) =~ "promoted: repl-2"
+  end
+
+  test "a universe that no longer exists is reported by every command, not a crash" do
+    Process.put({Kinoko.Repl, :universe}, "gone-#{System.unique_integer([:positive])}")
+
+    for fun <- [
+          fn -> Y.test("A.t") end,
+          fn -> Y.eval("1") end,
+          fn -> Y.call("A.one", []) end,
+          fn -> Y.symbols() end,
+          fn -> Y.read("A.one") end,
+          fn -> Y.unstage("x") end,
+          fn -> Y.history() end,
+          fn -> Y.load("def A.one() : Int do 1 end") end
+        ] do
+      out = capture_io(fn -> assert {:error, :no_such_universe} = fun.() end)
+      assert out =~ "no such universe"
+    end
   end
 
   test "main works out of the box" do

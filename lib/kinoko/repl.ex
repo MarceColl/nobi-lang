@@ -227,8 +227,8 @@ defmodule Kinoko.Repl do
   @spec call(String.t(), [term()], keyword()) :: term()
   def call(name, args, opts \\ []) do
     case Universe.call(current(), name, args, opts) do
-      {:ok, value} ->
-        IO.puts(show_untyped(name, value))
+      {:ok, value, type} ->
+        IO.puts("#{Exec.show(value, type)} : #{Format.type(type)}")
         remember(value)
 
       {:error, error} ->
@@ -263,8 +263,7 @@ defmodule Kinoko.Repl do
         {:error, error}
 
       {:error, error} ->
-        print_error(error)
-        {:error, error}
+        fail(error)
     end
   end
 
@@ -377,19 +376,5 @@ defmodule Kinoko.Repl do
     end
 
     :ok
-  end
-
-  # `call/3` has no static type to hand to the printer; the def's return type
-  # is the tail of its signature text.
-  defp show_untyped(name, value) do
-    with symbols when is_list(symbols) <- Universe.symbols(current()),
-         %{signature: sig} <- Enum.find(symbols, &(&1.symbol == name)),
-         [_, ret] <- Regex.run(~r/\) : (.+)\z/s, sig) do
-      "#{Exec.show(value, nil)} : #{ret}"
-    else
-      _ -> Exec.show(value, nil)
-    end
-  rescue
-    _ -> inspect(value)
   end
 end
