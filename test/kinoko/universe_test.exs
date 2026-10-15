@@ -578,6 +578,27 @@ defmodule Kinoko.UniverseTest do
     end
   end
 
+  describe "current" do
+    test "runs every call on the image it resolved, with no further round trip", %{u: u} do
+      assert {:promoted, _} = Universe.stage(u, "p", @g)
+      assert {:ok, current} = Universe.current(u)
+      assert {:ok, 1, _} = Universe.call(current, "A.g", [])
+
+      assert {:promoted, _} = Universe.stage(u, "p2", "def A.g() : Int do\n  2\nend")
+      assert {:ok, 1, _} = Universe.call(current, "A.g", [])
+      assert {:ok, 2, _} = Universe.call(u, "A.g", [])
+
+      # The CodeDb is not consulted: the handle runs with it stopped.
+      stop(u)
+      assert {:ok, 1, _} = Universe.call(current, "A.g", [])
+    end
+
+    test "errors as call/4 does", %{u: _u} do
+      assert {:error, :no_such_universe} =
+               Universe.current("nope-#{System.unique_integer([:positive])}")
+    end
+  end
+
   describe "at" do
     test "answers with a past commit's code after head changed", %{u: u} do
       {:promoted, _} = Universe.stage(u, "p1", @g)

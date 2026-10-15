@@ -69,7 +69,7 @@ defmodule Kinoko.Universe do
 
   alias Kinoko.{Cas, CodeDb, Exec, Lang}
   alias Kinoko.PersistentElmGenServer, as: Server
-  alias Kinoko.Universe.{At, AtCache, Registry}
+  alias Kinoko.Universe.{At, AtCache, Current, Registry}
 
   @read_timeout 5_000
 
@@ -200,7 +200,7 @@ defmodule Kinoko.Universe do
   caller: `{:ok, value, type}` or `{:error, %{code, message}}`
   (`Kinoko.Exec.eval/3`; `opts` are its limits, e.g. `timeout:`).
   """
-  @spec eval(name | At.t(), String.t(), keyword()) :: {:ok, term(), term()} | error
+  @spec eval(name | At.t() | Current.t(), String.t(), keyword()) :: {:ok, term(), term()} | error
   def eval(universe, expr_source, opts \\ []) do
     with {:ok, target} <- target(universe) do
       if is_binary(expr_source),
@@ -216,7 +216,8 @@ defmodule Kinoko.Universe do
   `{:ok, value, type}` (`type` the def's declared return type, as `eval/3`
   gives one) or `{:error, %{code, message}}`.
   """
-  @spec call(name | At.t(), String.t(), [term()], keyword()) :: {:ok, term(), term()} | error
+  @spec call(name | At.t() | Current.t(), String.t(), [term()], keyword()) ::
+          {:ok, term(), term()} | error
   def call(universe, symbol, args, opts \\ []) do
     with {:ok, target} <- target(universe),
          {:ok, value} <- staged_hint(universe, Exec.call(run_on(target), symbol, args, opts)) do
@@ -232,7 +233,7 @@ defmodule Kinoko.Universe do
   end
 
   @doc "Runs deftest `symbol` of the current commit, in the caller: `:ok | {:error, %{code, message, ...}}`."
-  @spec test(name | At.t(), String.t(), keyword()) :: :ok | error
+  @spec test(name | At.t() | Current.t(), String.t(), keyword()) :: :ok | error
   def test(universe, symbol, opts \\ []) do
     with {:ok, target} <- target(universe),
          do: staged_hint(universe, Exec.test(run_on(target), symbol, opts))
@@ -246,6 +247,13 @@ defmodule Kinoko.Universe do
     case Exec.loaded(hash) do
       {:ok, image} -> {:ok, %{image: image, signatures: sigs}}
       :error -> snapshot_at(at)
+    end
+  end
+
+  defp target(%Current{universe: universe, hash: hash, signatures: sigs}) do
+    case Exec.loaded(hash) do
+      {:ok, image} -> {:ok, %{image: image, signatures: sigs}}
+      :error -> target(universe)
     end
   end
 
@@ -329,6 +337,7 @@ defmodule Kinoko.Universe do
     end
   end
 
+  defp staged_hint(%Current{universe: universe}, result), do: staged_hint(universe, result)
   defp staged_hint(_universe_or_at, result), do: result
 
   defp hinted(message, definers) do
@@ -350,6 +359,23 @@ defmodule Kinoko.Universe do
   end
 
   @doc """
+  The universe's committed image as it is now: `{:ok, current}`, a
+  `Kinoko.Universe.Current` that `call/4`, `apply/4`, `eval/3`, `test/3`
+  and `routes/1` take in place of the name. Every call on it runs that
+  image, with no further CodeDb round trip: a host doing several calls in
+  a row (a route lookup, `init`, `view`) resolves the universe once and
+  runs them all on one commit's code. `{:error, ...}` as `call/4` (a
+  degraded universe answers `"degraded"`).
+  """
+  @spec current(name) :: {:ok, Current.t()} | error
+  def current(universe) when is_binary(universe) do
+    case read_request(universe, :image_key) do
+      {:ok, hash, sigs} -> {:ok, %Current{universe: universe, hash: hash, signatures: sigs}}
+      other -> runnable(universe, other)
+    end
+  end
+
+  @doc """
   Applies `fun`, a Yabu function value this universe's code made (a
   closure, a def taken as a value, a constructor; e.g. a view's handler or
   an effect's callback), to `args`, in the caller through `Kinoko.Exec.apply/4`
@@ -361,7 +387,7 @@ defmodule Kinoko.Universe do
   whichever commit `universe_or_at` is now. `opts` has no default: an
   `apply/3` would clash with `Kernel.apply/3` inside this module.
   """
-  @spec apply(name | At.t(), term(), [term()], keyword()) :: {:ok, term()} | error
+  @spec apply(name | At.t() | Current.t(), term(), [term()], keyword()) :: {:ok, term()} | error
   def apply(universe_or_at, fun, args, opts) do
     with {:ok, target} <- target(universe_or_at),
          do: Exec.apply(run_on(target), fun, args, opts)
@@ -386,7 +412,7 @@ defmodule Kinoko.Universe do
   current commit or a pinned view. Read from the image, so a degraded
   universe answers `"degraded"`.
   """
-  @spec routes(name | At.t()) :: map() | error
+  @spec routes(name | At.t() | Current.t()) :: map() | error
   def routes(universe_or_at) do
     with {:ok, target} <- target(universe_or_at),
          {:ok, routes} <- Exec.routes(run_on(target)),
