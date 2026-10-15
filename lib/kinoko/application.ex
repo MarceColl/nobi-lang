@@ -49,7 +49,8 @@ defmodule Kinoko.Application do
           id: :ensure_main,
           restart: :temporary
         ),
-        # After main exists: the `local` deployment serves it.
+        # Runs concurrently with :ensure_main (no ordering); ensure_local ensures
+        # main itself. It does not repair a drifted existing `local` row.
         Supervisor.child_spec({Task, &Kinoko.Deployment.ensure_local_at_boot/0},
           id: :ensure_local,
           restart: :temporary

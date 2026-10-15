@@ -27,19 +27,27 @@ defmodule Kinoko.Deployment do
         }
 
   @doc """
-  Creates a deployment. Options: `commit:` (default `nil`, follow head) and
-  `hosts:` (default `[]`). A commit given here is not checked; use `pin/2`
-  to pin with validation.
+  Creates a deployment. Options: `commit:` (default `nil`, follow head; a
+  commit is checked like `pin/2`'s, anything else is `{:error,
+  :no_such_commit}`) and `hosts:` (default `[]`, a list of strings).
+  Non-string name, universe, routes or hosts are `{:error, :bad_name}`.
   """
   @spec create(String.t(), String.t(), String.t(), keyword()) ::
-          :ok | {:error, :exists | :bad_name | :no_such_universe}
+          :ok | {:error, :exists | :bad_name | :no_such_universe | :no_such_commit | term()}
   def create(name, universe, routes, opts \\ []) do
+    commit = Keyword.get(opts, :commit)
+    hosts = Keyword.get(opts, :hosts, [])
+
     cond do
-      not Registry.valid_name?(name) ->
+      not Registry.valid_name?(name) or not is_binary(universe) or not is_binary(routes) or
+          not (is_list(hosts) and Enum.all?(hosts, &is_binary/1)) ->
         {:error, :bad_name}
 
       not universe_exists?(universe) ->
         {:error, :no_such_universe}
+
+      commit != nil and check_commit(universe, commit) != :ok ->
+        check_commit(universe, commit)
 
       true ->
         now = DateTime.utc_now()
@@ -48,8 +56,8 @@ defmodule Kinoko.Deployment do
           name: name,
           universe: universe,
           routes: routes,
-          commit: Keyword.get(opts, :commit),
-          hosts: opts |> Keyword.get(:hosts, []) |> Enum.map(&normalize_host/1),
+          commit: commit,
+          hosts: Enum.map(hosts, &normalize_host/1),
           inserted_at: now,
           updated_at: now
         }
@@ -96,7 +104,7 @@ defmodule Kinoko.Deployment do
   @doc """
   The deployment a request host reaches: an exact match against any
   deployment's `hosts`, else `<name>.localhost` for deployment `<name>`.
-  Case-insensitive; a port is ignored.
+  Case-insensitive; a port and a trailing dot are ignored.
   """
   @spec resolve(String.t()) :: {:ok, t} | :error
   def resolve(host) when is_binary(host) do
@@ -124,7 +132,11 @@ defmodule Kinoko.Deployment do
 
   @local_hosts ["localhost", "127.0.0.1"]
 
-  @doc "Idempotently creates `local` (and `main`, which it serves): universe `main`, routes `Main`, following head."
+  @doc """
+  Idempotently creates `main` and then `local` (universe `main`, routes `Main`,
+  following head, hosts `localhost` and `127.0.0.1`). It does not repair an
+  existing `local` row that has since been changed.
+  """
   @spec ensure_local() :: :ok
   def ensure_local do
     :ok = Registry.ensure_main()
@@ -194,9 +206,10 @@ defmodule Kinoko.Deployment do
     end
   end
 
-  # Hosts compare lowercase and without a port.
+  # Hosts compare lowercase, without a port and without a trailing dot
+  # (`App.Example.com.:4000` is `app.example.com`).
   defp normalize_host(host) do
-    host |> String.downcase() |> String.replace(~r/:\d+$/, "")
+    host |> String.downcase() |> String.replace(~r/:\d+$/, "") |> String.trim_trailing(".")
   end
 
   defp select_fields(query) do

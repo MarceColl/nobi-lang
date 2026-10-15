@@ -113,4 +113,53 @@ defmodule Kinoko.DeploymentTest do
     {:ok, d3} = Deployment.get(n)
     assert {:ok, ^u} = Deployment.target(d3)
   end
+
+  test "create validates commit like pin" do
+    u = fresh_universe()
+    assert {:promoted, _} = Universe.stage(u, "one", @v1)
+    assert :ok = Deployment.create(dname(), u, "Main", commit: 1)
+    assert {:error, :no_such_commit} = Deployment.create(dname(), u, "Main", commit: 2)
+    assert {:error, :no_such_commit} = Deployment.create(dname(), u, "Main", commit: 0)
+    assert {:error, :no_such_commit} = Deployment.create(dname(), u, "Main", commit: "1")
+    assert {:error, :no_such_commit} = Deployment.create(dname(), u, "Main", commit: :x)
+  end
+
+  test "host normalization: trailing dot, port, ipv6" do
+    u = fresh_universe()
+    n = dname()
+    :ok = Deployment.create(n, u, "Main", hosts: ["App.Example.com.:4000", "[::1]:4000"])
+    assert {:ok, %{hosts: ["app.example.com", "[::1]"]}} = Deployment.get(n)
+    assert {:ok, %{name: ^n}} = Deployment.resolve("app.example.com.")
+    assert {:ok, %{name: ^n}} = Deployment.resolve("app.example.com.:4000")
+    assert {:ok, %{name: ^n}} = Deployment.resolve("[::1]:4000")
+    assert {:ok, %{name: ^n}} = Deployment.resolve("[::1]")
+    assert {:ok, %{name: ^n}} = Deployment.resolve("#{n}.localhost.")
+    assert {:ok, %{name: ^n}} = Deployment.resolve("#{n}.localhost.:4000")
+    :ok = Deployment.ensure_local()
+    assert {:ok, %{name: "local"}} = Deployment.resolve("localhost.")
+    assert :error = Deployment.resolve("")
+  end
+
+  test "non-string arguments are bad_name, never a raise" do
+    u = fresh_universe()
+    assert {:error, :bad_name} = Deployment.create(dname(), nil, "Main")
+    assert {:error, :bad_name} = Deployment.create(dname(), u, nil)
+    assert {:error, :bad_name} = Deployment.create(dname(), u, "Main", hosts: [1])
+    assert {:error, :bad_name} = Deployment.create(dname(), u, "Main", hosts: "x")
+    assert :error = Deployment.resolve(nil)
+    assert :error = Deployment.get(nil)
+  end
+
+  test "concurrent creates give exactly one :ok" do
+    u = fresh_universe()
+    n = dname()
+
+    results =
+      1..10
+      |> Task.async_stream(fn _ -> Deployment.create(n, u, "Main") end, timeout: :infinity)
+      |> Enum.map(fn {:ok, r} -> r end)
+
+    assert Enum.count(results, &(&1 == :ok)) == 1
+    assert Enum.count(results, &(&1 == {:error, :exists})) == 9
+  end
 end
