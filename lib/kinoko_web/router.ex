@@ -97,10 +97,15 @@ defmodule KinokoWeb.Router do
       plug KinokoWeb.DeploymentStatus
     end
 
+    # The deployment is resolved from the request's host here, on the
+    # server, and signed into the LiveView session: the connected
+    # LiveView never trusts the URL the client sends.
     scope "/", KinokoWeb do
       pipe_through [:browser, :deployment]
 
-      live "/*path", DeploymentLive
+      live_session :deployment, session: {KinokoWeb.DeploymentStatus, :session, []} do
+        live "/*path", DeploymentLive
+      end
     end
   end
 end

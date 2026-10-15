@@ -40,7 +40,7 @@ defmodule KinokoWeb.Layouts do
   def app(%{bare: true} = assigns) do
     ~H"""
     {render_slot(@inner_block)}
-    <.flash_group flash={@flash} />
+    <.flash_group flash={@flash} prefix="kinoko-" />
     """
   end
 
@@ -93,18 +93,24 @@ defmodule KinokoWeb.Layouts do
   attr :flash, :map, required: true, doc: "the map of flash messages"
   attr :id, :string, default: "flash-group", doc: "the optional id of flash container"
 
+  attr :prefix, :string,
+    default: "",
+    doc: "prefixes every id, the container's included (a bare page keeps its ids to itself)"
+
   def flash_group(assigns) do
     ~H"""
-    <div id={@id} aria-live="polite">
-      <.flash kind={:info} flash={@flash} />
-      <.flash kind={:error} flash={@flash} />
+    <div id={@prefix <> @id} aria-live="polite">
+      <.flash id={@prefix <> "flash-info"} kind={:info} flash={@flash} />
+      <.flash id={@prefix <> "flash-error"} kind={:error} flash={@flash} />
 
       <.flash
-        id="client-error"
+        id={@prefix <> "client-error"}
         kind={:error}
         title={gettext("We can't find the internet")}
-        phx-disconnected={show(".phx-client-error #client-error") |> JS.remove_attribute("hidden")}
-        phx-connected={hide("#client-error") |> JS.set_attribute({"hidden", ""})}
+        phx-disconnected={
+          show(".phx-client-error ##{@prefix}client-error") |> JS.remove_attribute("hidden")
+        }
+        phx-connected={hide("##{@prefix}client-error") |> JS.set_attribute({"hidden", ""})}
         hidden
       >
         {gettext("Attempting to reconnect")}
@@ -112,11 +118,13 @@ defmodule KinokoWeb.Layouts do
       </.flash>
 
       <.flash
-        id="server-error"
+        id={@prefix <> "server-error"}
         kind={:error}
         title={gettext("Something went wrong!")}
-        phx-disconnected={show(".phx-server-error #server-error") |> JS.remove_attribute("hidden")}
-        phx-connected={hide("#server-error") |> JS.set_attribute({"hidden", ""})}
+        phx-disconnected={
+          show(".phx-server-error ##{@prefix}server-error") |> JS.remove_attribute("hidden")
+        }
+        phx-connected={hide("##{@prefix}server-error") |> JS.set_attribute({"hidden", ""})}
         hidden
       >
         {gettext("Attempting to reconnect")}

@@ -43,7 +43,7 @@ defmodule KinokoWeb.YabuHtmlTest do
           {"phx-click", "evil"},
           {"onclick", "x()"},
           {"onerror", "x()"},
-          {"phx-value-h", "e9"}
+          {"phx-value-h", "r0.e9"}
         ])
       )
 
@@ -111,24 +111,24 @@ defmodule KinokoWeb.YabuHtmlTest do
     assert attr(doc, "input", "maxlength") == []
   end
 
-  test "on-click becomes phx-click=yabu with phx-value-h" do
+  test "on-click becomes phx-click=yabu:click with phx-value-click" do
     msg = {:var, "Todo.Msg", "Toggle", [{:uuid, "u1"}]}
     {doc, handlers} = render(el("button", [{"on-click", msg}], [txt("go")]))
 
-    assert attr(doc, "button", "phx-click") == ["yabu"]
-    assert attr(doc, "button", "phx-value-click") == ["e0"]
-    assert handlers == %{"e0" => {:click, msg}}
+    assert attr(doc, "button", "phx-click") == ["yabu:click"]
+    assert attr(doc, "button", "phx-value-click") == ["r0.e0"]
+    assert handlers == %{"r0.e0" => {:click, msg}}
   end
 
   test "standalone on-change gets a minimal form wrapper, named yabu[id]" do
     fun = fn s -> {:var, "T.Msg", "Set", [s]} end
     {doc, handlers} = render(el("input", [{"value", "v"}, {"on-change", fun}]))
 
-    assert attr(doc, "form", "phx-change") == ["yabu"]
-    assert attr(doc, "form input", "name") == ["yabu[e0]"]
+    assert attr(doc, "form", "phx-change") == ["yabu:change"]
+    assert attr(doc, "form input", "name") == ["yabu[r0.e0]"]
     assert attr(doc, "form input", "value") == ["v"]
     assert LazyHTML.query(doc, "input[type=hidden]") |> Enum.count() == 0
-    assert handlers == %{"e0" => {:change, fun}}
+    assert handlers == %{"r0.e0" => {:change, fun}}
   end
 
   test "on-change inside a form: no wrapper, the form gets phx-change" do
@@ -141,10 +141,10 @@ defmodule KinokoWeb.YabuHtmlTest do
       )
 
     assert LazyHTML.query(doc, "form") |> Enum.count() == 1
-    assert attr(doc, "form", "phx-change") == ["yabu"]
-    assert attr(doc, "input", "name") == ["yabu[e0]"]
-    assert attr(doc, "textarea", "name") == ["yabu[e1]"]
-    assert Map.keys(handlers) == ["e0", "e1"]
+    assert attr(doc, "form", "phx-change") == ["yabu:change"]
+    assert attr(doc, "input", "name") == ["yabu[r0.e0]"]
+    assert attr(doc, "textarea", "name") == ["yabu[r0.e1]"]
+    assert Map.keys(handlers) == ["r0.e0", "r0.e1"]
   end
 
   test "on-change inside an on-submit form: one form, both bindings" do
@@ -152,20 +152,20 @@ defmodule KinokoWeb.YabuHtmlTest do
       render(el("form", [{"on-submit", :go}], [el("input", [{"on-change", fn s -> s end}])]))
 
     assert LazyHTML.query(doc, "form") |> Enum.count() == 1
-    assert attr(doc, "form", "phx-submit") == ["yabu"]
-    assert attr(doc, "form", "phx-change") == ["yabu"]
-    assert attr(doc, "form input[name=yabu_submit]", "value") == ["e0"]
-    assert attr(doc, "form input[name='yabu[e1]']", "name") == ["yabu[e1]"]
-    assert handlers["e0"] == {:submit, :go}
+    assert attr(doc, "form", "phx-submit") == ["yabu:submit"]
+    assert attr(doc, "form", "phx-change") == ["yabu:change"]
+    assert attr(doc, "form input[name=yabu_submit]", "value") == ["r0.e0"]
+    assert attr(doc, "form input[name='yabu[r0.e1]']", "name") == ["yabu[r0.e1]"]
+    assert handlers["r0.e0"] == {:submit, :go}
   end
 
   test "on-submit puts its id in the yabu_submit hidden field" do
     {doc, handlers} = render(el("form", [{"on-submit", :msg}], [el("button", [], [txt("x")])]))
-    assert attr(doc, "form", "phx-submit") == ["yabu"]
+    assert attr(doc, "form", "phx-submit") == ["yabu:submit"]
     assert attr(doc, "form", "phx-change") == []
     assert attr(doc, "form input[type=hidden]", "name") == ["yabu_submit"]
-    assert attr(doc, "form input[type=hidden]", "value") == ["e0"]
-    assert handlers == %{"e0" => {:submit, :msg}}
+    assert attr(doc, "form input[type=hidden]", "value") == ["r0.e0"]
+    assert handlers == %{"r0.e0" => {:submit, :msg}}
   end
 
   test "attribute names are validated strictly" do
@@ -216,16 +216,16 @@ defmodule KinokoWeb.YabuHtmlTest do
     {doc, _} =
       render(el("input", [{"name", "a"}, {"name", "b"}, {"on-change", fn s -> s end}]))
 
-    assert attr(doc, "input", "name") == ["yabu[e0]"]
+    assert attr(doc, "input", "name") == ["yabu[r0.e0]"]
   end
 
   test "several simple events on one element keep separate ids" do
     {doc, handlers} = render(el("input", [{"on-click", :c}, {"on-blur", :b}]))
-    assert attr(doc, "input", "phx-value-click") == ["e0"]
-    assert attr(doc, "input", "phx-value-blur") == ["e1"]
-    assert attr(doc, "input", "phx-click") == ["yabu"]
-    assert attr(doc, "input", "phx-blur") == ["yabu"]
-    assert handlers == %{"e0" => {:click, :c}, "e1" => {:blur, :b}}
+    assert attr(doc, "input", "phx-value-click") == ["r0.e0"]
+    assert attr(doc, "input", "phx-value-blur") == ["r0.e1"]
+    assert attr(doc, "input", "phx-click") == ["yabu:click"]
+    assert attr(doc, "input", "phx-blur") == ["yabu:blur"]
+    assert handlers == %{"r0.e0" => {:click, :c}, "r0.e1" => {:blur, :b}}
   end
 
   test "a form nested in a form renders as a div; one outer binding set" do
@@ -234,14 +234,14 @@ defmodule KinokoWeb.YabuHtmlTest do
 
     assert LazyHTML.query(doc, "form") |> Enum.count() == 1
     assert LazyHTML.query(doc, "input[name=yabu_submit]") |> Enum.count() == 1
-    assert attr(doc, "form", "phx-change") == ["yabu"]
-    assert LazyHTML.query(doc, "form > div > input[name='yabu[e1]']") |> Enum.count() == 1
-    assert Map.has_key?(handlers, "e0") and match?({:change, _}, handlers["e1"])
+    assert attr(doc, "form", "phx-change") == ["yabu:change"]
+    assert LazyHTML.query(doc, "form > div > input[name='yabu[r0.e1]']") |> Enum.count() == 1
+    assert Map.has_key?(handlers, "r0.e0") and match?({:change, _}, handlers["r0.e1"])
     refute Enum.any?(Map.values(handlers), &(&1 == {:submit, :inner}))
   end
 
   test "reserved names and phx- ids are dropped" do
-    for n <- ["yabu", "yabu_submit", "_target", "h", "yabu[e0]", "yabu_x"] do
+    for n <- ["yabu", "yabu_submit", "_target", "h", "yabu[r0.e0]", "yabu_x"] do
       {doc, _} = render(el("input", [{"name", n}]))
       assert attr(doc, "input", "name") == [], n
     end
@@ -269,11 +269,11 @@ defmodule KinokoWeb.YabuHtmlTest do
     {t1, h1} = YabuHtml.prepare(tree)
     {t2, h2} = YabuHtml.prepare(tree)
     assert {t1, h1} == {t2, h2}
-    assert h1 == %{"e0" => {:click, :a}, "e1" => {:click, :b}, "e2" => {:click, :c}}
+    assert h1 == %{"r0.e0" => {:click, :a}, "r0.e1" => {:click, :b}, "r0.e2" => {:click, :c}}
 
     {doc, _} = render(tree)
-    assert attr(doc, "ul > li:first-child > span", "phx-value-click") == ["e1"]
-    assert attr(doc, "ul > li:last-child", "phx-value-click") == ["e2"]
+    assert attr(doc, "ul > li:first-child > span", "phx-value-click") == ["r0.e1"]
+    assert attr(doc, "ul > li:last-child", "phx-value-click") == ["r0.e2"]
   end
 
   test "void elements render without children" do
@@ -285,5 +285,37 @@ defmodule KinokoWeb.YabuHtmlTest do
   test "prepared tree contains no Yabu terms" do
     {tree, _} = YabuHtml.prepare(el("div", [{"on-click", {:var, "A", "B", []}}], [txt("x")]))
     refute inspect(tree) =~ ":var"
+  end
+
+  test "handler ids carry the render number they were prepared for" do
+    tree = el("div", [], [el("button", [{"on-click", :a}]), el("button", [{"on-blur", :b}])])
+    {_tree, handlers} = YabuHtml.prepare(tree, 7)
+    assert handlers == %{"r7.e0" => {:click, :a}, "r7.e1" => {:blur, :b}}
+
+    {t7, _} = YabuHtml.prepare(tree, 7)
+    {t8, _} = YabuHtml.prepare(tree, 8)
+    assert inspect(t7) =~ "r7.e0" and inspect(t8) =~ "r8.e0"
+  end
+
+  test "every form gets phx-submit, so Enter is never a native submit" do
+    {doc, handlers} = render(el("input", [{"on-change", fn s -> s end}]))
+    assert attr(doc, "form", "phx-submit") == ["yabu:submit"]
+    assert LazyHTML.query(doc, "input[name=yabu_submit]") |> Enum.count() == 0
+    assert map_size(handlers) == 1
+
+    {doc, _} = render(el("form", [], [el("input", [{"on-change", fn s -> s end}])]))
+    assert attr(doc, "form", "phx-submit") == ["yabu:submit"]
+    assert attr(doc, "form", "phx-change") == ["yabu:change"]
+    assert LazyHTML.query(doc, "input[name=yabu_submit]") |> Enum.count() == 0
+
+    {doc, _} = render(el("form", [], [el("input", [{"name", "q"}])]))
+    assert attr(doc, "form", "phx-submit") == ["yabu:submit"]
+  end
+
+  test "ids in the host's kinoko- namespace are dropped" do
+    for id <- ["kinoko-error", "Kinoko-notice", "PHX-x"] do
+      {doc, _} = render(el("div", [{"id", id}]))
+      assert attr(doc, "div", "id") == [], id
+    end
   end
 end

@@ -44,6 +44,46 @@ defmodule KinokoWeb.DeploymentLiveTest do
   end
   """
 
+  # Two handlers on one element, and a row list keyed by position.
+  @rows """
+  defmodel P.Model do
+    count : Int
+    items : List<String>
+    log : String
+  end
+
+  deftype P.Msg do
+    Inc | Dec | Del(String)
+  end
+
+  def P.init() : (P.Model, Cmd<P.Msg>) do
+    (%P.Model{count: 0, items: ["a", "b", "c", "d"], log: ""}, Cmd.none())
+  end
+
+  def P.update(msg : P.Msg, model : P.Model) : (P.Model, Cmd<P.Msg>) do
+    case msg do
+      P.Msg.Inc -> (%P.Model{model | count: model.count + 1}, Cmd.none())
+      P.Msg.Dec -> (%P.Model{model | count: model.count - 100}, Cmd.none())
+      P.Msg.Del(x) -> (%P.Model{model | items: List.filter(model.items, fn (i : String) -> i != x end), log: String.concat(model.log, x)}, Cmd.none())
+    end
+  end
+
+  def P.view(model : P.Model) : Html<P.Msg> do
+    <main id="p">
+      <span id="count">{model.count}</span>
+      <span id="log">{model.log}</span>
+      <button id="both" on-click={P.Msg.Inc} on-blur={P.Msg.Dec}>x</button>
+      <ul>{List.map(model.items, fn (i : String) -> <li><button id={String.concat("del-", i)} on-click={P.Msg.Del(i)}>{i}</button></li> end)}</ul>
+    </main>
+  end
+
+  defapp P
+
+  defroutes Main do
+    "/" -> P
+  end
+  """
+
   # ---------- helpers ----------
 
   # A fresh universe with `source` promoted, and a deployment of the same
@@ -80,12 +120,12 @@ defmodule KinokoWeb.DeploymentLiveTest do
   # Yabu runs in steps off the LiveView process: an event returns before
   # its step lands, so these wait until no step is in flight.
   defp click(view, id) do
-    render_click(view, "yabu", %{"click" => id})
+    render_click(view, "yabu:click", %{"click" => id})
     settled(view)
   end
 
   defp change(view, id, value) do
-    render_change(view, "yabu", %{"_target" => ["yabu", id], "yabu" => %{id => value}})
+    render_change(view, "yabu:change", %{"_target" => ["yabu", id], "yabu" => %{id => value}})
     settled(view)
   end
 
@@ -111,7 +151,7 @@ defmodule KinokoWeb.DeploymentLiveTest do
       |> LazyHTML.from_fragment()
       |> LazyHTML.attribute("name")
 
-    [_, id] = Regex.run(~r/\Ayabu\[(e\d+)\]\z/, name)
+    [_, id] = Regex.run(~r/\Ayabu\[(r\d+\.e\d+)\]\z/, name)
     id
   end
 
@@ -164,12 +204,12 @@ defmodule KinokoWeb.DeploymentLiveTest do
 
     test "a bad param is a 404", %{conn: conn, u: u} do
       doc = static_404(conn, u, "/post/notauuid")
-      assert has?(doc, "#deployment-not-found")
+      assert has?(doc, "#kinoko-not-found")
       refute has?(doc, "#post")
     end
 
     test "an unknown path is a 404", %{conn: conn, u: u} do
-      assert conn |> static_404(u, "/nowhere") |> has?("#deployment-not-found")
+      assert conn |> static_404(u, "/nowhere") |> has?("#kinoko-not-found")
     end
 
     test "a click and an input change update the model", %{conn: conn, u: u} do
@@ -209,26 +249,40 @@ defmodule KinokoWeb.DeploymentLiveTest do
       assert conn |> on_host(u) |> get("/") |> html_response(200) =~ ~s(id="threads")
 
       html = conn |> on_host(u) |> get("/post/notauuid") |> html_response(404)
-      assert html =~ ~s(id="deployment-not-found")
+      assert html =~ ~s(id="kinoko-not-found")
 
       html = %{conn | host: "nobody-here.localhost"} |> get("/") |> html_response(404)
-      assert html =~ ~s(id="no-deployment")
+      assert html =~ ~s(id="kinoko-no-deployment")
 
       empty = fresh_universe("dl")
       :ok = Deployment.create(empty, empty, "Main")
-      assert conn |> on_host(empty) |> get("/") |> html_response(404) =~ ~s(id="no-routes")
+      assert conn |> on_host(empty) |> get("/") |> html_response(404) =~ ~s(id="kinoko-no-routes")
+    end
+  end
+
+  describe "a deployment that cannot run" do
+    test "answers 503 with the unavailable page", %{conn: conn} do
+      u = fresh_universe("dl")
+      stop(u)
+      store_commit(u, "def A.f() : Int do\n  A.nope()\nend")
+      :ok = Deployment.create(u, u, "Main")
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        html = conn |> on_host(u) |> get("/") |> html_response(503)
+        assert html =~ ~s(id="kinoko-unavailable")
+      end)
     end
   end
 
   describe "pages" do
     test "an unknown host gets the no-deployment page", %{conn: conn} do
-      assert conn |> static_404("nobody-here", "/") |> has?("#no-deployment")
+      assert conn |> static_404("nobody-here", "/") |> has?("#kinoko-no-deployment")
     end
 
     test "a deployment whose route table does not exist yet", %{conn: conn} do
       u = fresh_universe("dl")
       :ok = Deployment.create(u, u, "Main")
-      assert conn |> static_404(u, "/") |> has?("#no-routes")
+      assert conn |> static_404(u, "/") |> has?("#kinoko-no-routes")
     end
 
     test "reserved prefixes never reach the catch-all", %{conn: conn} do
@@ -271,7 +325,7 @@ defmodule KinokoWeb.DeploymentLiveTest do
     test "an unsupported effect shows a notice", %{conn: conn, u: u} do
       {view, _html} = open(conn, u, "/")
       click(view, click_id(view, "#save"))
-      assert has_element?(view, "#deployment-notice", "Cmd.store.insert is not available yet")
+      assert has_element?(view, "#kinoko-notice", "Cmd.store.insert is not available yet")
     end
 
     test "a runtime error shows a banner and keeps the view", %{conn: conn, u: u} do
@@ -280,13 +334,13 @@ defmodule KinokoWeb.DeploymentLiveTest do
       assert text(view, "#count") == "1"
 
       click(view, click_id(view, "#divide"))
-      assert has_element?(view, "#deployment-error", "division by zero")
+      assert has_element?(view, "#kinoko-error", "division by zero")
       assert text(view, "#count") == "1"
 
       # The app keeps running.
       click(view, click_id(view, "#inc"))
       assert text(view, "#count") == "2"
-      refute has_element?(view, "#deployment-error")
+      refute has_element?(view, "#kinoko-error")
     end
   end
 
@@ -298,23 +352,34 @@ defmodule KinokoWeb.DeploymentLiveTest do
     test "a forged id is ignored", %{conn: conn, u: u} do
       {view, _html} = open(conn, u, "/")
       before = render(view)
+      inc = click_id(view, "#inc")
+      [_, n] = Regex.run(~r/\Ar(\d+)\./, inc)
 
-      for params <- [
-            %{"click" => "e999"},
+      events = ~w(yabu:click yabu:submit yabu:change yabu:blur yabu:keyup yabu:nope yabu yabu:)
+
+      for event <- events,
+          params <- [
+            %{"click" => "e0"},
+            %{"click" => "r#{n}.e999"},
+            %{"click" => "r999.e0"},
+            %{"click" => "r#{n}.e0x"},
+            %{"click" => "r-1.e0"},
             %{"click" => "Lab.Msg.Inc"},
             %{"click" => %{"x" => 1}},
-            %{"click" => ["e0"]},
-            %{"yabu_submit" => "e0"},
-            %{"_target" => ["yabu", "e0"], "yabu" => %{"e0" => "x"}},
-            %{"_target" => ["yabu", "e0"], "yabu" => "clobbered"},
+            %{"click" => [inc]},
+            %{"blur" => inc},
+            %{"yabu_submit" => inc},
+            %{"_target" => ["yabu", inc], "yabu" => %{inc => "x"}},
+            %{"_target" => ["yabu", inc], "yabu" => "clobbered"},
             %{"_target" => "yabu"},
-            %{"h" => "e0"},
+            %{"h" => inc},
             %{}
           ] do
-        render_click(view, "yabu", params)
+        render_click(view, event, params)
       end
 
-      render_click(view, "other", %{"click" => "e0"})
+      render_click(view, "other", %{"click" => inc})
+      render_click(view, "yabu", %{"click" => inc})
       assert render(view) == before
       assert text(view, "#count") == "0"
     end
@@ -327,15 +392,18 @@ defmodule KinokoWeb.DeploymentLiveTest do
 
       # A change id sent as a click, a click id sent as a change.
       click(view, name)
-      refute has_element?(view, "#deployment-error")
+      refute has_element?(view, "#kinoko-error")
       change(view, save, "x")
-      refute has_element?(view, "#deployment-error")
+      refute has_element?(view, "#kinoko-error")
       assert text(view, "#saved") == ""
 
       # A change value that is not a string.
-      render_change(view, "yabu", %{"_target" => ["yabu", name], "yabu" => %{name => %{"a" => 1}}})
+      render_change(view, "yabu:change", %{
+        "_target" => ["yabu", name],
+        "yabu" => %{name => %{"a" => 1}}
+      })
 
-      render_change(view, "yabu", %{"_target" => ["yabu", name], "yabu" => "x"})
+      render_change(view, "yabu:change", %{"_target" => ["yabu", name], "yabu" => "x"})
       assert has_element?(view, ~s(#name[value=""]))
     end
 
@@ -345,9 +413,9 @@ defmodule KinokoWeb.DeploymentLiveTest do
     } do
       {view, _html} = open(conn, u, "/")
       inc = click_id(view, "#inc")
-      render_click(view, "yabu", %{"click" => inc})
-      render_click(view, "yabu", %{"click" => inc})
-      render_click(view, "yabu", %{"click" => inc})
+      render_click(view, "yabu:click", %{"click" => inc})
+      render_click(view, "yabu:click", %{"click" => inc})
+      render_click(view, "yabu:click", %{"click" => inc})
       eventually(view, &(&1 =~ ~s(<span id="count">3</span>)))
     end
 
@@ -359,16 +427,90 @@ defmodule KinokoWeb.DeploymentLiveTest do
       assert render(view) == before
     end
 
-    test "an id from a stale render only means what the current render says", %{
+    test "an id resolves in the render it names, until that render is gone", %{
       conn: conn,
       u: u
     } do
       {view, _html} = open(conn, u, "/")
       inc = click_id(view, "#inc")
       click(view, inc)
-      # Re-rendering keeps ids for the same tree, so the old id is still Inc.
+      assert click_id(view, "#inc") != inc
+
+      # Still kept: the click means what it meant where it was clicked.
       click(view, inc)
       assert text(view, "#count") == "2"
+
+      # Four more renders push it out: then it is ignored.
+      for _ <- 1..4, do: click(view, click_id(view, "#inc"))
+      assert text(view, "#count") == "6"
+      click(view, inc)
+      assert text(view, "#count") == "6"
+    end
+
+    test "a submit without an id (Enter in a form with no on-submit) is ignored", %{
+      conn: conn
+    } do
+      u = deploy(@forum, "Forum")
+      {view, _html} = open(conn, u, "/settings")
+
+      # The on-change input's form submits through LiveView, never natively.
+      assert has_element?(view, ~s(form[phx-submit="yabu:submit"] #name))
+
+      before = render(view)
+      render_submit(view, "yabu:submit", %{"yabu" => %{change_id(view, "#name") => "x"}})
+      assert render(view) == before
+    end
+
+    test "on-click and on-blur on one element: each event dispatches its own msg", %{
+      conn: conn
+    } do
+      u = deploy(@rows, "Main")
+      {view, _html} = open(conn, u, "/")
+
+      view |> element("#both") |> render_blur()
+      settled(view)
+      assert text(view, "#count") == "-100"
+
+      view |> element("#both") |> render_click()
+      settled(view)
+      assert text(view, "#count") == "-99"
+    end
+
+    test "two rows clicked before the re-render delete exactly those two", %{conn: conn} do
+      u = deploy(@rows, "Main")
+      {view, _html} = open(conn, u, "/")
+      a = click_id(view, "#del-a")
+      b = click_id(view, "#del-b")
+
+      # Both clicks land before either step's render.
+      render_click(view, "yabu:click", %{"click" => a})
+      render_click(view, "yabu:click", %{"click" => b})
+      eventually(view, &(&1 =~ ~s(<span id="log">ab</span>)))
+      refute has_element?(view, "#del-a")
+      refute has_element?(view, "#del-b")
+      assert has_element?(view, "#del-c")
+      assert has_element?(view, "#del-d")
+    end
+
+    test "the connected view serves the session's deployment, not the URL's host", %{
+      conn: conn,
+      u: u
+    } do
+      other = deploy(@forum, "Forum")
+      conn = conn |> on_host(u) |> get("/")
+
+      # A client connecting with another host in its URL still gets `u`.
+      {:ok, view, _html} = live(%{conn | host: "#{other}.localhost"})
+      render(view)
+      assert has_element?(view, "#inc")
+      refute has_element?(view, "#threads")
+    end
+
+    test "the LiveView keeps no timeline (one model per connection)", %{conn: conn, u: u} do
+      {view, _html} = open(conn, u, "/")
+      click(view, click_id(view, "#inc"))
+      %{socket: socket} = :sys.get_state(view.pid)
+      assert Kinoko.Elm.Runtime.timeline(socket.private.elm) == []
     end
   end
 
@@ -380,12 +522,14 @@ defmodule KinokoWeb.DeploymentLiveTest do
     defp following(head) do
       {m, _} = DeploymentLive.init(%{}, %{})
       d = %{name: "x", universe: "x", routes: "Main", commit: nil, hosts: []}
-      %{m | deployment: d, target: "x", head: head, subscribed?: true, page: :app}
+
+      %{m | name: "x", deployment: d, target: "x", head: head, subscribed?: true, watching: "x"}
+      |> Map.put(:page, :app)
     end
 
     test "a head that moved since opening is processed as a commit (subscribe race)" do
       {m, fx} = DeploymentLive.update({:head, {:ok, 3}}, following(2))
-      assert m.head == 3 and m.inflight == 1 and m.queue == []
+      assert m.head == 3 and m.inflight == 1 and :queue.to_list(m.queue) == []
       assert [{:async, {:task, _}, _}] = List.flatten([fx])
 
       {m, fx} = DeploymentLive.update({:head, {:ok, 2}}, following(2))
@@ -397,12 +541,40 @@ defmodule KinokoWeb.DeploymentLiveTest do
       assert m.inflight == 1
       {m, fx} = DeploymentLive.update({:committed, "x", %{commit: 4}}, m)
       {m, _} = DeploymentLive.update({:committed, "x", %{commit: 5}}, m)
-      assert List.flatten([fx]) == [] and m.queue == [:commit]
+      assert List.flatten([fx]) == [] and :queue.to_list(m.queue) == [:commit]
 
       # The step lands; the queued commit starts.
       {m, fx} = DeploymentLive.update({:stepped, 1, {:ok, %{}}}, m)
-      assert m.inflight == 2 and m.queue == []
+      assert m.inflight == 2 and :queue.to_list(m.queue) == []
       assert [{:async, {:task, _}, _}] = List.flatten([fx])
+    end
+
+    test "beyond 32 waiting, events are dropped; control msgs never are" do
+      m = %{following(2) | tree: {:text, "x"}}
+      {m, _} = DeploymentLive.update({:committed, "x", %{commit: 3}}, m)
+      assert m.inflight == 1
+
+      m =
+        Enum.reduce(1..40, m, fn i, m ->
+          elem(DeploymentLive.update({:event, "yabu:click", %{"click" => "r1.e#{i}"}}, m), 0)
+        end)
+
+      assert m.queued == 32 and :queue.len(m.queue) == 32
+
+      {m, _} = DeploymentLive.update({:deployment_changed, "x"}, m)
+      {m, _} = DeploymentLive.update({:deployment_changed, "x"}, m)
+      {m, _} = DeploymentLive.update({:committed, "x", %{commit: 4}}, m)
+      assert m.queued == 34
+      assert Enum.count(:queue.to_list(m.queue), &(&1 == :redeploy)) == 1
+    end
+
+    test "a session without a deployment, and the URL's host, never pick one" do
+      {m, _} = DeploymentLive.init(%{}, %{"deployment" => "named", "host" => "h"})
+      {m, _} = DeploymentLive.update({:params, %{}, "http://evil.localhost/x"}, m)
+      assert m.name == "named" and m.host == "h" and m.path == "/x"
+
+      {m, _} = DeploymentLive.init(%{}, %{"deployment" => %{"not" => "a name"}})
+      assert m.name == nil
     end
 
     test "a crashed step shows a generic banner, never the crash" do
@@ -432,7 +604,7 @@ defmodule KinokoWeb.DeploymentLiveTest do
 
       eventually(view, &(&1 =~ "Total"))
       assert text(view, "#count") == "1"
-      refute has_element?(view, "#deployment-notice")
+      refute has_element?(view, "#kinoko-notice")
     end
 
     test "a Model change re-inits with a notice", %{conn: conn} do
@@ -450,7 +622,7 @@ defmodule KinokoWeb.DeploymentLiveTest do
       u = deploy(@forum, "Forum")
       {view, _html} = open(conn, u, "/settings")
       assert {:promoted, _} = Universe.stage(u, "rm", "", remove: ["Forum"])
-      eventually(view, &(&1 =~ ~s(id="deployment-not-found")))
+      eventually(view, &(&1 =~ ~s(id="kinoko-not-found")))
     end
 
     test "a commit that unroutes the open path gives a 404 (Review Focus 4)", %{
@@ -468,8 +640,37 @@ defmodule KinokoWeb.DeploymentLiveTest do
       """
 
       assert {:promoted, _} = Universe.stage(u, "routes", routes)
-      eventually(view, &(&1 =~ ~s(id="deployment-not-found")))
+      eventually(view, &(&1 =~ ~s(id="kinoko-not-found")))
       refute has_element?(view, "#settings")
+    end
+
+    test "pin and follow reach an open page", %{conn: conn} do
+      u = deploy(@lab, "Main")
+      {view, _} = open(conn, u, "/")
+
+      body = String.replace(lab_view(), "Count <span", "Total <span")
+      assert {:promoted, _} = Universe.stage(u, "body", body)
+      eventually(view, &(&1 =~ "Total"))
+
+      :ok = Deployment.pin(u, 1)
+      eventually(view, &(&1 =~ "Deployment now serves commit 1"))
+      refute render(view) =~ "Total"
+
+      # Pinned: a commit no longer reaches it.
+      body3 = String.replace(lab_view(), "Count <span", "Sum <span")
+      assert {:promoted, _} = Universe.stage(u, "body3", body3)
+      click(view, click_id(view, "#inc"))
+      assert text(view, "#count") == "1"
+      refute render(view) =~ "Sum"
+
+      :ok = Deployment.follow(u)
+      eventually(view, &(&1 =~ "Deployment now follows head"))
+      assert render(view) =~ "Sum"
+
+      # Following again: the next commit arrives.
+      body4 = String.replace(lab_view(), "Count <span", "Tally <span")
+      assert {:promoted, _} = Universe.stage(u, "body4", body4)
+      eventually(view, &(&1 =~ "Tally"))
     end
 
     test "a pinned deployment ignores commits", %{conn: conn} do

@@ -98,11 +98,14 @@ defmodule KinokoWeb.Mcp.Instructions do
     and is passed to the app's `init` as a parameter, typed Int, String or
     Uuid: `"/post/:id" -> Forum.Post` needs
     `def Forum.Post.init(id : Uuid) : (Forum.Post.Model, Cmd<Forum.Post.Msg>)`
-    (the names match the pattern's params, in order). A URL that does not
-    parse as its type is a 404.
+    (the init's parameter names are exactly the pattern's params, as a set;
+    the URL fills them by name). A URL that does not parse as its type is a
+    404.
   - Cmd.navigate(App, args...) goes to the route that opens App with those
     args: `Cmd.navigate(Forum.Post, topic.id)` from update, `Cmd.navigate(Forum.Settings)`
-    when it takes none. The target must be an app some route reaches.
+    when it takes none. Promotion checks that the target is an app and the
+    args fit its init; whether a route reaches it is checked at run time, by
+    the deployment serving the page (with none, the page shows an error).
 
   THE LOOP
   1. Look first: `symbols` (every committed signature), then `read` the
