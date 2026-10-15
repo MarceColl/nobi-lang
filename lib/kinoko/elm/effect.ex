@@ -16,7 +16,7 @@ defmodule Kinoko.Elm.Effect do
 
   ## Commands — no response
 
-    * `reply/2`, `send_to/2`, `dispatch/1`, `after_ms/2` — any host
+    * `reply/2`, `send_to/2`, `dispatch/1`, `after_ms/2`, `broadcast/3` — any host
     * `stop/1` — `Kinoko.ElmGenServer` only
     * `navigate/1`, `patch/1`, `redirect/1`, `push_event/2`, `flash/2` —
       `KinokoWeb.ElmLiveView` only
@@ -32,6 +32,7 @@ defmodule Kinoko.Elm.Effect do
           {:async, request(), to_msg()}
           | {:reply, GenServer.from(), term()}
           | {:send, Process.dest() | :self, term()}
+          | {:broadcast, atom(), String.t(), term()}
           | {:after_ms, non_neg_integer(), term()}
           | {:stop, term()}
           | {:navigate, String.t()}
@@ -66,6 +67,14 @@ defmodule Kinoko.Elm.Effect do
 
   @doc "Sends `msg` to `dest`; `:self` routes it back into `update/2`."
   def send_to(dest, msg), do: {:send, dest, msg}
+
+  @doc """
+  Broadcasts `msg` on `topic` of the `Phoenix.PubSub` named `pubsub`. Performed
+  in order with the step's other effects (no task), so two steps' broadcasts
+  reach a subscriber in the order the steps ran.
+  """
+  def broadcast(pubsub, topic, msg) when is_atom(pubsub) and is_binary(topic),
+    do: {:broadcast, pubsub, topic, msg}
 
   @doc "Routes `msg` back into `update/2` after the current update."
   def dispatch(msg), do: {:send, :self, msg}

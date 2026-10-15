@@ -60,17 +60,28 @@ defmodule Kinoko.UniverseHelpers do
   storage holds after the checker changed under code that used to
   typecheck. Stop the universe first if it runs.
   """
-  def store_commit(name, source) do
+  def store_commit(name, source), do: store_commits(name, [{"old", source}])
+
+  @doc """
+  As `store_commit/2`, one commit per `{id, source}`, oldest first: each
+  commit's entries are the declarations its source defines.
+  """
+  def store_commits(name, commits) do
     alias Kinoko.{Cas, CodeDb, Lang}
 
-    {:ok, entries, texts} = Lang.prepare(source)
-    :ok = Cas.put(texts)
+    commits =
+      for {id, source} <- commits do
+        {:ok, entries, texts} = Lang.prepare(source)
+        :ok = Cas.put(texts)
 
-    live =
-      for {{:live, decl}, {cid, _}} <- Enum.zip(entries, texts),
-          do: {:live, Kinoko.Lang.Ast.name(decl), cid}
+        live =
+          for {{:live, decl}, {cid, _}} <- Enum.zip(entries, texts),
+              do: {:live, Kinoko.Lang.Ast.name(decl), cid}
 
-    durable = %{commits: [%{ids: ["old"], entries: live}], staged: []}
+        %{ids: [id], entries: live}
+      end
+
+    durable = %{commits: commits, staged: []}
 
     seq =
       case Kinoko.Elm.Store.latest(key(name)) do

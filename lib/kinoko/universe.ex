@@ -22,11 +22,18 @@ defmodule Kinoko.Universe do
       out). A write's outcome is then unknown: restage the same id, which is
       idempotent.
 
-  `eval/3`, `call/4` and `test/3` also return
+  `eval/3`, `call/4`, `test/3`, `apply/4` and `routes/1` also return
   `{:error, %{code: "degraded", message: m}}` while the universe is
   degraded (`health/1`), `m` naming the declarations that fail.
 
   The caller never crashes on any of them.
+
+  ## Pinned views
+
+  `at/2` gives a `Kinoko.Universe.At`, the universe as of one commit.
+  `eval/3`, `call/4`, `test/3`, `apply/4`, `apps/1` and `routes/1` take
+  one in place of the universe's name and answer with that commit's code,
+  whatever promotes later. `subscribe/1` hears of each new commit.
 
   ## Degraded
 
@@ -53,12 +60,16 @@ defmodule Kinoko.Universe do
   blocks the universe. They first ask the CodeDb for its image's hash and
   signatures only (`:image_key`), and take the whole committed code
   (`:snapshot`) only when no image of that hash is loaded yet
-  (`Kinoko.Exec.loaded/1`).
+  (`Kinoko.Exec.loaded/1`). `apply/4`, `routes/1` and `at/2` (which
+  replays history and reads the CAS) run in the caller the same way.
+
+  A promotion is announced by the CodeDb itself, after it is stored, on
+  `Kinoko.PubSub` topic `"universe:<name>"` (`subscribe/1`).
   """
 
   alias Kinoko.{Cas, CodeDb, Exec, Lang}
   alias Kinoko.PersistentElmGenServer, as: Server
-  alias Kinoko.Universe.Registry
+  alias Kinoko.Universe.{At, Registry}
 
   @read_timeout 5_000
 
@@ -116,7 +127,8 @@ defmodule Kinoko.Universe do
   defp prepare_and_stage(universe, id, source, opts) do
     case Lang.prepare(source, opts) do
       {:ok, entries, texts} ->
-        with :ok <- put_texts(texts), do: request(universe, {:stage, id, entries}, :infinity)
+        with :ok <- put_texts(texts),
+             do: request(universe, {:stage, universe, id, entries}, :infinity)
 
       # As `Kinoko.Lang.stage/4`: source that does not parse supersedes what
       # `id` staged; input refused for its type does not.
@@ -134,7 +146,7 @@ defmodule Kinoko.Universe do
        [%{name: nil, code: "bad-id", message: "a patch id is a string, not #{inspect(id)}"}]}
 
   defp unstage_quietly(universe, id) do
-    case request(universe, {:unstage, id}, :infinity) do
+    case request(universe, {:unstage, universe, id}, :infinity) do
       {:error, %{} = error} -> {:error, Map.take(error, [:code, :message])}
       other -> {:ok, other}
     end
@@ -153,7 +165,7 @@ defmodule Kinoko.Universe do
   @spec unstage(name, String.t()) :: :ok | :not_found | error
   def unstage(universe, id) do
     with :ok <- check(universe) do
-      case request(universe, {:unstage, id}, :infinity) do
+      case request(universe, {:unstage, universe, id}, :infinity) do
         {:error, %{code: _, message: message, name: _}} ->
           {:error, %{code: "internal", message: message}}
 
@@ -188,11 +200,11 @@ defmodule Kinoko.Universe do
   caller: `{:ok, value, type}` or `{:error, %{code, message}}`
   (`Kinoko.Exec.eval/3`; `opts` are its limits, e.g. `timeout:`).
   """
-  @spec eval(name, String.t(), keyword()) :: {:ok, term(), term()} | error
+  @spec eval(name | At.t(), String.t(), keyword()) :: {:ok, term(), term()} | error
   def eval(universe, expr_source, opts \\ []) do
     with {:ok, target} <- target(universe) do
       if is_binary(expr_source),
-        do: universe |> staged_hint(Exec.eval(target, expr_source, opts)),
+        do: staged_hint(universe, Exec.eval(target, expr_source, opts)),
         else:
           {:error,
            %{code: "parse", message: "an expression is a string, not #{inspect(expr_source)}"}}
@@ -204,7 +216,7 @@ defmodule Kinoko.Universe do
   `{:ok, value, type}` (`type` the def's declared return type, as `eval/3`
   gives one) or `{:error, %{code, message}}`.
   """
-  @spec call(name, String.t(), [term()], keyword()) :: {:ok, term(), term()} | error
+  @spec call(name | At.t(), String.t(), [term()], keyword()) :: {:ok, term(), term()} | error
   def call(universe, symbol, args, opts \\ []) do
     with {:ok, target} <- target(universe),
          {:ok, value} <- staged_hint(universe, Exec.call(run_on(target), symbol, args, opts)) do
@@ -220,7 +232,7 @@ defmodule Kinoko.Universe do
   end
 
   @doc "Runs deftest `symbol` of the current commit, in the caller: `:ok | {:error, %{code, message, ...}}`."
-  @spec test(name, String.t(), keyword()) :: :ok | error
+  @spec test(name | At.t(), String.t(), keyword()) :: :ok | error
   def test(universe, symbol, opts \\ []) do
     with {:ok, target} <- target(universe),
          do: staged_hint(universe, Exec.test(run_on(target), symbol, opts))
@@ -228,7 +240,15 @@ defmodule Kinoko.Universe do
 
   # What Exec runs against: the loaded image and the signatures (the fast
   # path: only the hash and the signatures leave the CodeDb), else the
-  # whole snapshot, whose image Exec then loads.
+  # whole snapshot, whose image Exec then loads. A pinned view's image is
+  # found by its hash, else rebuilt from history.
+  defp target(%At{hash: hash, signatures: sigs} = at) do
+    case Exec.loaded(hash) do
+      {:ok, image} -> {:ok, %{image: image, signatures: sigs}}
+      :error -> with {:ok, snapshot} <- snapshot_at(at.universe, at.commit), do: {:ok, snapshot}
+    end
+  end
+
   defp target(universe) do
     case read_request(universe, :image_key) do
       {:ok, hash, sigs} ->
@@ -256,27 +276,38 @@ defmodule Kinoko.Universe do
   defp run_on(snapshot), do: snapshot
 
   defp degraded(universe, reasons) do
-    failing =
-      reasons
-      |> Enum.map(&Map.get(&1, :name))
-      |> Enum.reject(&is_nil/1)
-      |> Enum.uniq()
-      |> Enum.map_join(", ", &"`#{&1}`")
-
     %{
       code: "degraded",
       message:
         "universe #{universe} is degraded: its committed code no longer typechecks " <>
-          "(failing: #{failing}), so nothing runs until a patch that fixes it promotes. " <>
-          "health shows why.",
+          "(failing: #{failing(reasons)}), so nothing runs until a patch that fixes it " <>
+          "promotes. health shows why.",
       reasons: reasons
     }
+  end
+
+  defp degraded_at(universe, commit, reasons) do
+    %{
+      code: "degraded",
+      message:
+        "commit #{commit} of universe #{universe} no longer typechecks " <>
+          "(failing: #{failing(reasons)}), so it cannot run",
+      reasons: reasons
+    }
+  end
+
+  defp failing(reasons) do
+    reasons
+    |> Enum.map(&Map.get(&1, :name))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.map_join(", ", &"`#{&1}`")
   end
 
   # An error naming a symbol that only a staged patch defines says so: the
   # code runs against committed code, where it does not exist yet.
   defp staged_hint(universe, {:error, %{code: code, message: message} = error} = result)
-       when code in ["unbound", "runtime"] and is_binary(message) do
+       when code in ["unbound", "runtime"] and is_binary(message) and is_binary(universe) do
     case read_request(universe, :definers) do
       definers when is_map(definers) and map_size(definers) > 0 ->
         hint = &hinted(&1, definers)
@@ -298,7 +329,7 @@ defmodule Kinoko.Universe do
     end
   end
 
-  defp staged_hint(_universe, result), do: result
+  defp staged_hint(_universe_or_at, result), do: result
 
   defp hinted(message, definers) do
     staged =
@@ -316,6 +347,134 @@ defmodule Kinoko.Universe do
       many ->
         "#{message} (" <> Enum.map_join(many, "; ", fn {s, note} -> "`#{s}` #{note}" end) <> ")"
     end
+  end
+
+  @doc """
+  Applies `fun`, a Yabu function value this universe's code made (a
+  closure, a def taken as a value, a constructor; e.g. a view's handler or
+  an effect's callback), to `args`, in the caller through `Kinoko.Exec.apply/4`
+  against the current commit (or a pinned view, `at/2`): `{:ok, value}` or
+  `{:error, %{code, message}}`. Bounded as `call/4` is (`opts` are its
+  limits). A value that is no function or takes another number of
+  arguments is code `"runtime"`; a closure whose image has been unloaded
+  is code `"unloaded"`.
+  """
+  @spec apply(name | At.t(), term(), [term()], keyword()) :: {:ok, term()} | error
+  def apply(universe_or_at, fun, args, opts) do
+    with {:ok, target} <- target(universe_or_at),
+         do: Exec.apply(run_on(target), fun, args, opts)
+  end
+
+  @doc """
+  The committed `defapp`s, sorted: `[app_symbol]`. Read from the symbols,
+  so a degraded universe lists its apps too.
+  """
+  @spec apps(name | At.t()) :: [String.t()] | error
+  def apps(%At{signatures: sigs}),
+    do: for({symbol, :app} <- Enum.sort(sigs), do: symbol)
+
+  def apps(universe) do
+    with symbols when is_list(symbols) <- symbols(universe),
+         do: for(%{symbol: symbol, signature: "app"} <- symbols, do: symbol)
+  end
+
+  @doc """
+  The committed route tables, `%{routes_name => [%{segments, app, params}]}`
+  (`Kinoko.Lang.Codegen`; match a path with `Kinoko.Lang.Routes`), of the
+  current commit or a pinned view. Read from the image, so a degraded
+  universe answers `"degraded"`.
+  """
+  @spec routes(name | At.t()) :: map() | error
+  def routes(universe_or_at) do
+    with {:ok, target} <- target(universe_or_at),
+         {:ok, routes} <- Exec.routes(run_on(target)),
+         do: routes
+  end
+
+  @doc """
+  Subscribes the caller to the universe's commits: after each promotion is
+  stored it receives `{:committed, universe, %{commit: n, image_hash: hash}}`
+  (`n` the new commit, 1-based into `history/1`). Staging that promotes
+  nothing sends nothing. `:ok`.
+  """
+  @spec subscribe(name) :: :ok | error
+  def subscribe(universe) do
+    with :ok <- check(universe),
+         do: Phoenix.PubSub.subscribe(Kinoko.PubSub, CodeDb.topic(universe))
+  end
+
+  @doc """
+  A pinned view of the universe as of commit `commit` (1-based into
+  `history/1`): `{:ok, at}`, an opaque `Kinoko.Universe.At` that `call/4`,
+  `apply/4`, `eval/3`, `test/3`, `apps/1` and `routes/1` take in place of
+  the universe's name. It answers with that commit's code whatever
+  promotes later.
+
+  Built in the caller, never in the CodeDb: the history is replayed up to
+  `commit`, its declarations fetched from `Kinoko.Cas` and checked again
+  (`Kinoko.Lang.restore/3`), and the image loaded. Views are cached for
+  the node's life by `{universe, commit}` (a commit never changes), images
+  by hash (`Kinoko.Exec`); nothing is evicted. A degraded universe opens
+  its older commits that still typecheck.
+
+  `{:error, %{code: "no_such_commit", message: m}}` when `commit` is not
+  one of the history's; `{:error, %{code: "degraded", ...}}` when that
+  commit's code no longer typechecks.
+  """
+  @spec at(name, pos_integer()) :: {:ok, At.t()} | error
+  def at(universe, commit) do
+    with :ok <- check(universe) do
+      case :persistent_term.get({At, universe, commit}, nil) do
+        %At{} = at ->
+          {:ok, at}
+
+        nil ->
+          with {:ok, snapshot} <- snapshot_at(universe, commit),
+               {:ok, image} <- Exec.load(snapshot) do
+            at = %At{
+              universe: universe,
+              commit: commit,
+              hash: image.hash,
+              signatures: snapshot.signatures
+            }
+
+            :persistent_term.put({At, universe, commit}, at)
+            {:ok, at}
+          end
+      end
+    end
+  end
+
+  # Commit `commit`'s snapshot, rebuilt from the history in the caller.
+  defp snapshot_at(universe, commit) do
+    with history when is_list(history) <- read_request(universe, :history),
+         :ok <- in_history(universe, commit, length(history)) do
+      case CodeDb.restore(Enum.take(history, commit), []) do
+        {:ok, u} -> {:ok, Lang.snapshot(u)}
+        {:degraded, _u, reasons} -> {:error, degraded_at(universe, commit, reasons)}
+        {:error, reasons} -> {:error, internal(Enum.map_join(reasons, "; ", & &1.message))}
+      end
+    end
+  rescue
+    e ->
+      if db_outage?(e),
+        do:
+          {:error,
+           unavailable("commit #{commit} of #{universe} could not be read: " <> describe(e))},
+        else:
+          {:error, internal("commit #{commit} of #{universe} does not restore: " <> describe(e))}
+  end
+
+  defp in_history(_universe, commit, n) when is_integer(commit) and commit in 1..n//1, do: :ok
+
+  defp in_history(universe, commit, n) do
+    {:error,
+     %{
+       code: "no_such_commit",
+       message:
+         "universe #{universe} has no commit #{inspect(commit, limit: 5)}: " <>
+           if(n == 0, do: "it has no commits yet", else: "its commits are 1 to #{n}")
+     }}
   end
 
   ## Routing

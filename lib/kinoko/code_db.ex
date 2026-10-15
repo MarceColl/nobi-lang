@@ -15,9 +15,10 @@ defmodule Kinoko.CodeDb do
 
   ## Messages (`{:call, from, request}`, replied with `Effect.reply`)
 
-    * `{:stage, id, entries}` → `{:promoted, [id]} | {:staged, [reason]}`
+    * `{:stage, universe, id, entries}` → `{:promoted, [id]} | {:staged, [reason]}`
       (`Kinoko.Lang.stage_entries/3`; the entries' text is already in the CAS)
-    * `{:unstage, id}` → `:ok | :not_found | {:error, reason}`
+    * `{:unstage, universe, id}` → `:ok | :not_found | {:error, reason}`
+      (an unstage can let other staged patches promote)
     * `:symbols` → `[%{symbol, cid, signature}]`
     * `{:read, symbol}` → `{:ok, text} | :error`
     * `:staged` → `[%{id, source, removes, reasons}]`, in staging order
@@ -32,6 +33,18 @@ defmodule Kinoko.CodeDb do
 
   While the universe is degraded, `:image_key` and `:snapshot` answer
   `{:degraded, reasons}`: its committed code cannot run.
+
+  ## Commits are broadcast
+
+  A write (`:stage` or `:unstage`) after which the history is longer
+  returns, besides the reply, an `Effect.broadcast/3` of
+  `{:committed, universe, %{commit: n, image_hash: hash}}` on
+  `Kinoko.PubSub`, topic `"universe:" <> universe` (`topic/1`): `n` the new
+  history's length (1-based, the newest commit) and `hash` the new committed
+  image's. Effects run after the step's state is stored, so a subscriber
+  never hears of a commit that a restart could lose. A write that stages
+  only, or unstages without promoting, broadcasts nothing. The universe's
+  name travels in the write (the stored state does not hold it).
 
   ## Storage
 
@@ -61,6 +74,10 @@ defmodule Kinoko.CodeDb do
   @spec key(String.t()) :: String.t()
   def key(name), do: "universe:" <> name
 
+  @doc "The `Kinoko.PubSub` topic universe `name`'s commits are broadcast on."
+  @spec topic(String.t()) :: String.t()
+  def topic(name), do: "universe:" <> name
+
   @impl true
   def init(_args), do: {state(Lang.new()), Fx.none()}
 
@@ -78,22 +95,40 @@ defmodule Kinoko.CodeDb do
     {s, Fx.reply(from, reply)}
   end
 
-  def update({:call, from, request}, %{u: u} = s) do
-    {s, reply} =
-      case handle(request, u) do
-        {u, {:promoted, _} = reply} -> {state(u), reply}
-        {u, reply} -> {%{s | u: u}, reply}
-      end
+  def update({:call, from, {:stage, universe, _id, _entries} = request}, s),
+    do: write(from, universe, request, s)
 
-    {s, Fx.reply(from, reply)}
+  def update({:call, from, {:unstage, universe, _id} = request}, s),
+    do: write(from, universe, request, s)
+
+  def update({:call, from, request}, %{u: u} = s) do
+    {u, reply} = handle(request, u)
+    {%{s | u: u}, Fx.reply(from, reply)}
   end
 
   # A stray message (a cast, an info) changes nothing.
   def update(_msg, s), do: {s, Fx.none()}
 
-  defp handle({:stage, id, entries}, u), do: Lang.stage_entries(u, id, entries)
+  # The hash is worked out again, and the commit broadcast, only when the
+  # write promoted (the history grew).
+  defp write(from, universe, request, %{u: u} = s) do
+    commits = length(Lang.history(u))
+    {u, reply} = handle(request, u)
 
-  defp handle({:unstage, id}, u) do
+    case length(Lang.history(u)) do
+      ^commits ->
+        {%{s | u: u}, Fx.reply(from, reply)}
+
+      n ->
+        s = state(u)
+        committed = {:committed, universe, %{commit: n, image_hash: s.hash}}
+        {s, [Fx.reply(from, reply), Fx.broadcast(Kinoko.PubSub, topic(universe), committed)]}
+    end
+  end
+
+  defp handle({:stage, _universe, id, entries}, u), do: Lang.stage_entries(u, id, entries)
+
+  defp handle({:unstage, _universe, id}, u) do
     case Lang.unstage(u, id) do
       {u, true} -> {u, :ok}
       {u, false} -> {u, :not_found}
@@ -149,18 +184,8 @@ defmodule Kinoko.CodeDb do
   @impl true
   def decode(binary) do
     %{commits: commits, staged: staged} = :erlang.binary_to_term(binary, [:safe])
-    wanted = referenced(commits, staged)
-    texts = Cas.get(Map.keys(wanted))
 
-    decls =
-      Map.new(wanted, fn {cid, symbol} ->
-        case Map.fetch(texts, cid) do
-          {:ok, text} -> {cid, parse!(cid, symbol, text)}
-          :error -> raise "declaration #{cid} (#{symbol}) is missing from the CAS"
-        end
-      end)
-
-    case Lang.restore(commits, staged, decls) do
+    case restore(commits, staged) do
       {:ok, u} ->
         state(u)
 
@@ -175,6 +200,32 @@ defmodule Kinoko.CodeDb do
       {:error, reasons} ->
         raise "the universe does not restore: " <> Enum.map_join(reasons, "; ", & &1.message)
     end
+  end
+
+  @doc """
+  `Kinoko.Lang.restore/3` of `commits` and `staged` (as `durable/1` stores
+  them), each declaration fetched by CID from `Kinoko.Cas` and parsed. Raises,
+  naming the CID, when one is missing from the CAS or its text does not
+  parse to one declaration. Pure but for the CAS read: `Kinoko.Universe`
+  also calls it, in its caller, to rebuild a past commit (`Universe.at/2`).
+  """
+  @spec restore([map()], [{String.t(), [tuple()]}]) ::
+          {:ok, Lang.Universe.t()}
+          | {:degraded, Lang.Universe.t(), [Lang.reason()]}
+          | {:error, [Lang.reason()]}
+  def restore(commits, staged) do
+    wanted = referenced(commits, staged)
+    texts = Cas.get(Map.keys(wanted))
+
+    decls =
+      Map.new(wanted, fn {cid, symbol} ->
+        case Map.fetch(texts, cid) do
+          {:ok, text} -> {cid, parse!(cid, symbol, text)}
+          :error -> raise "declaration #{cid} (#{symbol}) is missing from the CAS"
+        end
+      end)
+
+    Lang.restore(commits, staged, decls)
   end
 
   # `%{cid => symbol}` for every CID restore needs: what the commits replay

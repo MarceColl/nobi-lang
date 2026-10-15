@@ -75,6 +75,7 @@ defmodule Kinoko.Elm.Timeline do
   def describe({:reply, {pid, _}, value}), do: "reply #{short(value)} to #{inspect(pid)}"
   def describe({:send, :self, msg}), do: "dispatch #{short(msg)}"
   def describe({:send, dest, msg}), do: "send #{short(msg)} to #{inspect(dest)}"
+  def describe({:broadcast, _pubsub, topic, msg}), do: "broadcast #{short(msg)} on #{topic}"
   def describe({:after_ms, ms, msg}), do: "after #{ms}ms #{short(msg)}"
   def describe({:stop, reason}), do: "stop #{inspect(reason)}"
   def describe({:navigate, to}), do: "navigate #{to}"

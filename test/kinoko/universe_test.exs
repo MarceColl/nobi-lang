@@ -485,4 +485,162 @@ defmodule Kinoko.UniverseTest do
       assert {:error, %{code: "timeout"}} = Task.await(eval, 10_000)
     end
   end
+
+  describe "apply" do
+    test "applies a closure the image made and a constructor fun", %{u: u} do
+      {:promoted, _} = Universe.stage(u, "c", @counter)
+
+      {:promoted, _} =
+        Universe.stage(u, "add", """
+        def M.adder(n : Int) : (Int -> Int) do
+          fn (x : Int) -> x + n end
+        end
+        """)
+
+      assert {:ok, add2, _} = Universe.call(u, "M.adder", [2], [])
+      assert {:ok, 5} = Universe.apply(u, add2, [3], [])
+
+      assert {:ok, ctor, _} = Universe.eval(u, "Counter.Msg.Add", [])
+      assert {:ok, expected, _} = Universe.eval(u, "Counter.Msg.Add(4)", [])
+      assert {:ok, ^expected} = Universe.apply(u, ctor, [4], [])
+    end
+
+    test "is bounded and refuses what it cannot apply", %{u: u} do
+      {:promoted, _} =
+        Universe.stage(u, "f", """
+        def M.spin() : (Int -> Int) do
+          fn (x : Int) -> M.loop(x) end
+        end
+
+        def M.loop(n : Int) : Int do
+          M.loop(n + 1)
+        end
+        """)
+
+      {:ok, spin, _} = Universe.call(u, "M.spin", [], [])
+      assert {:error, %{code: "timeout"}} = Universe.apply(u, spin, [0], timeout: 100)
+      assert {:error, %{code: "runtime"}} = Universe.apply(u, spin, [1, 2], [])
+      assert {:error, %{code: "runtime"}} = Universe.apply(u, :not_a_fun, [], [])
+      assert {:error, :no_such_universe} = Universe.apply("nope-apply", spin, [0], [])
+    end
+
+    test "a closure of an unloaded image answers unloaded", %{u: u} do
+      {:promoted, _} =
+        Universe.stage(u, "f", "def M.k() : (Int -> Int) do\n  fn (x : Int) -> x end\nend")
+
+      {:ok, k, _} = Universe.call(u, "M.k", [], [])
+      {:promoted, _} = Universe.stage(u, "g", @g)
+      {:ok, old} = Universe.at(u, 1)
+      :ok = Exec.unload(Exec.loaded(old.hash) |> elem(1))
+
+      assert {:error, %{code: "unloaded"}} = Universe.apply(u, k, [1], [])
+    end
+  end
+
+  describe "apps and routes" do
+    @forum File.read!("test/fixtures/yabu/forum.yabu")
+
+    test "list the committed apps and route tables", %{u: u} do
+      assert [] = Universe.apps(u)
+      assert %{} == Universe.routes(u)
+
+      {:promoted, _} = Universe.stage(u, "forum", @forum)
+      assert ["Forum.Post", "Forum.Settings", "Forum.Threads"] = Universe.apps(u)
+
+      assert %{"Forum" => [%{app: "Forum.Threads"}, post, %{app: "Forum.Settings"}]} =
+               Universe.routes(u)
+
+      assert %{segments: [{:lit, "post"}, {:param, "id"}], params: [{"id", "Uuid"}]} = post
+      assert {:error, :no_such_universe} = Universe.apps("nope-apps")
+      assert {:error, :bad_name} = Universe.routes("Bad Name")
+    end
+  end
+
+  describe "subscribe" do
+    test "a promotion is broadcast after it is stored; a staged-only patch is not", %{u: u} do
+      assert :ok = Universe.subscribe(u)
+
+      {:promoted, _} = Universe.stage(u, "p1", @g)
+      assert_receive {:committed, ^u, %{commit: 1, image_hash: h1}}
+      assert is_binary(h1)
+      assert stored_commits(u) == 1
+
+      {:staged, _} = Universe.stage(u, "wip", @f <> "\n\ndef A.f2() : Int do\n  A.nope()\nend")
+      :ok = Universe.unstage(u, "wip")
+      refute_receive {:committed, _, _}, 50
+
+      {:promoted, _} = Universe.stage(u, "p2", "def A.g() : Int do\n  2\nend")
+      assert_receive {:committed, ^u, %{commit: 2, image_hash: h2}}
+      assert h2 != h1
+      assert stored_commits(u) == 2
+
+      assert {:error, :no_such_universe} = Universe.subscribe("nope-sub")
+    end
+  end
+
+  describe "at" do
+    test "answers with a past commit's code after head changed", %{u: u} do
+      {:promoted, _} = Universe.stage(u, "p1", @g)
+      {:promoted, _} = Universe.stage(u, "p2", "def A.g() : Int do\n  5\nend")
+
+      assert {:ok, one} = Universe.at(u, 1)
+      assert {:ok, two} = Universe.at(u, 2)
+      assert {:ok, 1, {:named, "Int"}} = Universe.call(one, "A.g", [], [])
+      assert {:ok, 5, _} = Universe.call(two, "A.g", [], [])
+      assert {:ok, 5, _} = Universe.call(u, "A.g", [], [])
+      assert {:ok, 1, _} = Universe.eval(one, "A.g()", [])
+
+      # Cached: the same handle again.
+      assert {:ok, ^one} = Universe.at(u, 1)
+    end
+
+    test "survives its image being unloaded", %{u: u} do
+      {:promoted, _} = Universe.stage(u, "p1", @g)
+      {:ok, one} = Universe.at(u, 1)
+      {:ok, image} = Exec.loaded(one.hash)
+      :ok = Exec.unload(image)
+      assert {:ok, 1, _} = Universe.call(one, "A.g", [], [])
+    end
+
+    test "apply, apps and routes take a handle", %{u: u} do
+      {:promoted, _} = Universe.stage(u, "forum", @forum)
+      {:promoted, _} = Universe.stage(u, "counter", @counter)
+      {:ok, one} = Universe.at(u, 1)
+
+      assert ["Forum.Post", "Forum.Settings", "Forum.Threads"] = Universe.apps(one)
+      assert "Counter" in Universe.apps(u)
+      assert %{"Forum" => [_, _, _]} = Universe.routes(one)
+
+      {:ok, ctor, _} = Universe.eval(one, "Forum.Post.Msg.Draft", [])
+      {:ok, expected, _} = Universe.eval(one, ~s|Forum.Post.Msg.Draft("hi")|, [])
+      assert {:ok, ^expected} = Universe.apply(one, ctor, ["hi"], [])
+      assert {:error, %{code: "unbound"}} = Universe.eval(one, "Counter.init()", [])
+    end
+
+    test "an out-of-range commit is no_such_commit", %{u: u} do
+      assert {:error, %{code: "no_such_commit"}} = Universe.at(u, 1)
+      {:promoted, _} = Universe.stage(u, "p1", @g)
+
+      for n <- [0, -1, 2, "1", nil] do
+        assert {:error, %{code: "no_such_commit", message: _}} = Universe.at(u, n)
+      end
+
+      assert {:error, :no_such_universe} = Universe.at("nope-at", 1)
+    end
+
+    test "a degraded universe still opens an older healthy commit", %{u: u} do
+      store_commits(u, [{"ok", @g}, {"bad", @f <> "\n\ndef A.h() : Int do\n  A.nope()\nend"}])
+
+      capture_log(fn -> assert {:degraded, _} = Universe.health(u) end)
+      assert {:ok, one} = Universe.at(u, 1)
+      assert {:ok, 1, _} = Universe.call(one, "A.g", [], [])
+      assert {:error, %{code: "degraded"}} = Universe.at(u, 2)
+    end
+  end
+
+  defp stored_commits(u) do
+    {:ok, row} = Kinoko.Elm.Store.latest(key(u))
+    %{commits: commits} = :erlang.binary_to_term(row.state)
+    length(commits)
+  end
 end

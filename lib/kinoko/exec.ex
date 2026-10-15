@@ -306,6 +306,70 @@ defmodule Kinoko.Exec do
     end
   end
 
+  @doc """
+  `fun` (a Yabu function value: a closure, a def taken as a value, a
+  constructor) applied to `args` in a worker, bounded as `call/4` is:
+  `{:ok, value}` or `{:error, %{code, message}}`. `snapshot_or_image` is
+  the code the value is run against (its image is loaded first). A value
+  that is no function, or takes another number of arguments, is code
+  `"runtime"`; a closure whose image was unloaded (`unload/1`) is code
+  `"unloaded"`, before or while it runs.
+  """
+  @spec apply(
+          Lang.snapshot() | image | %{image: image, signatures: map()},
+          term(),
+          [term()],
+          keyword()
+        ) ::
+          {:ok, term()} | {:error, error}
+  def apply(snapshot_or_image, fun, args, opts) when is_list(args) do
+    with :ok <- applicable(fun, args),
+         {:ok, image} <- image(snapshot_or_image, opts),
+         :ok <- fun_loaded(fun) do
+      case run(image, fn -> Kernel.apply(fun, args) end, opts) do
+        {:error, %{code: "internal"}} = error ->
+          if fun_loaded(fun) == :ok, do: error, else: Worker.unloaded_error()
+
+        result ->
+          result
+      end
+    end
+  end
+
+  defp applicable(fun, args) when is_function(fun, length(args)), do: :ok
+
+  defp applicable(fun, args) when is_function(fun) do
+    {:arity, arity} = Function.info(fun, :arity)
+    runtime("the function takes #{arity} argument(s), got #{length(args)}")
+  end
+
+  defp applicable(value, _args), do: runtime("#{inspect(value, limit: 5)} is not a function")
+
+  # A closure points into the module that made it: an image's, which
+  # `unload/1` may have purged, or the runtime's (`:erl_eval`, `Kinoko.Lang.Rt`).
+  defp fun_loaded(fun) do
+    {:module, module} = Function.info(fun, :module)
+    if :code.is_loaded(module), do: :ok, else: Worker.unloaded_error()
+  end
+
+  @doc """
+  The image's route tables (`__yabu__(:routes)`, see `Kinoko.Lang.Codegen`):
+  `{:ok, %{routes_name => [%{segments, app, params}]}}` (empty when the code
+  declares none), or `{:error, %{code, message}}` (the image does not load,
+  or was unloaded meanwhile: `"unloaded"`).
+  """
+  @spec routes(Lang.snapshot() | image | %{image: image, signatures: map()}, keyword()) ::
+          {:ok, map()} | {:error, error}
+  def routes(snapshot_or_image, opts \\ []) do
+    with {:ok, image} <- image(snapshot_or_image, opts) do
+      try do
+        {:ok, image.module.__yabu__(:routes)}
+      rescue
+        UndefinedFunctionError -> Worker.unloaded_error()
+      end
+    end
+  end
+
   defp image(%{module: _, binary: _} = image, _opts), do: ensure_loaded(image)
   defp image(%{image: image, signatures: _}, _opts), do: ensure_loaded(image)
 

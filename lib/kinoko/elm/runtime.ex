@@ -3,7 +3,7 @@ defmodule Kinoko.Elm.Runtime do
   The host-agnostic core shared by `Kinoko.ElmGenServer` and `KinokoWeb.ElmLiveView`.
 
   It runs `init`/`update`, performs every effect that only needs a process
-  (async work, reply, send, timers), records the timeline, and hands back the
+  (async work, reply, send, broadcast, timers), records the timeline, and hands back the
   effects only the host can perform (`stop`, navigation, flash, ...).
 
   A host calls:
@@ -209,7 +209,7 @@ defmodule Kinoko.Elm.Runtime do
     %{runtime | pending: Map.put(runtime.pending, id, {started_at, description})}
   end
 
-  @process_effects [:async, :reply, :send, :after_ms]
+  @process_effects [:async, :reply, :send, :after_ms, :broadcast]
 
   defp dispatch(effect, _id, _perform? = false) when elem(effect, 0) in @process_effects, do: :ok
 
@@ -228,6 +228,12 @@ defmodule Kinoko.Elm.Runtime do
 
   defp dispatch({:send, dest, msg}, _id, true) do
     send(dest, msg)
+    :ok
+  end
+
+  # A local broadcast is a send to each subscriber: it does not wait.
+  defp dispatch({:broadcast, pubsub, topic, msg}, _id, true) do
+    Phoenix.PubSub.broadcast(pubsub, topic, msg)
     :ok
   end
 

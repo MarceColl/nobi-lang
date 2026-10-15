@@ -4,6 +4,9 @@ defmodule Kinoko.Elm.RuntimeOnStepTest.Mod do
   def init, do: {0, Fx.none()}
   def update(:inc, n), do: {n + 1, Fx.none()}
   def update({:inc_then_ping, pid}, n), do: {n + 1, Fx.send_to(pid, :effect)}
+
+  def update({:inc_then_broadcast, topic}, n),
+    do: {n + 1, Fx.broadcast(Kinoko.PubSub, topic, {:broadcast, n + 1})}
 end
 
 defmodule Kinoko.Elm.RuntimeOnStepTest do
@@ -31,6 +34,19 @@ defmodule Kinoko.Elm.RuntimeOnStepTest do
     {_rt, _} = Runtime.step(rt, {:inc_then_ping, test_pid})
 
     assert {:messages, [{:hooked, 0}, {:hooked, 1}, :effect]} =
+             Process.info(self(), :messages)
+  end
+
+  test "a broadcast is performed after the hook, in order" do
+    test_pid = self()
+    topic = "runtime-test:#{System.unique_integer([:positive])}"
+    :ok = Phoenix.PubSub.subscribe(Kinoko.PubSub, topic)
+    {rt, _} = start(fn _state, seq -> send(test_pid, {:hooked, seq}) end)
+    {rt, _} = Runtime.step(rt, {:inc_then_broadcast, topic})
+    {_rt, _} = Runtime.step(rt, {:inc_then_broadcast, topic})
+
+    assert {:messages,
+            [{:hooked, 0}, {:hooked, 1}, {:broadcast, 1}, {:hooked, 2}, {:broadcast, 2}]} =
              Process.info(self(), :messages)
   end
 
