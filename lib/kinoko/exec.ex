@@ -15,8 +15,8 @@ defmodule Kinoko.Exec do
 
   ## Trying it from iex
 
-  `iex -S mix` aliases `Kinoko.Repl` as `Y` (see `.iex.exs`), which keeps
-  the session universe for you. Without it, take a snapshot yourself:
+  `iex -S mix` aliases `Kinoko.Repl` as `Y` (see `.iex.exs`), which drives
+  the current `Kinoko.Universe` for you. Without it, take a snapshot yourself:
 
       iex> {u, {:promoted, _}} = Lang.stage(Lang.new(), "c", File.read!("test/fixtures/yabu/counter.yabu"))
       iex> snapshot = Lang.snapshot(u)

@@ -1,10 +1,24 @@
 defmodule Kinoko.Repl do
   @moduledoc """
-  A tiny stateful helper for trying Yabu from `iex -S mix`. It keeps ONE
-  session universe in a named Agent (started lazily on first use, deliberately
-  outside the supervision tree: it is a dev convenience, and a crash just
-  gives you a fresh session), so you never thread the universe by hand. The
-  repo's `.iex.exs` aliases this module as `Y`.
+  A tiny helper for trying Yabu from `iex -S mix`. Every call goes through
+  `Kinoko.Universe`, against the session's CURRENT universe: `"main"` until
+  you `use/1` another (kept in the shell process's dictionary, so each iex
+  session has its own), so you never thread the universe by hand. The state
+  lives in the universe, not here: it survives a restart of the shell or of
+  the universe's process. The repo's `.iex.exs` aliases this module as `Y`.
+
+  To start from nothing, create a fresh universe and switch to it
+  (there is no reset; `main` is the shared one):
+
+      iex> Y.create("scratch")
+      created: scratch
+      :ok
+      iex> Y.use("scratch")
+      using: scratch
+      :ok
+      iex> Y.universes()
+      main
+      scratch (current)
 
   Everything prints readably and returns a useful value. `eval/2` and
   `call/3` print the value (or the error) as Yabu source; inside iex they
@@ -55,14 +69,65 @@ defmodule Kinoko.Repl do
       {:error, :enoent}
 
   Also: `call/2`, `last/0`, `test/1`, `symbols/0`, `read/1`, `unstage/1`,
-  `history/0`, `u/0` (the universe, to hand to `Kinoko.Exec` /
-  `Kinoko.Lang` directly) and `reset/0`.
+  `history/0`, `current/0`, `use/1`, `universes/0` and `create/1`.
   """
 
-  alias Kinoko.{Exec, Lang}
+  alias Kinoko.{Exec, Universe}
   alias Kinoko.Lang.Format
 
-  @agent __MODULE__.Session
+  @current_key {__MODULE__, :universe}
+  @last_key {__MODULE__, :last}
+  @default "main"
+
+  @doc "The name of the session's current universe (`\"main\"` by default)."
+  @spec current() :: String.t()
+  def current, do: Process.get(@current_key, @default)
+
+  @doc """
+  Switch the session to universe `name`. An unknown name prints an error
+  and changes nothing.
+  """
+  @spec use(String.t()) :: :ok | {:error, :no_such_universe | :bad_name}
+  def use(name) do
+    cond do
+      not is_binary(name) ->
+        print_error(:bad_name, name)
+
+      name in Enum.map(Universe.list(), & &1.name) ->
+        Process.put(@current_key, name)
+        IO.puts("using: #{name}")
+        :ok
+
+      true ->
+        print_error(:no_such_universe, name)
+    end
+  end
+
+  @doc "Prints every universe, marking the current one."
+  @spec universes() :: :ok
+  def universes do
+    for %{name: name} <- Universe.list(),
+        do: IO.puts(if(name == current(), do: "#{name} (current)", else: name))
+
+    :ok
+  end
+
+  @doc "Create an empty universe (it does not switch to it: `use/1`)."
+  @spec create(String.t()) :: :ok | {:error, :exists | :bad_name}
+  def create(name) do
+    case Universe.create(name) do
+      :ok ->
+        IO.puts("created: #{name}")
+        :ok
+
+      {:error, :exists} ->
+        IO.puts("error: universe #{name} already exists")
+        {:error, :exists}
+
+      {:error, :bad_name} ->
+        print_error(:bad_name, name)
+    end
+  end
 
   @doc """
   Stage `path_or_source`: a file when the argument names one, else source
@@ -76,7 +141,7 @@ defmodule Kinoko.Repl do
   `{:error, :enoent}` (`{:error, :eisdir}`).
   """
   @spec load(String.t(), keyword()) ::
-          :ok | {:staged, [Lang.reason()]} | {:error, :enoent | :eisdir}
+          :ok | {:staged, [Universe.reason()]} | {:error, :enoent | :eisdir}
   def load(path_or_source, opts \\ []) when is_binary(path_or_source) do
     case source_of(path_or_source) do
       {:ok, source, default_id} -> stage(source, default_id, opts)
@@ -110,17 +175,33 @@ defmodule Kinoko.Repl do
   end
 
   defp stage(source, default_id, opts) do
-    Agent.get_and_update(
-      session(),
-      fn %{n: n} = s ->
-        id = opts[:id] || default_id || "repl-#{n + 1}"
-        {u, verdict} = Lang.stage(s.u, id, source)
-        {{id, verdict}, %{s | u: u, n: if(default_id || opts[:id], do: n, else: n + 1)}}
-      end,
-      :infinity
-    )
-    |> report_verdict()
+    u = current()
+    id = opts[:id] || default_id || next_id(u)
+
+    case Universe.stage(u, id, source) do
+      {:error, error} -> fail(error, u)
+      verdict -> report_verdict(id, verdict)
+    end
   end
+
+  # `repl-N`, N one past the highest the universe has seen (promoted or staged).
+  defp next_id(u) do
+    seen =
+      for list <- [Universe.history(u) |> ids_of(:ids), Universe.staged(u) |> ids_of(:id)],
+          id <- list,
+          {n, ""} <- [repl_number(id)],
+          do: n
+
+    "repl-#{Enum.max([0 | seen]) + 1}"
+  end
+
+  defp ids_of(entries, key) when is_list(entries),
+    do: Enum.flat_map(entries, &List.wrap(Map.fetch!(&1, key)))
+
+  defp ids_of(_error, _key), do: []
+
+  defp repl_number("repl-" <> n), do: Integer.parse(n)
+  defp repl_number(_), do: :error
 
   @doc """
   Evaluate an expression against the session; prints `value : type`. Inside
@@ -129,14 +210,13 @@ defmodule Kinoko.Repl do
   """
   @spec eval(String.t(), keyword()) :: term()
   def eval(source, opts \\ []) when is_binary(source) do
-    case Exec.eval(Lang.snapshot(u()), source, opts) do
+    case Universe.eval(current(), source, opts) do
       {:ok, value, type} ->
         IO.puts("#{Exec.show(value, type)} : #{Format.type(type)}")
         remember(value)
 
       {:error, error} ->
-        print_error(error)
-        quiet({:error, error})
+        fail(error)
     end
   end
 
@@ -146,23 +226,22 @@ defmodule Kinoko.Repl do
   """
   @spec call(String.t(), [term()], keyword()) :: term()
   def call(name, args, opts \\ []) do
-    case Exec.call(Lang.snapshot(u()), name, args, opts) do
+    case Universe.call(current(), name, args, opts) do
       {:ok, value} ->
         IO.puts(show_untyped(name, value))
         remember(value)
 
       {:error, error} ->
-        print_error(error)
-        quiet({:error, error})
+        fail(error)
     end
   end
 
   @doc "The value the last successful `eval/2` or `call/3` computed (`nil` before any)."
   @spec last() :: term()
-  def last, do: Agent.get(session(), & &1.last)
+  def last, do: Process.get(@last_key)
 
   defp remember(value) do
-    Agent.update(session(), &%{&1 | last: value})
+    Process.put(@last_key, value)
     quiet(value)
   end
 
@@ -174,7 +253,7 @@ defmodule Kinoko.Repl do
   @doc "Run a deftest; prints `ok` or its failures."
   @spec test(String.t(), keyword()) :: :ok | {:error, map()}
   def test(name, opts \\ []) do
-    case Exec.test(Lang.snapshot(u()), name, opts) do
+    case Universe.test(current(), name, opts) do
       :ok ->
         IO.puts("#{name}: ok")
         :ok
@@ -192,15 +271,21 @@ defmodule Kinoko.Repl do
   @doc "Prints the signature of every committed symbol."
   @spec symbols() :: :ok
   def symbols do
-    Enum.each(Lang.symbols(u()), fn %{name: name, signature: sig} ->
-      IO.puts(if String.starts_with?(sig, name), do: sig, else: "#{name} : #{sig}")
-    end)
+    case Universe.symbols(current()) do
+      {:error, error} ->
+        fail(error)
+
+      symbols ->
+        Enum.each(symbols, fn %{symbol: name, signature: sig} ->
+          IO.puts(if String.starts_with?(sig, name), do: sig, else: "#{name} : #{sig}")
+        end)
+    end
   end
 
   @doc "Prints the committed source of `name`; returns `:ok` or `:error`."
   @spec read(String.t()) :: :ok | :error
   def read(name) do
-    case Lang.read(u(), name) do
+    case Universe.read(current(), name) do
       {:ok, text} ->
         IO.puts(text)
         :ok
@@ -208,64 +293,70 @@ defmodule Kinoko.Repl do
       :error ->
         IO.puts("no committed symbol named #{name}")
         :error
+
+      {:error, error} ->
+        fail(error)
     end
   end
 
   @doc """
-  Drop a staged patch by id; prints what happened. `true`, `false` (nothing
-  staged under `id`) or `{:error, reason}`.
+  Drop a staged patch by id; prints what happened. `:ok`, `:not_found`
+  (nothing staged under `id`) or `{:error, reason}`.
   """
-  @spec unstage(String.t()) :: boolean() | {:error, Lang.reason()}
+  @spec unstage(String.t()) :: :ok | :not_found | {:error, term()}
   def unstage(id) do
-    result =
-      Agent.get_and_update(
-        session(),
-        fn s ->
-          {u, result} = Lang.unstage(s.u, id)
-          {result, %{s | u: u}}
-        end,
-        :infinity
-      )
+    case Universe.unstage(current(), id) do
+      :ok ->
+        IO.puts("unstaged: #{id}")
+        :ok
 
-    case result do
-      true -> IO.puts("unstaged: #{id}")
-      false -> IO.puts("nothing staged under #{id}")
-      {:error, reason} -> print_error(reason)
+      :not_found ->
+        IO.puts("nothing staged under #{id}")
+        :not_found
+
+      {:error, error} ->
+        fail(error)
     end
-
-    result
   end
 
   @doc "Every promoted round, oldest first."
-  @spec history() :: [map()]
-  def history, do: Lang.history(u())
-
-  @doc "The session universe, for `Kinoko.Exec` / `Kinoko.Lang` directly."
-  @spec u() :: Lang.Universe.t()
-  def u, do: Agent.get(session(), & &1.u, :infinity)
-
-  @doc "Start over with an empty universe."
-  @spec reset() :: :ok
-  def reset, do: Agent.update(session(), fn _ -> fresh() end)
-
-  defp fresh, do: %{u: Lang.new(), n: 0, last: nil}
-
-  defp session do
-    case Agent.start(&fresh/0, name: @agent) do
-      {:ok, pid} -> pid
-      {:error, {:already_started, pid}} -> pid
+  @spec history() :: [map()] | {:error, term()}
+  def history do
+    case Universe.history(current()) do
+      {:error, error} -> fail(error)
+      rounds -> rounds
     end
   end
 
-  defp report_verdict({_id, {:promoted, ids}}) do
+  defp report_verdict(_id, {:promoted, ids}) do
     IO.puts("promoted: #{Enum.join(ids, ", ")}")
     :ok
   end
 
-  defp report_verdict({id, {:staged, reasons} = verdict}) do
+  defp report_verdict(id, {:staged, reasons} = verdict) do
     IO.puts("staged: #{id}")
     Enum.each(reasons, &IO.puts("  #{&1.name || "-"}: [#{&1.code}] #{&1.message}"))
     verdict
+  end
+
+  defp fail(error, universe \\ nil)
+
+  defp fail(error, universe) when is_atom(error),
+    do: quiet(print_error(error, universe || current()))
+
+  defp fail(error, _universe) do
+    print_error(error)
+    quiet({:error, error})
+  end
+
+  defp print_error(:no_such_universe, name) do
+    IO.puts("error: no such universe: #{name}")
+    {:error, :no_such_universe}
+  end
+
+  defp print_error(:bad_name, name) do
+    IO.puts("error: bad universe name: #{inspect(name)}")
+    {:error, :bad_name}
   end
 
   # The reasons only when they say more than the message: the message is
@@ -288,10 +379,14 @@ defmodule Kinoko.Repl do
     :ok
   end
 
-  # `call/3` has no static type to hand to the printer; use the def's return type.
+  # `call/3` has no static type to hand to the printer; the def's return type
+  # is the tail of its signature text.
   defp show_untyped(name, value) do
-    case Lang.signatures(u()) do
-      %{^name => {:def, _params, ret}} -> "#{Exec.show(value, ret)} : #{Format.type(ret)}"
+    with symbols when is_list(symbols) <- Universe.symbols(current()),
+         %{signature: sig} <- Enum.find(symbols, &(&1.symbol == name)),
+         [_, ret] <- Regex.run(~r/\) : (.+)\z/s, sig) do
+      "#{Exec.show(value, nil)} : #{ret}"
+    else
       _ -> Exec.show(value, nil)
     end
   rescue

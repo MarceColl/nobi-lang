@@ -1,15 +1,19 @@
 defmodule Kinoko.ReplTest do
-  use ExUnit.Case, async: false
+  use Kinoko.DataCase, async: false
 
   import ExUnit.CaptureIO
+  import Kinoko.UniverseHelpers
 
   alias Kinoko.Repl, as: Y
+  alias Kinoko.Universe
 
   @counter "test/fixtures/yabu/counter.yabu"
 
   setup do
-    Y.reset()
-    :ok
+    name = fresh_universe("repl")
+    capture_io(fn -> assert Y.use(name) == :ok end)
+    on_exit(fn -> Process.delete({Kinoko.Repl, :universe}) end)
+    %{u: name}
   end
 
   test "the walkthrough: load, init, update, view" do
@@ -74,11 +78,72 @@ defmodule Kinoko.ReplTest do
     assert [%{ids: ["repl-1"]}] = Y.history()
 
     capture_io(fn -> Y.load("def A.bad() : Int do A.missing() end", id: "bad") end)
-    assert capture_io(fn -> assert Y.unstage("bad") == true end) =~ "unstaged: bad"
-    assert capture_io(fn -> assert Y.unstage("bad") == false end) =~ "nothing staged under bad"
+    assert capture_io(fn -> assert Y.unstage("bad") == :ok end) =~ "unstaged: bad"
 
-    Y.reset()
+    assert capture_io(fn -> assert Y.unstage("bad") == :not_found end) =~
+             "nothing staged under bad"
+  end
+
+  test "universes: create, use, list; a fresh universe starts empty", %{u: u} do
+    capture_io(fn -> Y.load(@counter) end)
+    assert Y.current() == u
+
+    other = "repl-other-#{System.unique_integer([:positive])}"
+    stop_on_exit(other)
+    assert capture_io(fn -> assert Y.create(other) == :ok end) =~ "created: #{other}"
+    assert capture_io(fn -> assert {:error, :exists} = Y.create(other) end) =~ "already exists"
+
+    assert capture_io(fn -> assert {:error, :bad_name} = Y.create("Bad Name") end) =~
+             "bad universe"
+
+    out = capture_io(fn -> Y.universes() end)
+    assert out =~ "#{u} (current)\n"
+    assert out =~ "#{other}\n"
+
+    assert capture_io(fn -> assert Y.use(other) == :ok end) =~ "using: #{other}"
+    assert Y.current() == other
     assert Y.history() == []
+    assert capture_io(fn -> assert {:error, _} = Y.eval("Counter.init()") end) =~ "error: ["
+
+    # The first universe kept its state.
+    capture_io(fn -> Y.use(u) end)
+    assert [%{ids: ["counter"]}] = Y.history()
+  end
+
+  test "use of an unknown or bad name says so and stays put", %{u: u} do
+    out = capture_io(fn -> assert Y.use("nope-nope") == {:error, :no_such_universe} end)
+    assert out == "error: no such universe: nope-nope\n"
+    out = capture_io(fn -> assert Y.use(:main) == {:error, :bad_name} end)
+    assert out =~ "bad universe name"
+    assert Y.current() == u
+  end
+
+  test "the state is the universe's: killing its CodeDb mid-session loses nothing", %{u: u} do
+    capture_io(fn -> Y.load(@counter) end)
+    capture_io(fn -> assert Y.load("def A.one() : Int do 1 end") == :ok end)
+
+    pid = pid(u)
+    ref = Process.monitor(pid)
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^ref, _, _, _}
+
+    assert capture_io(fn -> assert Y.eval("A.one() + 1") == 2 end) =~ "2 : Int"
+    out = capture_io(fn -> Y.eval("Counter.init()") end)
+    assert out =~ "%Counter.Model{count: 0}"
+    assert [%{ids: ["counter"]}, %{ids: ["repl-1"]}] = Y.history()
+
+    # And the next anonymous id continues the numbering.
+    assert capture_io(fn -> Y.load("def A.two() : Int do 2 end") end) =~ "promoted: repl-2"
+  end
+
+  test "main works out of the box" do
+    :ok = Universe.Registry.ensure_main()
+    on_exit(fn -> stop("main") end)
+    Process.delete({Kinoko.Repl, :universe})
+    assert Y.current() == "main"
+    out = capture_io(fn -> assert Y.load("def Repltest.one() : Int do 1 end") == :ok end)
+    assert out =~ "promoted: repl-"
+    assert capture_io(fn -> assert Y.eval("Repltest.one()") == 1 end) =~ "1 : Int"
   end
 
   test "errors print readably, the message once" do
@@ -115,6 +180,6 @@ defmodule Kinoko.ReplTest do
     out = capture_io(fn -> assert Y.load("test/fixtures/yabu") == {:error, :eisdir} end)
     assert out =~ "test/fixtures/yabu is a directory"
     assert Y.history() == []
-    assert Kinoko.Lang.staged(Y.u()) == %{}
+    assert Universe.staged(Y.current()) == []
   end
 end
