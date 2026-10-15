@@ -20,7 +20,9 @@ defmodule Kinoko.Application do
         {DynamicSupervisor,
          name: Kinoko.Elm.Supervisor, strategy: :one_for_one, max_restarts: 1_000, max_seconds: 60},
         {DNSCluster, query: Application.get_env(:kinoko, :dns_cluster_query) || :ignore},
-        {Phoenix.PubSub, name: Kinoko.PubSub}
+        {Phoenix.PubSub, name: Kinoko.PubSub},
+        # Owns the ETS table of Kinoko.Universe.at/2's pinned views.
+        Kinoko.Universe.AtCache
         # One-shot: makes sure the `main` universe row exists. A DB outage is
         # logged, not fatal (the first Universe call retries ensure_main). Skipped
         # in test (`config :kinoko, :ensure_main_at_boot, false`) because the SQL

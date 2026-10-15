@@ -18,7 +18,7 @@ defmodule Kinoko.CodeDb do
     * `{:stage, universe, id, entries}` → `{:promoted, [id]} | {:staged, [reason]}`
       (`Kinoko.Lang.stage_entries/3`; the entries' text is already in the CAS)
     * `{:unstage, universe, id}` → `:ok | :not_found | {:error, reason}`
-      (an unstage can let other staged patches promote)
+      (never promotes: `Kinoko.Lang.unstage/2` leaves history as it is)
     * `:symbols` → `[%{symbol, cid, signature}]`
     * `{:read, symbol}` → `{:ok, text} | :error`
     * `:staged` → `[%{id, source, removes, reasons}]`, in staging order
@@ -42,8 +42,10 @@ defmodule Kinoko.CodeDb do
   `Kinoko.PubSub`, topic `"universe:" <> universe` (`topic/1`): `n` the new
   history's length (1-based, the newest commit) and `hash` the new committed
   image's. Effects run after the step's state is stored, so a subscriber
-  never hears of a commit that a restart could lose. A write that stages
-  only, or unstages without promoting, broadcasts nothing. The universe's
+  never hears of a commit that a restart could lose. A stage that promotes
+  nothing broadcasts nothing, and neither does an unstage (it never
+  promotes; checking the history keeps that an invariant of Lang's, not
+  an assumption here). The universe's
   name travels in the write (the stored state does not hold it).
 
   ## Storage
@@ -110,7 +112,7 @@ defmodule Kinoko.CodeDb do
   def update(_msg, s), do: {s, Fx.none()}
 
   # The hash is worked out again, and the commit broadcast, only when the
-  # write promoted (the history grew).
+  # write promoted (the history grew; an unstage never does).
   defp write(from, universe, request, %{u: u} = s) do
     commits = length(Lang.history(u))
     {u, reply} = handle(request, u)

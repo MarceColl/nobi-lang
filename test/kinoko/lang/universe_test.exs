@@ -1196,7 +1196,7 @@ defmodule Kinoko.Lang.UniverseTest do
         {naive, reference} = run(NaiveUniverse, naive, op)
 
         failure =
-          failure ||
+          failure || unstage_promoted(op, before, fast) ||
             begin_failure(op, before, verdict, reference, fast, naive)
 
         {naive, failure}
@@ -1204,6 +1204,15 @@ defmodule Kinoko.Lang.UniverseTest do
 
     if failure, do: flunk(failure)
   end
+
+  # An unstage never promotes: `Kinoko.CodeDb` broadcasts commits on the
+  # history growing and relies on this.
+  defp unstage_promoted({:unstage, _} = op, before, after_u) do
+    if length(Universe.history(after_u)) != length(Universe.history(before)),
+      do: "#{inspect(op)} lengthened history"
+  end
+
+  defp unstage_promoted(_op, _before, _after_u), do: nil
 
   defp begin_failure(op, before, verdict, reference, fast, naive) do
     history = history_holds(before, verdict, fast)

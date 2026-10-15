@@ -594,6 +594,28 @@ defmodule Kinoko.UniverseTest do
       assert {:ok, ^one} = Universe.at(u, 1)
     end
 
+    test "a reused name with another history is rebuilt, never served stale", %{u: u} do
+      {:promoted, _} = Universe.stage(u, "p1", @g)
+      {:ok, old} = Universe.at(u, 1)
+      assert {:ok, 1, _} = Universe.call(old, "A.g", [], [])
+
+      # The name is used again from scratch (as after a database reset).
+      stop(u)
+      Repo.query!("DELETE FROM elm_states WHERE key = $1", [key(u)])
+      Repo.query!("DELETE FROM universes WHERE name = $1", [u])
+      :ok = Universe.create(u)
+      {:promoted, _} = Universe.stage(u, "p1", "def A.g() : Int do\n  7\nend")
+
+      assert {:ok, fresh} = Universe.at(u, 1)
+      assert fresh != old
+      assert {:ok, 7, _} = Universe.call(fresh, "A.g", [], [])
+
+      # The old view, its image unloaded, is not rebuilt from the new history.
+      {:ok, image} = Exec.loaded(old.hash)
+      :ok = Exec.unload(image)
+      assert {:error, %{code: "no_such_commit"}} = Universe.call(old, "A.g", [], [])
+    end
+
     test "survives its image being unloaded", %{u: u} do
       {:promoted, _} = Universe.stage(u, "p1", @g)
       {:ok, one} = Universe.at(u, 1)

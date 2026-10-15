@@ -69,7 +69,7 @@ defmodule Kinoko.Universe do
 
   alias Kinoko.{Cas, CodeDb, Exec, Lang}
   alias Kinoko.PersistentElmGenServer, as: Server
-  alias Kinoko.Universe.{At, Registry}
+  alias Kinoko.Universe.{At, AtCache, Registry}
 
   @read_timeout 5_000
 
@@ -245,7 +245,7 @@ defmodule Kinoko.Universe do
   defp target(%At{hash: hash, signatures: sigs} = at) do
     case Exec.loaded(hash) do
       {:ok, image} -> {:ok, %{image: image, signatures: sigs}}
-      :error -> with {:ok, snapshot} <- snapshot_at(at.universe, at.commit), do: {:ok, snapshot}
+      :error -> snapshot_at(at)
     end
   end
 
@@ -357,7 +357,9 @@ defmodule Kinoko.Universe do
   `{:error, %{code, message}}`. Bounded as `call/4` is (`opts` are its
   limits). A value that is no function or takes another number of
   arguments is code `"runtime"`; a closure whose image has been unloaded
-  is code `"unloaded"`.
+  is code `"unloaded"`. A closure runs the code of the image it came from,
+  whichever commit `universe_or_at` is now. `opts` has no default: an
+  `apply/3` would clash with `Kernel.apply/3` inside this module.
   """
   @spec apply(name | At.t(), term(), [term()], keyword()) :: {:ok, term()} | error
   def apply(universe_or_at, fun, args, opts) do
@@ -392,10 +394,11 @@ defmodule Kinoko.Universe do
   end
 
   @doc """
-  Subscribes the caller to the universe's commits: after each promotion is
-  stored it receives `{:committed, universe, %{commit: n, image_hash: hash}}`
-  (`n` the new commit, 1-based into `history/1`). Staging that promotes
-  nothing sends nothing. `:ok`.
+  Subscribes the caller to the universe's commits: after each write that
+  adds commits, once it is stored, it receives
+  `{:committed, universe, %{commit: n, image_hash: hash}}`, `commit` the
+  newest (1-based into `history/1`; one write can add several) and `hash`
+  its image's. Staging that promotes nothing sends nothing. `:ok`.
   """
   @spec subscribe(name) :: :ok | error
   def subscribe(universe) do
@@ -412,10 +415,12 @@ defmodule Kinoko.Universe do
 
   Built in the caller, never in the CodeDb: the history is replayed up to
   `commit`, its declarations fetched from `Kinoko.Cas` and checked again
-  (`Kinoko.Lang.restore/3`), and the image loaded. Views are cached for
-  the node's life by `{universe, commit}` (a commit never changes), images
-  by hash (`Kinoko.Exec`); nothing is evicted. A degraded universe opens
-  its older commits that still typecheck.
+  (`Kinoko.Lang.restore/3`), and the image loaded. The history is read on
+  every call; views are cached (`Kinoko.Universe.AtCache`, ETS) by
+  `{universe, commit}` and a fingerprint of the history up to `commit`, so
+  a name reused with another history is rebuilt, never served stale.
+  Images are cached by hash (`Kinoko.Exec`); nothing is evicted. A
+  degraded universe opens its older commits that still typecheck.
 
   `{:error, %{code: "no_such_commit", message: m}}` when `commit` is not
   one of the history's; `{:error, %{code: "degraded", ...}}` when that
@@ -423,37 +428,61 @@ defmodule Kinoko.Universe do
   """
   @spec at(name, pos_integer()) :: {:ok, At.t()} | error
   def at(universe, commit) do
-    with :ok <- check(universe) do
-      case :persistent_term.get({At, universe, commit}, nil) do
-        %At{} = at ->
+    with {:ok, rounds} <- rounds(universe, commit) do
+      fingerprint = AtCache.fingerprint(rounds)
+
+      case AtCache.get(universe, commit, fingerprint) do
+        {:ok, at} ->
           {:ok, at}
 
-        nil ->
-          with {:ok, snapshot} <- snapshot_at(universe, commit),
+        :error ->
+          with {:ok, snapshot} <- restore_at(universe, commit, rounds),
                {:ok, image} <- Exec.load(snapshot) do
             at = %At{
               universe: universe,
               commit: commit,
+              fingerprint: fingerprint,
               hash: image.hash,
               signatures: snapshot.signatures
             }
 
-            :persistent_term.put({At, universe, commit}, at)
+            :ok = AtCache.put(universe, commit, fingerprint, at)
             {:ok, at}
           end
       end
     end
   end
 
-  # Commit `commit`'s snapshot, rebuilt from the history in the caller.
-  defp snapshot_at(universe, commit) do
+  # The history's first `commit` rounds, read from the CodeDb every time:
+  # the cache is trusted only for the history it was built from.
+  defp rounds(universe, commit) do
     with history when is_list(history) <- read_request(universe, :history),
-         :ok <- in_history(universe, commit, length(history)) do
-      case CodeDb.restore(Enum.take(history, commit), []) do
-        {:ok, u} -> {:ok, Lang.snapshot(u)}
-        {:degraded, _u, reasons} -> {:error, degraded_at(universe, commit, reasons)}
-        {:error, reasons} -> {:error, internal(Enum.map_join(reasons, "; ", & &1.message))}
-      end
+         :ok <- in_history(universe, commit, length(history)),
+         do: {:ok, Enum.take(history, commit)}
+  end
+
+  # A pinned view's snapshot again (its image was unloaded), only while the
+  # universe's history still starts with the rounds the view was made from.
+  defp snapshot_at(%At{universe: universe, commit: commit, fingerprint: fingerprint}) do
+    with {:ok, rounds} <- rounds(universe, commit) do
+      if AtCache.fingerprint(rounds) == fingerprint,
+        do: restore_at(universe, commit, rounds),
+        else:
+          {:error,
+           %{
+             code: "no_such_commit",
+             message:
+               "universe #{universe}'s history changed under commit #{commit}: open it again"
+           }}
+    end
+  end
+
+  # Commit `commit`'s snapshot, rebuilt from its rounds in the caller.
+  defp restore_at(universe, commit, rounds) do
+    case CodeDb.restore(rounds, []) do
+      {:ok, u} -> {:ok, Lang.snapshot(u)}
+      {:degraded, _u, reasons} -> {:error, degraded_at(universe, commit, reasons)}
+      {:error, reasons} -> {:error, internal(Enum.map_join(reasons, "; ", & &1.message))}
     end
   rescue
     e ->
