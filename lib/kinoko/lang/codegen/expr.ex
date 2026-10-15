@@ -24,8 +24,13 @@ defmodule Kinoko.Lang.Codegen.Expr do
 
   Values follow `Kinoko.Lang.Rt`'s table. `always(e)` is
   `case E of true -> {}; _ -> 'Elixir.Kinoko.Exec.Hooks':always_failed(Src) end`
-  (Rust records a false `always` and goes on), `sometimes(e)` evaluates `e`
-  and is `{}`. A `case` ends in `_ -> Rt:no_arm!()`.
+  (Rust records a false `always` and goes on). Inside a declaration,
+  `sometimes(e)` is
+  `case E of true -> 'Elixir.Kinoko.Exec.Hooks':sometimes_held(Decl, Src); _ -> {} end`,
+  so a deftest can be scored for the `sometimes` it never reached; in an
+  expression evaluated against an image (no declaration) it evaluates `e`
+  and is `{}`. `Src` is `Kinoko.Lang.Format.expr/1` of `e`, the site's source
+  as Rust's `Site` words it. A `case` ends in `_ -> Rt:no_arm!()`.
   """
 
   alias Kinoko.Lang.Format
@@ -40,22 +45,25 @@ defmodule Kinoko.Lang.Codegen.Expr do
 
   @typedoc """
   `n` is the next variable's number, `env` each local's variable, `names`
-  the image's defs (`name => {fun_atom, arity}`), `module` the image module
-  and `local?` whether the code is inside it (local calls) or outside it
-  (`:erl_eval`, remote calls).
+  the image's defs (`name => {fun_atom, arity}`), `module` the image module,
+  `local?` whether the code is inside it (local calls) or outside it
+  (`:erl_eval`, remote calls), and `decl` the declaration being lowered
+  (`nil` for an expression evaluated against the image): what a `sometimes`
+  that holds is recorded under.
   """
   @type ctx :: %{
           n: non_neg_integer(),
           env: %{String.t() => atom()},
           names: %{String.t() => {atom(), non_neg_integer()}},
           module: atom(),
-          local?: boolean()
+          local?: boolean(),
+          decl: String.t() | nil
         }
 
-  @doc "A fresh context."
-  @spec ctx(map(), atom(), boolean()) :: ctx
-  def ctx(names, module, local?),
-    do: %{n: 0, env: %{}, names: names, module: module, local?: local?}
+  @doc "A fresh context, lowering the declaration `decl` (`nil`: an expression)."
+  @spec ctx(map(), atom(), boolean(), String.t() | nil) :: ctx
+  def ctx(names, module, local?, decl \\ nil),
+    do: %{n: 0, env: %{}, names: names, module: module, local?: local?, decl: decl}
 
   @doc "`params` (`[{name, type}]`) as fresh variables: their forms and the context binding them."
   @spec params(ctx, [{String.t(), term()}]) :: {[tuple()], ctx}
@@ -213,9 +221,18 @@ defmodule Kinoko.Lang.Codegen.Expr do
      ctx}
   end
 
-  def expr({:sometimes, _, [x]}, ctx) do
+  def expr({:sometimes, _, [x]}, %{decl: nil} = ctx) do
     {f, ctx} = expr(x, ctx)
     {{:block, @a, [{:match, @a, {:var, @a, :_}, f}, unit()]}, ctx}
+  end
+
+  def expr({:sometimes, _, [x]}, ctx) do
+    {f, ctx} = expr(x, ctx)
+    held = remote(@hooks, :sometimes_held, [lit(ctx.decl), lit(Format.expr(x))])
+
+    {{:case, @a, f,
+      [{:clause, @a, [lit(true)], [], [held]}, {:clause, @a, [{:var, @a, :_}], [], [unit()]}]},
+     ctx}
   end
 
   def expr({:jsx, _, _} = jsx, ctx), do: jsx(jsx, ctx)

@@ -242,6 +242,16 @@ defmodule Kinoko.Lang.CodegenTest do
                "always failed: T.one() == 2",
                "always failed: T.one() == 3"
              ]
+
+      # A `sometimes` that held is recorded under its declaration.
+      assert Hooks.take_reached() == MapSet.new([{"T.t", "T.one() == 1"}])
+      assert image.sometimes == %{"T.t" => ["T.one() == 1"]}
+
+      # Outside a declaration, `sometimes` only evaluates its argument.
+      {:ok, typed, _} = Lang.check_expr(universe(src), "sometimes(T.one() == 1)")
+      forms = Codegen.expr_forms(typed, image.names, image.module)
+      assert {:value, {}, _} = :erl_eval.exprs(forms, :erl_eval.new_bindings())
+      assert Hooks.take_reached() == MapSet.new()
     end
 
     test "runtime errors are Rust's" do

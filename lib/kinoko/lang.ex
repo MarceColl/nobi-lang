@@ -242,9 +242,11 @@ defmodule Kinoko.Lang do
 
   @doc """
   The committed code compiled to one Erlang module (`Kinoko.Lang.Codegen`):
-  `{:ok, %{module:, binary:, hash:, names:, tests:}}`, where `names` is
-  `%{def => {fun, arity}}` and `tests` `%{test => fun}`; or
-  `{:error, %{code: "compile", message: m}}`. Nothing is loaded.
+  `{:ok, %{module:, binary:, hash:, names:, tests:, sometimes:}}`, where
+  `names` is `%{def => {fun, arity}}`, `tests` `%{test => fun}` and
+  `sometimes` `%{test => [source]}` (the `sometimes` sites each test
+  writes); or `{:error, %{code: "compile" | "internal", message: m}}`.
+  Nothing is loaded (`Kinoko.Exec.load/1` loads).
   """
   @spec image(Universe.t()) :: {:ok, map()} | {:error, %{code: String.t(), message: String.t()}}
   def image(u), do: u |> committed() |> Codegen.compile()

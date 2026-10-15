@@ -17,4 +17,13 @@ defmodule Kinoko.Exec.HooksTest do
     assert Task.await(task) == []
     assert Hooks.take_failures() == ["always failed: here"]
   end
+
+  test "sometimes sites that held are taken once each, then cleared" do
+    assert Hooks.take_reached() == MapSet.new()
+    assert Hooks.sometimes_held("A.t", "x > 1") == {}
+    assert Hooks.sometimes_held("A.t", "x > 1") == {}
+    assert Hooks.sometimes_held("A.f", "x > 1") == {}
+    assert Hooks.take_reached() == MapSet.new([{"A.t", "x > 1"}, {"A.f", "x > 1"}])
+    assert Hooks.take_reached() == MapSet.new()
+  end
 end
