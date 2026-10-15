@@ -18,7 +18,7 @@ defmodule Kinoko.Lang.UniverseConformanceTest do
   """
   use ExUnit.Case, async: false
 
-  alias Kinoko.Lang.{Format, Parser, Universe}
+  alias Kinoko.Lang.{Cid, Format, Parser, Universe}
 
   @moduletag :quint
   @moduletag timeout: 1_800_000
@@ -87,15 +87,26 @@ defmodule Kinoko.Lang.UniverseConformanceTest do
     |> Enum.sort()
   end
 
-  # A history round's entries, each CID read back from the universe's texts.
-  defp round_entries(u, round) do
+  # A history round's entries by name: each CID, a tombstone nil. (The
+  # universe keeps no text; the spec's rounds are compared by CID.)
+  defp round_entries(round) do
     round.entries
     |> Enum.map(fn
-      {:live, name, cid} -> {name, Universe.text(u, cid)}
+      {:live, name, cid} -> {name, cid}
       {:gone, name} -> {name, nil}
     end)
     |> Enum.sort()
   end
+
+  # A spec round's entries by name: each declaration's CID, a tombstone nil.
+  defp spec_round(p) do
+    for([name, entry] <- map(p), do: spec_cid(name, entry)) |> Enum.sort()
+  end
+
+  defp spec_cid(name, %{"tag" => "Live", "value" => v}),
+    do: {"M.#{name}", source(name, v) |> parse!() |> Cid.of()}
+
+  defp spec_cid(name, _), do: {"M.#{name}", nil}
 
   # The spec variable whose name ends in `::<name>`.
   defp var(state, name) do
@@ -241,7 +252,7 @@ defmodule Kinoko.Lang.UniverseConformanceTest do
         for [id, p] <- map(var(state, "staged")) do
           {Integer.to_string(int(id)), spec_entries(p), Map.fetch!(reasons, int(id))}
         end,
-      history: Enum.map(var(state, "history"), &spec_entries/1),
+      history: Enum.map(var(state, "history"), &spec_round/1),
       last_action: var(state, "lastAction")
     }
   end
@@ -253,7 +264,7 @@ defmodule Kinoko.Lang.UniverseConformanceTest do
         for {id, p} <- Universe.staged(u) do
           {id, ex_entries(p), refused(Universe.reasons(u, id))}
         end,
-      history: Enum.map(Universe.history(u), &round_entries(u, &1)),
+      history: Enum.map(Universe.history(u), &round_entries/1),
       last_action: last_action
     }
   end

@@ -34,7 +34,9 @@ defmodule Kinoko.Lang.Universe do
   - entry: `{:live, decl} | {:gone, name}`, what a patch does to one name.
   - round: `%{ids: [id], entries: [{:live, name, cid} | {:gone, name}]}`,
     ids sorted, entries one per name in name order. It holds no
-    declaration: one superseded since lives on in `text/2` alone.
+    declaration, and the universe keeps no text: a declaration's canonical
+    text is `Kinoko.Lang.Format.decl/1` of it, and one superseded since
+    lives on only where the caller keeps it (the CAS, `Kinoko.Cas`).
   - verdict: `{:promoted, [id]}` (every patch that promoted as a result, in
     order) or `{:staged, [reason]}`.
   - reason: `%{name: String.t() | nil, code: String.t(), message: String.t()}`,
@@ -42,8 +44,10 @@ defmodule Kinoko.Lang.Universe do
     patch is applied over committed code (its own, or a committed one it
     breaks or removes a name from, `name` then that one's), in name order.
     Besides the checker's codes: `"duplicate"` (a name touched twice in one
-    patch), `"bad-id"` (the empty id), and, from `restore/2`, `"parse"` and
-    `"restore"` (storage that is not what history replays to).
+    patch), `"bad-id"` (the empty id), and, from `restore/3`, `"restore"`
+    (storage that is not what history replays to).
+  - durable: `%{commits: [round], staged: [{id, [{name, cid | :gone}]}]}`
+    (`durable/1`), staged patches in the order they were (last) staged.
 
   Inside, a staged entry is `{:live, name, cid, decl} | {:gone, name}`, its
   CID worked out once, when it was staged, and its declaration without
@@ -52,7 +56,7 @@ defmodule Kinoko.Lang.Universe do
   what was staged.
   """
 
-  alias Kinoko.Lang.{Ast, Cid, Format, Parser, Salsa}
+  alias Kinoko.Lang.{Ast, Cid, Salsa}
   alias Kinoko.Lang.Types.{Hints, Stdlib}
   alias Kinoko.Lang.Universe.{Db, Search}
 
@@ -60,10 +64,10 @@ defmodule Kinoko.Lang.Universe do
             committed: %{},
             staged: %{},
             given: %{},
+            order: [],
             sigs: %{},
             salsa: nil,
             cas: MapSet.new(),
-            texts: %{},
             kept: 0
 
   @type t :: %__MODULE__{}
@@ -78,7 +82,7 @@ defmodule Kinoko.Lang.Universe do
   # id: `stage/3` refuses the empty one.
   @change ""
   @no_id "a patch needs an id: the empty one names what a promotion changed"
-  # The one patch `restore/2` checks committed code as. Its round is never
+  # The one patch `restore/3` checks committed code as. Its round is never
   # kept: the history restored takes its place.
   @restore "$restore"
   # A check through the database that failed and kept no error: only a
@@ -106,9 +110,24 @@ defmodule Kinoko.Lang.Universe do
   @spec signatures(t()) :: map()
   def signatures(%__MODULE__{sigs: sigs}), do: sigs
 
-  @doc "The canonical source of a declaration ever committed, by CID; `nil` if none was."
-  @spec text(t(), String.t()) :: String.t() | nil
-  def text(%__MODULE__{texts: texts}, cid), do: Map.get(texts, cid)
+  @doc """
+  What storage keeps (see "Shapes"): history and each staged patch's names
+  and CIDs, patches in the order they were last staged. Nothing else: no
+  declaration and no text.
+  """
+  @spec durable(t()) :: %{commits: [round], staged: [{id, [{String.t(), String.t() | :gone}]}]}
+  def durable(%__MODULE__{} = u) do
+    staged =
+      for id <- Enum.reverse(u.order) do
+        {id,
+         Enum.map(Map.fetch!(u.staged, id), fn
+           {:live, name, cid, _} -> {name, cid}
+           {:gone, name} -> {name, :gone}
+         end)}
+      end
+
+    %{commits: history(u), staged: staged}
+  end
 
   @doc """
   How many times the database has checked a declaration, over this
@@ -177,68 +196,86 @@ defmodule Kinoko.Lang.Universe do
   def reasons(%__MODULE__{} = u, id), do: u |> reasons_of(id) |> elem(0)
 
   @doc """
-  The universe storage keeps: `rounds` (oldest first) and `texts`, the
-  canonical source of declarations by CID, which must hold every one the
-  rounds replay to. That code is checked again, as one patch of any size.
-  `{:error, reasons}` says why not: a name whose text is missing, does not
-  parse or is not the declaration history commits; or the reasons the code
-  does not typecheck.
+  The universe storage keeps (`durable/1`): `commits` (oldest first),
+  `staged` patches in staging order, and `decls`, the declaration of each
+  CID by CID, which must hold every one the commits replay to and every one
+  staged. Committed code is checked again, as one patch of any size; then
+  each staged patch is staged again, in order, through `stage/3`, so its
+  reasons are worked out afresh.
+
+  `{:error, reasons}` says why not: a CID with no declaration (`name: nil`,
+  the message naming the CID), a declaration that is not the CID or the
+  name it is given for (`Kinoko.Lang.Cid.of/1` is worked out again), all
+  `"restore"`; or the reasons committed code does not typecheck.
   """
-  @spec restore([round], %{String.t() => String.t()}) :: {:ok, t()} | {:error, [reason]}
-  def restore(rounds, texts) do
-    held =
-      rounds
-      |> replay()
-      |> Enum.sort()
-      |> Enum.map(fn {name, cid} -> read_back(name, cid, Map.get(texts, cid)) end)
+  @spec restore([round], [{id, [{String.t(), String.t() | :gone}]}], %{String.t() => Ast.decl()}) ::
+          {:ok, t()} | {:error, [reason]}
+  def restore(commits, staged, decls) do
+    code =
+      commits |> replay() |> Enum.sort() |> Enum.map(fn {name, cid} -> {:live, name, cid} end)
 
-    case for({:error, reason} <- held, do: reason) do
-      [] ->
-        code = for {:ok, decl} <- held, do: {:live, decl}
-        {u, verdict} = if code == [], do: {new(), nil}, else: stage(new(), @restore, code)
+    patches =
+      for {id, entries} <- staged do
+        {id,
+         Enum.map(entries, fn
+           {name, :gone} -> {:gone, name}
+           {name, cid} -> {:live, name, cid}
+         end)}
+      end
 
-        case verdict do
-          {:staged, reasons} ->
-            {:error, reasons}
+    entries = code ++ Enum.flat_map(patches, &elem(&1, 1))
 
-          _ ->
-            {:ok, %{u | history: Enum.reverse(rounds), texts: referenced(rounds, texts, u.texts)}}
-        end
-
-      errors ->
-        {:error, errors}
+    case entries |> Enum.flat_map(&unheld(&1, decls)) |> Enum.uniq() do
+      [] -> restage(commits, patches, decls)
+      errors -> {:error, errors}
     end
   end
 
-  # The texts of every cid the rounds commit, canonical (`Format.decl`) text
-  # winning over what storage gave.
-  defp referenced(rounds, given, canonical) do
-    cids = for round <- rounds, {:live, _, cid} <- round.entries, into: MapSet.new(), do: cid
-    given |> Map.take(MapSet.to_list(cids)) |> Map.merge(canonical)
-  end
+  # Why `decls` does not hold the declaration an entry names: `[]`, or one reason.
+  defp unheld({:gone, _}, _decls), do: []
 
-  defp read_back(name, cid, nil),
-    do: {:error, restore_error(name, "history commits #{cid}, and no text is held for it")}
+  defp unheld({:live, name, cid}, decls) do
+    case Map.fetch(decls, cid) do
+      :error ->
+        [restore_error(nil, "#{name} is #{cid}, and no declaration is given for it")]
 
-  defp read_back(name, cid, text) do
-    case Parser.program(text) do
-      {:ok, [decl]} ->
+      {:ok, decl} ->
         cond do
-          Ast.name(decl) != name ->
-            {:error, restore_error(name, "the text of #{cid} defines #{Ast.name(decl)}")}
-
           Cid.of(decl) != cid ->
-            {:error, restore_error(name, "the text held for #{cid} is #{Cid.of(decl)}")}
+            [restore_error(name, "the declaration given for #{cid} is #{Cid.of(decl)}")]
+
+          Ast.name(decl) != name ->
+            [restore_error(name, "the declaration of #{cid} defines #{Ast.name(decl)}")]
 
           true ->
-            {:ok, decl}
+            []
         end
+    end
+  end
 
-      {:ok, decls} ->
-        {:error, restore_error(name, "the text of #{cid} holds #{length(decls)} declarations")}
+  defp restage(commits, patches, decls) do
+    code = for {_, cid} <- Enum.sort(replay(commits)), do: {:live, Map.fetch!(decls, cid)}
+    {u, verdict} = if code == [], do: {new(), nil}, else: stage(new(), @restore, code)
 
-      {:error, e} ->
-        {:error, %{name: name, code: "parse", message: "the text of #{cid}: #{inspect(e)}"}}
+    case verdict do
+      {:staged, reasons} ->
+        {:error, reasons}
+
+      _ ->
+        u = %{u | history: Enum.reverse(commits)}
+
+        u =
+          Enum.reduce(patches, u, fn {id, entries}, u ->
+            entries =
+              Enum.map(entries, fn
+                {:live, _, cid} -> {:live, Map.fetch!(decls, cid)}
+                gone -> gone
+              end)
+
+            u |> stage(id, entries) |> elem(0)
+          end)
+
+        {:ok, u}
     end
   end
 
@@ -280,7 +317,12 @@ defmodule Kinoko.Lang.Universe do
           %{u | salsa: Salsa.set(u.salsa, layer, {:name, name}, :tombstone)}
       end)
 
-    %{u | staged: Map.put(u.staged, id, patch), given: Map.put(u.given, id, entries)}
+    %{
+      u
+      | staged: Map.put(u.staged, id, patch),
+        given: Map.put(u.given, id, entries),
+        order: [id | u.order]
+    }
   end
 
   # Take what `id` stages out of staging, and out of the database.
@@ -293,7 +335,14 @@ defmodule Kinoko.Lang.Universe do
         salsa =
           Enum.reduce(patch, u.salsa, &Salsa.unset(&2, {:patch, id}, {:name, entry_name(&1)}))
 
-        {patch, %{u | staged: staged, given: Map.delete(u.given, id), salsa: salsa}}
+        {patch,
+         %{
+           u
+           | staged: staged,
+             given: Map.delete(u.given, id),
+             order: List.delete(u.order, id),
+             salsa: salsa
+         }}
     end
   end
 
@@ -361,8 +410,7 @@ defmodule Kinoko.Lang.Universe do
             decl: decl,
             typed: typed!(outcome),
             deps: outcome.deps
-          }),
-        texts: Map.put_new_lazy(u.texts, cid, fn -> Format.decl(decl) end)
+          })
     }
 
     {u, checks}

@@ -164,22 +164,200 @@ defmodule Kinoko.LangTest do
     assert map_size(committed) == 6
 
     for {name, c} <- committed do
-      assert %{cid: cid, decl: _, typed: typed, deps: %MapSet{}, signature: sig} = c
-      assert Lang.text(u, cid) == Kinoko.Lang.Format.decl(c.decl)
+      assert %{cid: cid, decl: decl, typed: typed, deps: %MapSet{}, signature: sig} = c
+      assert Lang.cid(decl) == cid
       assert sig == Lang.signatures(u)[name]
       assert typed != nil
     end
 
     assert {:def, [{:named, _} | _], _} = committed["Counter.update"].signature
-    assert Lang.text(u, "nope") == nil
   end
 
-  test "restore rebuilds a universe from its history and texts" do
+  # ---------- durable state, restore, prepare, snapshot ----------
+
+  @cid ~r/\A[0-9a-f]{64}\z/
+
+  # Every binary in `term`.
+  defp binaries(term) when is_binary(term), do: [term]
+  defp binaries(term) when is_list(term), do: Enum.flat_map(term, &binaries/1)
+  defp binaries(term) when is_tuple(term), do: term |> Tuple.to_list() |> binaries()
+
+  defp binaries(term) when is_map(term) and not is_struct(term),
+    do: Enum.flat_map(term, fn {k, v} -> binaries(k) ++ binaries(v) end)
+
+  defp binaries(term) when is_atom(term) or is_number(term), do: []
+
+  # The atoms in `term`.
+  defp atoms(term) when is_atom(term), do: [term]
+  defp atoms(term) when is_list(term), do: Enum.flat_map(term, &atoms/1)
+  defp atoms(term) when is_tuple(term), do: term |> Tuple.to_list() |> atoms()
+
+  defp atoms(term) when is_map(term) and not is_struct(term),
+    do: Enum.flat_map(term, fn {k, v} -> atoms(k) ++ atoms(v) end)
+
+  defp atoms(_), do: []
+
+  # What CodeDb does: each canonical text `prepare` gives, parsed back.
+  defp decls_of(texts) do
+    Map.new(texts, fn {cid, text} ->
+      {:ok, [decl]} = Lang.parse(text)
+      {cid, decl}
+    end)
+  end
+
+  # Stage `source` as Universe will: prepare, then stage the entries; the
+  # CAS rows accumulate in `cas`.
+  defp staged_via_prepare({u, cas}, id, source, opts \\ []) do
+    {:ok, entries, texts} = Lang.prepare(source, opts)
+    {u, _verdict} = Lang.stage_entries(u, id, entries)
+    {u, Map.merge(cas, Map.new(texts))}
+  end
+
+  # A universe with three commits (one a tombstone), a broken staged patch,
+  # a staged removal, and an id restaged after another was staged.
+  defp storied do
+    {Lang.new(), %{}}
+    |> staged_via_prepare(
+      "base",
+      "def M.a() : Int do\n  1\nend\n\ndef M.b() : Int do\n  M.a()\nend"
+    )
+    |> staged_via_prepare("edit", "def M.a() : Int do\n  2\nend")
+    |> staged_via_prepare("drop", "def M.c() : Int do\n  M.a()\nend", remove: ["M.b"])
+    |> staged_via_prepare("z-broken", "def M.d() : Int do\n  M.nope()\nend")
+    |> staged_via_prepare("a-rm", "", remove: ["M.a"])
+    |> staged_via_prepare("again", "def M.e() : Int do\n  \"s\"\nend")
+    |> staged_via_prepare("later", "def M.f() : String do\n  M.g()\nend")
+    |> staged_via_prepare("again", "def M.e() : Int do\n  M.c() + \"s\"\nend")
+  end
+
+  test "durable holds only ids, names and CIDs" do
+    {u, _} = storied()
+    durable = Lang.durable(u)
+    assert %{commits: commits, staged: staged} = durable
+    assert map_size(durable) == 2
+    assert length(commits) == 3
+
+    ids = Map.keys(Lang.staged(u)) ++ Enum.flat_map(commits, & &1.ids)
+    names = ~w(M.a M.b M.c M.d M.e M.f)
+
+    for b <- binaries(durable) do
+      assert b in ids or b in names or b =~ @cid, "#{inspect(b)} is not an id, a name or a CID"
+    end
+
+    assert Enum.uniq(atoms(durable)) -- [:commits, :staged, :ids, :entries, :live, :gone] == []
+
+    # Staged patches in staging order (a restaged id last), entries as staged.
+    assert Enum.map(staged, &elem(&1, 0)) == ["z-broken", "a-rm", "later", "again"]
+    assert {"a-rm", [{"M.a", :gone}]} in staged
+    assert [{"M.d", d}] = :proplists.get_value("z-broken", staged)
+    assert d =~ @cid
+  end
+
+  test "restore rebuilds committed code, history, staged patches and their reasons" do
+    {u, cas} = storied()
+    %{commits: commits, staged: staged} = Lang.durable(u)
+    assert {:ok, r} = Lang.restore(commits, staged, decls_of(cas))
+
+    assert Lang.committed(r) == Lang.committed(u)
+    assert Lang.history(r) == Lang.history(u)
+    assert Lang.signatures(r) == Lang.signatures(u)
+    assert Lang.staged(r) == Lang.staged(u)
+    assert Lang.durable(r) == Lang.durable(u)
+    assert [%{code: "unbound"}] = Lang.reasons(r, "z-broken")
+
+    # Only the decls restore uses need be given; extra ones are ignored.
+    assert {:ok, _} = Lang.restore(commits, staged, Map.put(decls_of(cas), "junk", :junk))
+    assert {:ok, empty} = Lang.restore([], [], %{})
+    assert Lang.committed(empty) == %{}
+
+    # An older history restores the code it replays to.
+    assert {:ok, older} = Lang.restore(Enum.take(commits, 1), [], decls_of(cas))
+    assert Enum.map(Lang.symbols(older), & &1.name) == ["M.a", "M.b"]
+  end
+
+  test "restore refuses a CID it has no declaration for, naming it" do
+    {u, cas} = storied()
+    %{commits: commits, staged: staged} = Lang.durable(u)
+    c = Lang.committed(u)["M.c"].cid
+
+    assert {:error, [%{name: nil, code: "restore", message: m}]} =
+             Lang.restore(commits, staged, Map.delete(decls_of(cas), c))
+
+    assert m =~ c
+
+    [{"M.d", d}] = :proplists.get_value("z-broken", staged)
+
+    assert {:error, [%{name: nil, code: "restore", message: m}]} =
+             Lang.restore(commits, staged, Map.delete(decls_of(cas), d))
+
+    assert m =~ d
+  end
+
+  test "restore refuses a declaration that is not the CID it is given for" do
+    {u, cas} = storied()
+    %{commits: commits, staged: staged} = Lang.durable(u)
+    c = Lang.committed(u)["M.c"].cid
+    {:ok, [other]} = Lang.parse("def M.c() : Int do\n  3\nend")
+
+    assert {:error, [%{name: "M.c", code: "restore", message: m}]} =
+             Lang.restore(commits, staged, Map.put(decls_of(cas), c, other))
+
+    assert m =~ c
+
+    {:ok, [renamed]} = Lang.parse("def M.x() : Int do\n  M.a()\nend")
+    commits = [%{ids: ["p"], entries: [{:live, "M.c", Lang.cid(renamed)}]}]
+
+    assert {:error, [%{name: "M.c", code: "restore"}]} =
+             Lang.restore(commits, [], %{Lang.cid(renamed) => renamed})
+  end
+
+  test "restore refuses committed code that does not typecheck" do
+    {:ok, [broken]} = Lang.parse("def M.b() : Int do\n  M.missing()\nend")
+    commits = [%{ids: ["p"], entries: [{:live, "M.b", Lang.cid(broken)}]}]
+
+    assert {:error, [%{name: "M.b", code: "unbound"}]} =
+             Lang.restore(commits, [], %{Lang.cid(broken) => broken})
+  end
+
+  test "prepare parses, gives each declaration's CID and canonical text, and stages nothing" do
+    source = "def M.a() : Int do 1 end\ndef   M.b() : Int do\n  M.a()\nend"
+    assert {:ok, entries, texts} = Lang.prepare(source, remove: ["M.z"])
+    {:ok, decls} = Lang.parse(source)
+    assert entries == Enum.map(decls, &{:live, &1}) ++ [{:gone, "M.z"}]
+    assert texts == Enum.map(decls, &{Lang.cid(&1), Kinoko.Lang.Format.decl(&1)})
+    assert {:ok, [{:gone, "M.z"}], []} = Lang.prepare("", remove: ["M.z"])
+
+    assert {:error, [%{code: "parse", name: nil, message: m}]} = Lang.prepare("def (")
+    assert m =~ ~r/\d+:\d+/
+    assert {:error, [%{code: "parse"}]} = Lang.prepare(nil)
+    assert {:error, [%{code: "bad-name"}]} = Lang.prepare("", remove: [:x])
+    assert {:error, [%{code: "bad-name"}]} = Lang.prepare("", remove: "M.z")
+  end
+
+  test "stage_entries stages parsed entries as stage does" do
+    {:ok, entries, _} = Lang.prepare(@counter)
+    assert {u, {:promoted, ["counter"]}} = Lang.stage_entries(Lang.new(), "counter", entries)
+    assert Lang.committed(u) == Lang.committed(promoted())
+
+    assert {^u, {:staged, [%{code: "bad-id"}]}} = Lang.stage_entries(u, :p, entries)
+    assert {^u, {:staged, [%{code: "internal"}]}} = Lang.stage_entries(u, "p", [:junk])
+    bad = %{u | salsa: :not_a_database}
+    assert {^bad, {:staged, [%{code: "internal"}]}} = Lang.stage_entries(bad, "p", entries)
+  end
+
+  test "snapshot holds committed code and the signatures a check sees" do
     u = promoted()
-    texts = for {_, %{cid: cid}} <- Lang.committed(u), into: %{}, do: {cid, Lang.text(u, cid)}
-    assert {:ok, r} = Lang.restore(Lang.history(u), texts)
-    assert Lang.symbols(r) == Lang.symbols(u)
-    assert {:error, [%{code: "restore"} | _]} = Lang.restore(Lang.history(u), %{})
+    snap = Lang.snapshot(u)
+    assert %{committed: committed, signatures: sigs} = snap
+    assert sigs == Lang.signatures(u)
+
+    for {name, c} <- committed do
+      assert %{cid: _, decl: _, typed: _, signature: sig} = c
+      assert sig == sigs[name]
+    end
+
+    assert Lang.check_expr(snap, "Counter.init()") == Lang.check_expr(u, "Counter.init()")
+    assert Lang.image(snap) == Lang.image(u)
   end
 
   test "Format.signature renders each kind of signature" do

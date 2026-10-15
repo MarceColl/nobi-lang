@@ -8,7 +8,7 @@ defmodule Kinoko.Lang.UniverseTest do
 
   import Kinoko.Lang.UniverseCases, only: [parse: 1, patch: 1, entries: 1, play: 4, run: 3]
 
-  alias Kinoko.Lang.{Ast, Cid, Format, NaiveUniverse, Salsa, Universe, UniverseCases}
+  alias Kinoko.Lang.{Ast, Cid, NaiveUniverse, Salsa, Universe, UniverseCases}
   alias Kinoko.Lang.Types.{Check, Extract, Stdlib}
   alias Kinoko.Lang.Universe.{Db, Search}
 
@@ -917,67 +917,60 @@ defmodule Kinoko.Lang.UniverseTest do
     assert v == {:promoted, ["p"]}
     assert Universe.committed(u)["M.a"].cid == cid
     assert [%{entries: [{:live, "M.a", ^cid}]}] = Universe.history(u)
-    assert Universe.text(u, cid) == Format.decl(d)
+    assert Cid.of(Universe.committed(u)["M.a"].decl) == cid
   end
 
-  # What storage keeps, history and the declarations' texts by CID, restores
-  # the same universe: committed code with each check, the signatures, and
+  # What storage keeps, history and the declarations by CID, restores the
+  # same universe: committed code with each check, the signatures, and
   # history. Storage that is not what history replays to, or code that does
   # not typecheck, is refused, saying why.
   test "rust only: restoring history and the code it replays to gives the same universe" do
-    {u, _} =
-      stage(
-        Universe.new(),
-        "base",
-        patch("def M.a() : Int do 1 end\ndef M.b() : Int do M.a() end")
-      )
+    sources = [
+      "def M.a() : Int do 1 end\ndef M.b() : Int do M.a() end",
+      "def M.a() : Int do 2 end",
+      "def M.c() : Int do M.a() end"
+    ]
 
-    {u, _} = stage(u, "edit", patch("def M.a() : Int do 2 end"))
-    {u, _} = stage(u, "drop", [gone("M.b") | patch("def M.c() : Int do M.a() end")])
+    decls =
+      Map.new(for(src <- sources, {:live, d} <- patch(src), do: {Cid.of(d), d}))
 
-    texts =
-      Map.new(
-        Universe.history(u)
-        |> Enum.flat_map(& &1.entries)
-        |> Enum.flat_map(fn
-          {:live, _, cid} -> [{cid, Universe.text(u, cid)}]
-          _ -> []
-        end)
-      )
+    {u, _} = stage(Universe.new(), "base", patch(Enum.at(sources, 0)))
+    {u, _} = stage(u, "edit", patch(Enum.at(sources, 1)))
+    {u, _} = stage(u, "drop", [gone("M.b") | patch(Enum.at(sources, 2))])
 
-    {:ok, restored} = Universe.restore(Universe.history(u), texts)
+    {:ok, restored} = Universe.restore(Universe.history(u), [], decls)
     assert Universe.committed(restored) == Universe.committed(u)
     assert Universe.history(restored) == Universe.history(u)
     assert Universe.signatures(restored) == Universe.signatures(u)
     assert Universe.staged(restored) == %{}
-    # Only texts history references are kept, and canonical text wins.
-    {:ok, padded} = Universe.restore(Universe.history(u), Map.put(texts, "unreferenced", "junk"))
-    assert Universe.text(padded, "unreferenced") == nil
+    # Declarations history does not reference are ignored.
+    assert {:ok, _} =
+             Universe.restore(Universe.history(u), [], Map.put(decls, "unreferenced", :junk))
+
+    # Layout is not content: a declaration parsed from loose text is the CID.
     a = Universe.committed(u)["M.a"].cid
-    loose = Map.put(texts, a, "def   M.a() : Int do\n  2\nend")
-    {:ok, relaid} = Universe.restore(Universe.history(u), loose)
-    assert Universe.text(relaid, a) == Universe.text(u, a)
-    assert {:ok, empty} = Universe.restore([], %{})
+    [{:live, loose}] = patch("def   M.a() : Int do\n  2\nend")
+    {:ok, relaid} = Universe.restore(Universe.history(u), [], Map.put(decls, a, loose))
+    assert Universe.committed(relaid) == Universe.committed(u)
+    assert {:ok, empty} = Universe.restore([], [], %{})
     assert Universe.committed(empty) == %{}
 
     # An older history restores the code it replays to.
-    {:ok, older} = Universe.restore(Enum.take(Universe.history(u), 2), texts)
+    {:ok, older} = Universe.restore(Enum.take(Universe.history(u), 2), [], decls)
     assert names(older) == ["M.a", "M.b"]
 
     c = Universe.committed(u)["M.c"].cid
-    {:error, missing} = Universe.restore(Universe.history(u), Map.delete(texts, c))
-    assert [%{name: "M.c", code: "restore"}] = missing
+    {:error, missing} = Universe.restore(Universe.history(u), [], Map.delete(decls, c))
+    assert [%{name: nil, code: "restore", message: message}] = missing
+    assert message =~ c
 
-    {:error, wrong} =
-      Universe.restore(Universe.history(u), Map.put(texts, c, "def M.c() : Int do 3 end"))
-
+    [{:live, three}] = patch("def M.c() : Int do 3 end")
+    {:error, wrong} = Universe.restore(Universe.history(u), [], Map.put(decls, c, three))
     assert [%{name: "M.c", code: "restore"}] = wrong
-    {:error, garbled} = Universe.restore(Universe.history(u), Map.put(texts, c, "def M.c( : Int"))
-    assert [%{name: "M.c", code: "parse"}] = garbled
 
     [{:live, broken}] = patch("def M.b() : Int do M.missing() end")
     history = [%{ids: ["p"], entries: [{:live, "M.b", Cid.of(broken)}]}]
-    {:error, why} = Universe.restore(history, %{Cid.of(broken) => Format.decl(broken)})
+    {:error, why} = Universe.restore(history, [], %{Cid.of(broken) => broken})
     sole(why, "M.b", "unbound")
   end
 

@@ -2,8 +2,16 @@ defmodule Kinoko.Lang do
   @moduledoc """
   The Yabu language core: parse, format, content-address, and stage code into
   a `Kinoko.Lang.Universe`. Pure values only; thread the returned universe.
-  Every other piece of Kinoko goes through this module, never through the
-  universe's own functions.
+
+  **Internal.** Only `Kinoko.CodeDb` (whose pure core this is) and
+  `Kinoko.Universe` call it; every other caller uses `Kinoko.Universe`.
+  Nothing calls the universe's own functions but this module.
+
+  The universe keeps no text. What storage keeps is `durable/1` (names and
+  CIDs only); declarations live in the CAS (`Kinoko.Cas`) by CID, and
+  `restore/3` rebuilds the universe from both. `prepare/2` turns source into
+  entries and the CAS rows to write before staging them (`stage_entries/3`);
+  `snapshot/1` is what `Kinoko.Exec` runs against.
 
       iex> alias Kinoko.Lang
       iex> {u, {:staged, [reason]}} = Lang.stage(Lang.new(), "p1", "def A.f() : Int do\\n  A.g()\\nend")
@@ -40,7 +48,7 @@ defmodule Kinoko.Lang do
   "type-too-large", "internal". Added by parser and universe: "parse" (message
   includes `line:col`), "duplicate" (a name defined twice in one patch),
   "bad-id" (an empty or non-string patch id), "bad-name" (a `remove:` entry
-  that is not a string), "restore" (inconsistent history), and "internal"
+  that is not a string), "restore" (storage `restore/3` cannot rebuild from), and "internal"
   (a fault of the checker or universe, the universe left as it was).
   """
 
@@ -48,6 +56,7 @@ defmodule Kinoko.Lang do
   alias Kinoko.Lang.Types.{Check, Extract}
 
   @type reason :: %{name: String.t() | nil, code: String.t(), message: String.t()}
+  @type snapshot :: %{committed: %{String.t() => map()}, signatures: map()}
 
   @doc "Parse source into declarations (with positions)."
   @spec parse(String.t()) :: {:ok, [Ast.decl()]} | {:error, map()}
@@ -78,41 +87,83 @@ defmodule Kinoko.Lang do
     refused (`"bad-id"`, `"bad-name"`): the universe is returned unchanged.
   - Should the checker or universe raise, the universe given is returned
     unchanged with `{:staged, [%{name: nil, code: "internal", message: ...}]}`.
+
+  For tests and the REPL: the universe's callers `prepare/2` and then
+  `stage_entries/3`.
   """
   @spec stage(Universe.t(), String.t(), String.t(), keyword()) ::
           {Universe.t(), {:promoted, [String.t()]} | {:staged, [reason]}}
-  def stage(u, id, source, opts \\ []) do
+  def stage(u, id, source, opts \\ [])
+
+  def stage(u, id, source, opts) when is_binary(id) do
+    guarded(u, fn ->
+      case prepare(source, opts) do
+        {:ok, entries, _texts} ->
+          Universe.stage(u, id, entries)
+
+        # Source that does not parse supersedes what `id` staged; input
+        # refused for its type does not.
+        {:error, [%{code: "parse"}] = reasons} when is_binary(source) ->
+          {u, _} = Universe.unstage(u, id)
+          {u, {:staged, reasons}}
+
+        {:error, reasons} ->
+          {u, {:staged, reasons}}
+      end
+    end)
+  end
+
+  def stage(u, id, _source, _opts), do: stage_entries(u, id, [])
+
+  @doc """
+  Parse `source` into the entries a patch stages, without staging them:
+  `{:ok, entries, texts}`, where `entries` is each declaration as
+  `{:live, decl}` and then each `remove:` name as `{:gone, name}`, and
+  `texts` is `[{cid, canonical_text}]`, one per declaration in order (the
+  CAS rows to put before staging). Pure.
+
+  `{:error, [reason]}`: `"parse"` (with `line:col`; also for source that is
+  not a string) or `"bad-name"` (a `remove:` entry that is not a string).
+  """
+  @spec prepare(String.t(), keyword()) ::
+          {:ok, [Universe.entry()], [{String.t(), String.t()}]} | {:error, [reason]}
+  def prepare(source, opts \\ []) do
     removes = Keyword.get(opts, :remove, [])
 
     cond do
-      not is_binary(id) ->
-        {u, {:staged, [refused("bad-id", "a patch id is a string, not #{shown(id)}")]}}
-
       not is_list(removes) or not Enum.all?(removes, &is_binary/1) ->
         bad = if is_list(removes), do: Enum.find(removes, &(not is_binary(&1))), else: removes
-
-        {u,
-         {:staged, [refused("bad-name", "`remove:` lists names (strings), not #{shown(bad)}")]}}
+        {:error, [refused("bad-name", "`remove:` lists names (strings), not #{shown(bad)}")]}
 
       not is_binary(source) ->
-        {u, {:staged, [refused("parse", "source is a string, not #{shown(source)}")]}}
+        {:error, [refused("parse", "source is a string, not #{shown(source)}")]}
 
       true ->
-        guarded(u, fn -> stage_source(u, id, source, removes) end)
+        case parse(source) do
+          {:ok, decls} ->
+            entries = Enum.map(decls, &{:live, &1}) ++ for(name <- removes, do: {:gone, name})
+            {:ok, entries, Enum.map(decls, &{Cid.of(&1), Format.decl(&1)})}
+
+          {:error, %{message: message, line: line, col: col}} ->
+            {:error, [refused("parse", "#{line}:#{col}: #{message}")]}
+        end
     end
   end
 
-  defp stage_source(u, id, source, removes) do
-    case parse(source) do
-      {:ok, decls} ->
-        gone = for name <- removes, do: {:gone, name}
-        Universe.stage(u, id, Enum.map(decls, &{:live, &1}) ++ gone)
+  @doc """
+  Stage already parsed `entries` (`{:live, decl} | {:gone, name}`, as
+  `prepare/2` gives them) under `id`, then promote whatever can. An `id`
+  that is not a string is refused (`"bad-id"`); should the checker or
+  universe raise (malformed entries included), the universe given is
+  returned unchanged with an `"internal"` reason, as for `stage/4`.
+  """
+  @spec stage_entries(Universe.t(), String.t(), [Universe.entry()]) ::
+          {Universe.t(), {:promoted, [String.t()]} | {:staged, [reason]}}
+  def stage_entries(u, id, entries) when is_binary(id),
+    do: guarded(u, fn -> Universe.stage(u, id, entries) end)
 
-      {:error, %{message: message, line: line, col: col}} ->
-        {u, _} = Universe.unstage(u, id)
-        {u, {:staged, [refused("parse", "#{line}:#{col}: #{message}")]}}
-    end
-  end
+  def stage_entries(u, id, _entries),
+    do: {u, {:staged, [refused("bad-id", "a patch id is a string, not #{shown(id)}")]}}
 
   @doc """
   Drop what `id` staged: `{u, true}`, or `{u, false}` when nothing is staged
@@ -223,18 +274,34 @@ defmodule Kinoko.Lang do
   @spec reasons(Universe.t(), String.t()) :: [reason]
   defdelegate reasons(u, id), to: Universe
 
-  @doc "The canonical source of a declaration ever committed, by CID; `nil` if none was."
-  @spec text(Universe.t(), String.t()) :: String.t() | nil
-  defdelegate text(u, cid), to: Universe
+  @doc """
+  What storage keeps of a universe:
+  `%{commits: [commit], staged: [{id, [{name, cid | :gone}]}]}`, commits
+  oldest first (as `history/1` gives them), staged patches in the order they
+  were last staged. Only ids, names and CIDs: no declaration, no text.
+  """
+  @spec durable(Universe.t()) :: %{commits: [map()], staged: [{String.t(), [tuple()]}]}
+  defdelegate durable(u), to: Universe
 
   @doc """
-  A universe from what storage keeps: `rounds` (oldest first, as `history/1`
-  gives them) and `texts` (canonical source by CID, as `text/2` gives it).
-  `{:error, reasons}` when they are inconsistent or the code they build
-  does not typecheck.
+  The universe `durable/1` describes, given `decls`, the declaration of each
+  CID (`%{cid => decl}`; parsed from the CAS's text). Committed code is
+  checked again, then the staged patches are staged again in order, so
+  their reasons are worked out afresh. `{:error, reasons}`: a `"restore"`
+  reason for a CID with no declaration (`name: nil`, the message naming the
+  CID) or a declaration that is not the CID or name it is given for; or the
+  reasons committed code does not typecheck.
   """
-  @spec restore([map()], %{String.t() => String.t()}) :: {:ok, Universe.t()} | {:error, [reason]}
-  defdelegate restore(rounds, texts), to: Universe
+  @spec restore([map()], [{String.t(), [tuple()]}], %{String.t() => Ast.decl()}) ::
+          {:ok, Universe.t()} | {:error, [reason]}
+  defdelegate restore(commits, staged, decls), to: Universe
+
+  @doc """
+  What `Kinoko.Exec` runs against: `%{committed: committed(u), signatures:
+  signatures(u)}`. `check_expr/2` and `image/1` take it as they take a universe.
+  """
+  @spec snapshot(Universe.t()) :: %{committed: %{String.t() => map()}, signatures: map()}
+  def snapshot(u), do: %{committed: committed(u), signatures: signatures(u)}
 
   @doc "Every promoted round, oldest first: `%{ids: [id], entries: [{:live, name, cid} | {:gone, name}]}`."
   @spec history(Universe.t()) :: [map()]
@@ -250,7 +317,9 @@ defmodule Kinoko.Lang do
   tests, or a def needing more than 10_000 Erlang variables). Nothing is
   loaded (`Kinoko.Exec.load/2` loads).
   """
-  @spec image(Universe.t()) :: {:ok, map()} | {:error, %{code: String.t(), message: String.t()}}
+  @spec image(Universe.t() | snapshot()) ::
+          {:ok, map()} | {:error, %{code: String.t(), message: String.t()}}
+  def image(%{committed: committed, signatures: _}), do: Codegen.compile(committed)
   def image(u), do: u |> committed() |> Codegen.compile()
 
   @doc """
@@ -258,11 +327,18 @@ defmodule Kinoko.Lang do
   may stay polymorphic): `{:ok, typed, type}`, or `{:error, [reason]}`
   with a `"parse"` reason or the checker's.
   """
-  @spec check_expr(Universe.t(), String.t()) :: {:ok, tuple(), term()} | {:error, [reason]}
+  @spec check_expr(Universe.t() | snapshot(), String.t()) ::
+          {:ok, tuple(), term()} | {:error, [reason]}
   def check_expr(u, source) when is_binary(source) do
+    sigs =
+      case u do
+        %{committed: _, signatures: sigs} -> sigs
+        u -> signatures(u)
+      end
+
     case Parser.expr(source) do
       {:ok, e} ->
-        case Check.expr(Ast.without_positions(e), signatures(u)).result do
+        case Check.expr(Ast.without_positions(e), sigs).result do
           {:ok, typed} -> {:ok, typed, Keyword.fetch!(elem(typed, 1), :type)}
           {:error, errors} -> {:error, Enum.map(errors, &Map.put_new(&1, :name, nil))}
         end

@@ -156,8 +156,9 @@ defmodule Kinoko.PersistentElmGenServer do
   rather than leaking atoms.
 
   The code DB server (piece 3) holds a `Kinoko.Lang` universe: its
-  `durable/1` keeps only the universe's `history` (rounds) and `texts`, and
-  its `decode/1` rebuilds the universe from them with `Kinoko.Lang.restore/2`,
+  `durable/1` is `Kinoko.Lang.durable/1` (commits and staged patches as
+  names and CIDs, no text), and its `decode/1` fetches the declarations by
+  CID from the CAS and rebuilds the universe with `Kinoko.Lang.restore/3`,
   which checks the code again on every boot.
   """
 
