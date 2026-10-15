@@ -182,7 +182,11 @@ defmodule Kinoko.Exec.ShowTest do
     assert String.starts_with?(shown_quickly(ints), "%{-100000 => -100000, -99999 => -99999,")
 
     strings = Map.new(1..200_000, &{"k#{&1}", 0}) |> Map.put("B", 1) |> Map.put("a", 2)
-    assert String.starts_with?(shown_quickly(strings), ~s(%{"B" => 1, "a" => 2, "k1" => 0, "k10" => 0,))
+
+    assert String.starts_with?(
+             shown_quickly(strings),
+             ~s(%{"B" => 1, "a" => 2, "k1" => 0, "k10" => 0,)
+           )
 
     # Other keys keep Yabu's order (Int before String, for a mixed map Exec never builds).
     assert Show.show(%{"a" => 1, 2 => 2, {1, 2} => 3}) == ~s[%{2 => 2, "a" => 1, (1, 2) => 3}]

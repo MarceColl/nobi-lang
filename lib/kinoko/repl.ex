@@ -6,7 +6,11 @@ defmodule Kinoko.Repl do
   gives you a fresh session), so you never thread the universe by hand. The
   repo's `.iex.exs` aliases this module as `Y`.
 
-  Everything prints readably and returns a useful value.
+  Everything prints readably and returns a useful value. `eval/2` and
+  `call/3` print the value (or the error) as Yabu source; inside iex they
+  return nothing iex would echo (the raw BEAM term would only repeat it,
+  less readably), and `last/0` hands back the last value they computed. Outside iex (a
+  script, a test) they return the value itself.
 
   ## Walkthrough
 
@@ -17,6 +21,8 @@ defmodule Kinoko.Repl do
       (%Counter.Model{count: 0}, Cmd.none()) : (Counter.Model, Cmd<Counter.Msg>)
       iex> Y.eval("Counter.update(Counter.Msg.Add(5), %Counter.Model{count: 1})")
       (%Counter.Model{count: 6}, Cmd.none()) : (Counter.Model, Cmd<Counter.Msg>)
+      iex> {model, _cmd} = Y.last()
+      {{:rec, "Counter.Model", %{"count" => 6}}, {:cmd, :none}}
       iex> Y.eval("Counter.view(%Counter.Model{count: 2})")
       <div class="counter">
         <button on-click={Counter.Msg.Decrement}>-</button>
@@ -42,9 +48,15 @@ defmodule Kinoko.Repl do
       iex> Y.eval("Counter.double(%Counter.Model{count: 21})")
       42 : Int
 
-  Also: `call/2`, `test/1`, `symbols/0`, `read/1`, `unstage/1`, `history/0`,
-  `u/0` (the universe, to hand to `Kinoko.Exec` / `Kinoko.Lang` directly)
-  and `reset/0`.
+  A file that is not there is said so, and nothing is staged:
+
+      iex> Y.load("test/fixtures/yabu/countr.yabu")
+      no such file: test/fixtures/yabu/countr.yabu
+      {:error, :enoent}
+
+  Also: `call/2`, `last/0`, `test/1`, `symbols/0`, `read/1`, `unstage/1`,
+  `history/0`, `u/0` (the universe, to hand to `Kinoko.Exec` /
+  `Kinoko.Lang` directly) and `reset/0`.
   """
 
   alias Kinoko.{Exec, Lang}
@@ -53,53 +65,111 @@ defmodule Kinoko.Repl do
   @agent __MODULE__.Session
 
   @doc """
-  Stage `path_or_source` (a `.yabu` file if the argument is an existing path,
-  else source text). The patch id is the file's base name, `repl-N` for
-  source, or `id:` if given (restage the same id to fix a staged patch).
-  Returns `:ok` when it promoted, `{:staged, reasons}` otherwise.
-  """
-  @spec load(String.t(), keyword()) :: :ok | {:staged, [Lang.reason()]}
-  def load(path_or_source, opts \\ []) when is_binary(path_or_source) do
-    {source, default_id} =
-      if File.regular?(path_or_source),
-        do: {File.read!(path_or_source), Path.basename(path_or_source, ".yabu")},
-        else: {path_or_source, nil}
+  Stage `path_or_source`: a file when the argument names one, else source
+  text. The patch id is the file's base name, `repl-N` for source, or
+  `id:` if given (restage the same id to fix a staged patch). Returns `:ok`
+  when it promoted, `{:staged, reasons}` otherwise.
 
-    Agent.get_and_update(session(), fn %{u: u, n: n} = s ->
-      id = opts[:id] || default_id || "repl-#{n + 1}"
-      {u, verdict} = Lang.stage(u, id, source)
-      {{id, verdict}, %{s | u: u, n: if(default_id || opts[:id], do: n, else: n + 1)}}
-    end)
+  An argument that looks like a path (it ends in `.yabu`, or is one word
+  with no space or newline) but names no file is not staged as source:
+  it prints `no such file: <path>` (or says it is a directory) and returns
+  `{:error, :enoent}` (`{:error, :eisdir}`).
+  """
+  @spec load(String.t(), keyword()) ::
+          :ok | {:staged, [Lang.reason()]} | {:error, :enoent | :eisdir}
+  def load(path_or_source, opts \\ []) when is_binary(path_or_source) do
+    case source_of(path_or_source) do
+      {:ok, source, default_id} -> stage(source, default_id, opts)
+      {:error, why} -> {:error, why}
+    end
+  end
+
+  defp source_of(arg) do
+    cond do
+      File.regular?(arg) ->
+        {:ok, File.read!(arg), Path.basename(arg, ".yabu")}
+
+      File.dir?(arg) ->
+        IO.puts("#{arg} is a directory, not a .yabu file")
+        {:error, :eisdir}
+
+      path_like?(arg) ->
+        IO.puts("no such file: #{arg}")
+        {:error, :enoent}
+
+      true ->
+        {:ok, arg, nil}
+    end
+  end
+
+  # No Yabu program is one word: a declaration starts with a keyword and a
+  # space.
+  defp path_like?(arg) do
+    String.ends_with?(arg, ".yabu") or
+      (arg != "" and not String.contains?(arg, [" ", "\n", "\t", "\r"]))
+  end
+
+  defp stage(source, default_id, opts) do
+    Agent.get_and_update(
+      session(),
+      fn %{n: n} = s ->
+        id = opts[:id] || default_id || "repl-#{n + 1}"
+        {u, verdict} = Lang.stage(s.u, id, source)
+        {{id, verdict}, %{s | u: u, n: if(default_id || opts[:id], do: n, else: n + 1)}}
+      end,
+      :infinity
+    )
     |> report_verdict()
   end
 
-  @doc "Evaluate an expression against the session; prints `value : type`, returns the value."
+  @doc """
+  Evaluate an expression against the session; prints `value : type`. Inside
+  iex returns nothing to echo (see `last/0`); elsewhere the value. An error
+  is printed, and returned as `{:error, error}` outside iex.
+  """
   @spec eval(String.t(), keyword()) :: term()
   def eval(source, opts \\ []) when is_binary(source) do
     case Exec.eval(u(), source, opts) do
       {:ok, value, type} ->
         IO.puts("#{Exec.show(value, type)} : #{Format.type(type)}")
-        value
+        remember(value)
 
       {:error, error} ->
         print_error(error)
-        {:error, error}
+        quiet({:error, error})
     end
   end
 
-  @doc "Call a committed def with already-built values; prints the shown value."
+  @doc """
+  Call a committed def with already-built values (BEAM terms, see
+  `Kinoko.Lang.Rt`); prints the shown value and returns it as `eval/2` does.
+  """
   @spec call(String.t(), [term()], keyword()) :: term()
   def call(name, args, opts \\ []) do
     case Exec.call(u(), name, args, opts) do
       {:ok, value} ->
         IO.puts(show_untyped(name, value))
-        value
+        remember(value)
 
       {:error, error} ->
         print_error(error)
-        {:error, error}
+        quiet({:error, error})
     end
   end
+
+  @doc "The value the last successful `eval/2` or `call/3` computed (`nil` before any)."
+  @spec last() :: term()
+  def last, do: Agent.get(session(), & &1.last)
+
+  defp remember(value) do
+    Agent.update(session(), &%{&1 | last: value})
+    quiet(value)
+  end
+
+  # Inside iex, nothing for it to echo: what was printed says it all.
+  defp quiet(result), do: if(iex?(), do: IEx.dont_display_result(), else: result)
+
+  defp iex?, do: Code.ensure_loaded?(IEx) and IEx.started?()
 
   @doc "Run a deftest; prints `ok` or its failures."
   @spec test(String.t(), keyword()) :: :ok | {:error, map()}
@@ -141,13 +211,29 @@ defmodule Kinoko.Repl do
     end
   end
 
-  @doc "Drop a staged patch by id."
+  @doc """
+  Drop a staged patch by id; prints what happened. `true`, `false` (nothing
+  staged under `id`) or `{:error, reason}`.
+  """
   @spec unstage(String.t()) :: boolean() | {:error, Lang.reason()}
   def unstage(id) do
-    Agent.get_and_update(session(), fn s ->
-      {u, result} = Lang.unstage(s.u, id)
-      {result, %{s | u: u}}
-    end)
+    result =
+      Agent.get_and_update(
+        session(),
+        fn s ->
+          {u, result} = Lang.unstage(s.u, id)
+          {result, %{s | u: u}}
+        end,
+        :infinity
+      )
+
+    case result do
+      true -> IO.puts("unstaged: #{id}")
+      false -> IO.puts("nothing staged under #{id}")
+      {:error, reason} -> print_error(reason)
+    end
+
+    result
   end
 
   @doc "Every promoted round, oldest first."
@@ -156,13 +242,13 @@ defmodule Kinoko.Repl do
 
   @doc "The session universe, for `Kinoko.Exec` / `Kinoko.Lang` directly."
   @spec u() :: Lang.Universe.t()
-  def u, do: Agent.get(session(), & &1.u)
+  def u, do: Agent.get(session(), & &1.u, :infinity)
 
   @doc "Start over with an empty universe."
   @spec reset() :: :ok
   def reset, do: Agent.update(session(), fn _ -> fresh() end)
 
-  defp fresh, do: %{u: Lang.new(), n: 0}
+  defp fresh, do: %{u: Lang.new(), n: 0, last: nil}
 
   defp session do
     case Agent.start(&fresh/0, name: @agent) do
@@ -182,11 +268,24 @@ defmodule Kinoko.Repl do
     verdict
   end
 
+  # The reasons only when they say more than the message: the message is
+  # the first reason's.
   defp print_error(%{code: code, message: message} = error) do
     IO.puts("error: [#{code}] #{message}")
 
-    for reason <- Map.get(error, :reasons, []),
-        do: IO.puts("  #{reason.name || "-"}: [#{reason.code}] #{reason.message}")
+    case Map.get(error, :reasons, []) do
+      [] ->
+        :ok
+
+      [%{code: ^code, message: ^message}] ->
+        :ok
+
+      reasons ->
+        for reason <- reasons,
+            do: IO.puts("  #{Map.get(reason, :name) || "-"}: [#{reason.code}] #{reason.message}")
+    end
+
+    :ok
   end
 
   # `call/3` has no static type to hand to the printer; use the def's return type.

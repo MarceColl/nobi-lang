@@ -74,17 +74,47 @@ defmodule Kinoko.ReplTest do
     assert [%{ids: ["repl-1"]}] = Y.history()
 
     capture_io(fn -> Y.load("def A.bad() : Int do A.missing() end", id: "bad") end)
-    assert Y.unstage("bad") == true
+    assert capture_io(fn -> assert Y.unstage("bad") == true end) =~ "unstaged: bad"
+    assert capture_io(fn -> assert Y.unstage("bad") == false end) =~ "nothing staged under bad"
 
     Y.reset()
     assert Y.history() == []
   end
 
-  test "errors print readably" do
+  test "errors print readably, the message once" do
     capture_io(fn -> Y.load(@counter) end)
     out = capture_io(fn -> assert {:error, _} = Y.eval("Counter.nope()") end)
     assert out =~ "error: ["
     out = capture_io(fn -> assert {:error, _} = Y.eval("1 +") end)
     assert out =~ "[parse]"
+    # One reason, the message itself: printed once.
+    assert [_] = String.split(out, "\n", trim: true)
+
+    out = capture_io(fn -> assert {:error, %{code: "runtime"}} = Y.eval("1 / 0") end)
+    assert out == "error: [runtime] division by zero\n"
+  end
+
+  test "last is the last value eval or call computed; outside iex they return it too" do
+    assert Y.last() == nil
+    capture_io(fn -> Y.load(@counter) end)
+    capture_io(fn -> assert Y.eval("1 + 2") == 3 end)
+    assert Y.last() == 3
+    capture_io(fn -> assert Y.call("Counter.init", []) == Y.last() end)
+    assert {{:rec, "Counter.Model", %{"count" => 0}}, {:cmd, :none}} = Y.last()
+    # An error leaves it.
+    capture_io(fn -> Y.eval("1 / 0") end)
+    assert {{:rec, "Counter.Model", _}, _} = Y.last()
+  end
+
+  test "a path that names no file is said so, and nothing is staged" do
+    for path <- ["test/fixtures/yabu/countr.yabu", "counter.yabu", "notes.txt", "missing"] do
+      out = capture_io(fn -> assert Y.load(path) == {:error, :enoent} end)
+      assert out == "no such file: #{path}\n"
+    end
+
+    out = capture_io(fn -> assert Y.load("test/fixtures/yabu") == {:error, :eisdir} end)
+    assert out =~ "test/fixtures/yabu is a directory"
+    assert Y.history() == []
+    assert Kinoko.Lang.staged(Y.u()) == %{}
   end
 end
