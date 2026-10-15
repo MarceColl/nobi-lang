@@ -2,35 +2,45 @@ defmodule Kinoko.Exec do
   @moduledoc """
   Runs committed Yabu code on the BEAM (piece 4,
   `docs/superpowers/specs/2026-10-15-yabu-erlang-codegen-design.md`): loads
-  a universe's image (one module per distinct committed code), calls its
+  a snapshot's image (one module per distinct committed code), calls its
   defs, evaluates expressions against it, runs its deftests and shows
   values as Yabu source.
 
       iex> alias Kinoko.{Exec, Lang}
       iex> {u, {:promoted, _}} = Lang.stage(Lang.new(), "c", File.read!("test/fixtures/yabu/counter.yabu"))
-      iex> {:ok, {model, _cmd}, _type} = Exec.eval(u, "Counter.update(Counter.Msg.Add(2), %Counter.Model{count: 1})")
+      iex> snapshot = Lang.snapshot(u)
+      iex> {:ok, {model, _cmd}, _type} = Exec.eval(snapshot, "Counter.update(Counter.Msg.Add(2), %Counter.Model{count: 1})")
       iex> Exec.show(model, {:named, "Counter.Model"})
       "%Counter.Model{count: 3}"
 
   ## Trying it from iex
 
   `iex -S mix` aliases `Kinoko.Repl` as `Y` (see `.iex.exs`), which keeps
-  the session universe for you. Without it, thread the universe yourself:
+  the session universe for you. Without it, take a snapshot yourself:
 
       iex> {u, {:promoted, _}} = Lang.stage(Lang.new(), "c", File.read!("test/fixtures/yabu/counter.yabu"))
-      iex> {:ok, {_model, _cmd}, _type} = Exec.eval(u, "Counter.init()")
-      iex> {:ok, {model, _cmd}, _} = Exec.eval(u, "Counter.update(Counter.Msg.Add(5), %Counter.Model{count: 1})")
+      iex> snapshot = Lang.snapshot(u)
+      iex> {:ok, {_model, _cmd}, _type} = Exec.eval(snapshot, "Counter.init()")
+      iex> {:ok, {model, _cmd}, _} = Exec.eval(snapshot, "Counter.update(Counter.Msg.Add(5), %Counter.Model{count: 1})")
       iex> Exec.show(model, {:named, "Counter.Model"})
       "%Counter.Model{count: 6}"
 
   The REPL walkthrough (load counter, init, update with `Add(5)`, view, stage
   a broken def and read its reason, fix it, eval it) is in `Kinoko.Repl`.
 
+  ## Snapshots, not universes
+
+  Exec takes `Kinoko.Lang.snapshot/1` (the committed code plus the
+  signatures to check against), or an image. It never takes a
+  `Kinoko.Lang.Universe`, and calls no `Kinoko.Lang` function that does:
+  `load/2`, `call/4`, `eval/3` and `test/3` have no clause for one. Hosts
+  reach Exec through `Kinoko.Universe`, which hands out snapshots.
+
   ## Images
 
-  `load/2` compiles a universe's committed code (`Kinoko.Lang.Codegen`, in
+  `load/2` compiles a snapshot's committed code (`Kinoko.Lang.Codegen`, in
   a bounded worker) and loads it, keeping the image in `:persistent_term`
-  under its hash: two universes with the same code share one module,
+  under its hash: two snapshots with the same code share one module,
   loaded once. The module stays loaded after a promotion, so an image
   keeps answering with the code it was made from until `unload/1` purges
   it. (Putting a new key in `:persistent_term` costs no global GC pass;
@@ -43,7 +53,7 @@ defmodule Kinoko.Exec do
   images in bulk (a long-lived host stepping many versions) owns calling
   `unload/1` for the ones no longer needed.
 
-  `unload/1` is global: the image is shared by every universe with the
+  `unload/1` is global: the image is shared by every snapshot with the
   same code, so unloading it stops every worker running it, other
   callers' included. Those callers get `{:error, %{code: "unloaded"}}`;
   their next `load/2` loads it again.
@@ -53,8 +63,8 @@ defmodule Kinoko.Exec do
   A host that keeps Yabu running (piece 2's app runtime, stepping an app
   across many messages) must:
 
-  - **hold the image, not the universe.** `call/4`, `eval/3` and `test/3`
-    take a universe too, but each such call re-hashes its committed code to
+  - **hold the image, not the snapshot.** `call/4`, `eval/3` and `test/3`
+    take a snapshot too, but each such call re-hashes its committed code to
     find the image (`Kinoko.Lang.Codegen.image_hash/1`): cheap once, waste
     per message. `load/2` once, then call with the image.
   - **invoke every Yabu value only through `Kinoko.Exec.Worker.run/2`.** A
@@ -109,7 +119,7 @@ defmodule Kinoko.Exec do
         }
 
   @doc """
-  The universe's image, loaded: `{:ok, image}` (see `t:image/0` and
+  The snapshot's image (or a bare committed map's), loaded: `{:ok, image}` (see `t:image/0` and
   `Kinoko.Lang.image/1`), or the codegen's `{:error, %{code, message}}`.
   The image is cached by hash; its module is loaded only when it is not.
 
@@ -119,9 +129,16 @@ defmodule Kinoko.Exec do
   compiled module holds the image's lock, so two callers compiling the
   same new code each compile it, and the first to install it wins.
   """
-  @spec load(Lang.Universe.t(), keyword()) :: {:ok, image} | {:error, error}
-  def load(u, opts \\ []) do
-    committed = Lang.committed(u)
+  @spec load(Lang.snapshot() | map(), keyword()) :: {:ok, image} | {:error, error}
+  def load(snapshot_or_committed, opts \\ [])
+
+  def load(%{committed: committed} = snapshot, opts) when not is_struct(snapshot),
+    do: load_committed(committed, opts)
+
+  def load(committed, opts) when is_map(committed) and not is_struct(committed),
+    do: load_committed(committed, opts)
+
+  defp load_committed(committed, opts) do
     hash = Codegen.image_hash(committed)
 
     case :persistent_term.get(key(hash), nil) do
@@ -235,14 +252,14 @@ defmodule Kinoko.Exec do
   end
 
   @doc """
-  The def `name` of `u_or_image` applied to `args` (BEAM values, see
+  The def `name` of `snapshot_or_image` applied to `args` (BEAM values, see
   `Kinoko.Lang.Rt`): `{:ok, value}` or `{:error, %{code, message}}`. Only
   the image's own defs are called by name, as in Rust's `call`.
   """
-  @spec call(Lang.Universe.t() | image, String.t(), [term()], keyword()) ::
+  @spec call(Lang.snapshot() | image, String.t(), [term()], keyword()) ::
           {:ok, term()} | {:error, error}
-  def call(u_or_image, name, args, opts \\ []) when is_binary(name) and is_list(args) do
-    with {:ok, image} <- image(u_or_image, opts) do
+  def call(snapshot_or_image, name, args, opts \\ []) when is_binary(name) and is_list(args) do
+    with {:ok, image} <- image(snapshot_or_image, opts) do
       case image.names do
         %{^name => {f, arity}} when arity == length(args) ->
           run(image, fn -> apply(image.module, f, args) end, opts)
@@ -269,22 +286,25 @@ defmodule Kinoko.Exec do
   end
 
   defp image(%{module: _, binary: _} = image, _opts), do: ensure_loaded(image)
-  defp image(u, opts), do: load(u, opts)
+
+  defp image(snapshot, opts) when is_map_key(snapshot, :committed) and not is_struct(snapshot),
+    do: load(snapshot, opts)
 
   defp runtime(message), do: {:error, %{code: "runtime", message: message}}
 
   @doc """
-  The expression `source`, checked against `u`'s committed code and
+  The expression `source`, checked against the snapshot's signatures and
   evaluated with it: `{:ok, value, type}` or `{:error, %{code, message}}`.
   An expression that does not parse or check is refused with its first
   reason's code and message (`reasons:` holds them all) before anything
   runs. `always` and `sometimes` in it are evaluated, never scored.
   """
-  @spec eval(Lang.Universe.t(), String.t(), keyword()) :: {:ok, term(), term()} | {:error, error}
-  def eval(u, source, opts \\ []) when is_binary(source) do
-    case Lang.check_expr(u, source) do
+  @spec eval(Lang.snapshot(), String.t(), keyword()) :: {:ok, term(), term()} | {:error, error}
+  def eval(snapshot, source, opts \\ [])
+      when is_map_key(snapshot, :committed) and not is_struct(snapshot) and is_binary(source) do
+    case Lang.check_expr(snapshot, source) do
       {:ok, typed, type} ->
-        with {:ok, image} <- load(u, opts),
+        with {:ok, image} <- load(snapshot, opts),
              {:ok, forms} <- expr_forms(typed, image),
              {:ok, value} <- run(image, fn -> erl_eval(forms) end, opts) do
           {:ok, value, type}
@@ -328,9 +348,9 @@ defmodule Kinoko.Exec do
   that hits a limit is the worker's `"timeout"` or `"heap"` error, with no
   failures (they died with the worker).
   """
-  @spec test(Lang.Universe.t() | image, String.t(), keyword()) :: :ok | {:error, error}
-  def test(u_or_image, name, opts \\ []) when is_binary(name) do
-    with {:ok, image} <- image(u_or_image, opts) do
+  @spec test(Lang.snapshot() | image, String.t(), keyword()) :: :ok | {:error, error}
+  def test(snapshot_or_image, name, opts \\ []) when is_binary(name) do
+    with {:ok, image} <- image(snapshot_or_image, opts) do
       case image.tests do
         %{^name => f} -> score(image, name, run_test(image, f, opts))
         _ -> runtime("no test named `#{name}`")

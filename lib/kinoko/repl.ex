@@ -129,7 +129,7 @@ defmodule Kinoko.Repl do
   """
   @spec eval(String.t(), keyword()) :: term()
   def eval(source, opts \\ []) when is_binary(source) do
-    case Exec.eval(u(), source, opts) do
+    case Exec.eval(Lang.snapshot(u()), source, opts) do
       {:ok, value, type} ->
         IO.puts("#{Exec.show(value, type)} : #{Format.type(type)}")
         remember(value)
@@ -146,7 +146,7 @@ defmodule Kinoko.Repl do
   """
   @spec call(String.t(), [term()], keyword()) :: term()
   def call(name, args, opts \\ []) do
-    case Exec.call(u(), name, args, opts) do
+    case Exec.call(Lang.snapshot(u()), name, args, opts) do
       {:ok, value} ->
         IO.puts(show_untyped(name, value))
         remember(value)
@@ -174,7 +174,7 @@ defmodule Kinoko.Repl do
   @doc "Run a deftest; prints `ok` or its failures."
   @spec test(String.t(), keyword()) :: :ok | {:error, map()}
   def test(name, opts \\ []) do
-    case Exec.test(u(), name, opts) do
+    case Exec.test(Lang.snapshot(u()), name, opts) do
       :ok ->
         IO.puts("#{name}: ok")
         :ok

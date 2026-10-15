@@ -19,7 +19,7 @@ defmodule Kinoko.Exec.ShowTest do
   defp universe(src) do
     {u, r} = Lang.stage(Lang.new(), "p", src)
     assert {:promoted, _} = r, inspect(r)
-    u
+    Lang.snapshot(u)
   end
 
   # How long `Show.show/1` took to write `v`, in ms, and what it wrote.

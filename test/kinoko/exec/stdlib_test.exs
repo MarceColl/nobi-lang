@@ -15,12 +15,12 @@ defmodule Kinoko.Exec.StdlibTest do
   # TS integers stop at 2^53; Rust's Int is i64, where this parses.
   @divergent ["String.to_int(\"9007199254740993\") == Option.None"]
 
-  defp universe(""), do: Lang.new()
+  defp universe(""), do: Lang.snapshot(Lang.new())
 
   defp universe(src) do
     {u, r} = Lang.stage(Lang.new(), "p", src)
     assert {:promoted, _} = r, inspect(r)
-    u
+    Lang.snapshot(u)
   end
 
   defp value_in(src, expr) do
@@ -51,7 +51,7 @@ defmodule Kinoko.Exec.StdlibTest do
   describe "the oracle" do
     test "every stdlib example holds, but the divergent one (TS stdlib.test.ts)" do
       rows = YabuGolden.stdlib()
-      u = Lang.new()
+      u = Lang.snapshot(Lang.new())
 
       results =
         for %{"name" => name, "examples" => examples} <- rows, example <- examples do

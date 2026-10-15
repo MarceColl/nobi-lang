@@ -30,7 +30,7 @@ defmodule Kinoko.ExecGoldenTest do
   defp load(label, source) do
     {u, r} = Lang.stage(Lang.new(), "golden", source)
     assert {:promoted, _} = r, "#{label}: #{inspect(r, limit: 5)}"
-    assert {:ok, image} = Exec.load(u), label
+    assert {:ok, image} = Exec.load(Lang.snapshot(u)), label
     %{image: image, sigs: YabuGolden.signatures(source), tests: Map.keys(image.tests)}
   end
 

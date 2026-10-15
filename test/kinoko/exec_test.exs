@@ -13,12 +13,12 @@ defmodule Kinoko.ExecTest do
   # cache. Rust's step-budget and depth tests have no BEAM form as written;
   # their runaway programs end here in `"timeout"` or `"heap"`.
 
-  defp universe(""), do: Lang.new()
+  defp universe(""), do: Lang.snapshot(Lang.new())
 
   defp universe(src) do
     {u, r} = Lang.stage(Lang.new(), "p", src)
     assert {:promoted, _} = r, inspect(r)
-    u
+    Lang.snapshot(u)
   end
 
   defp value_in(src, expr) do
@@ -849,7 +849,7 @@ defmodule Kinoko.ExecTest do
     test "refusing a comparison too large to walk is quick" do
       binds = Enum.map_join(1..40, "\n", fn i -> "  x#{i} = [x#{i - 1}, x#{i - 1}]" end)
       ys = Enum.map_join(1..30, "\n", fn i -> "  y#{i} = [y#{i - 1}, y#{i - 1}]" end)
-      u = Lang.new()
+      u = Lang.snapshot(Lang.new())
       {:ok, _} = Exec.load(u)
 
       for expr <- [
@@ -939,16 +939,23 @@ defmodule Kinoko.ExecTest do
       assert {:file, _} = :code.is_loaded(a.module)
     end
 
+    test "a universe is not accepted, only a snapshot or image" do
+      u = Lang.new()
+      assert_raise FunctionClauseError, fn -> Exec.load(u) end
+      assert_raise FunctionClauseError, fn -> Exec.eval(u, "1") end
+      assert_raise FunctionClauseError, fn -> Exec.call(u, "A.f", []) end
+    end
+
     test "after a promotion the old image still answers its old body" do
       {u1, {:promoted, _}} = Lang.stage(Lang.new(), "p", "def Ver.n() : Int do 1 end")
-      {:ok, old} = Exec.load(u1)
+      {:ok, old} = Exec.load(Lang.snapshot(u1))
       {u2, {:promoted, _}} = Lang.stage(u1, "p", "def Ver.n() : Int do 2 end")
-      {:ok, new} = Exec.load(u2)
+      {:ok, new} = Exec.load(Lang.snapshot(u2))
 
       refute old.module == new.module
       assert Exec.call(old, "Ver.n", []) == {:ok, 1}
       assert Exec.call(new, "Ver.n", []) == {:ok, 2}
-      assert Exec.call(u1, "Ver.n", []) == {:ok, 1}
+      assert Exec.call(Lang.snapshot(u1), "Ver.n", []) == {:ok, 1}
     end
 
     test "unload purges the module and forgets it; a later load brings it back" do
