@@ -12,6 +12,20 @@ defmodule Kinoko.Exec do
       iex> Exec.show(model, {:named, "Counter.Model"})
       "%Counter.Model{count: 3}"
 
+  ## Trying it from iex
+
+  `iex -S mix` aliases `Kinoko.Repl` as `Y` (see `.iex.exs`), which keeps
+  the session universe for you. Without it, thread the universe yourself:
+
+      iex> {u, {:promoted, _}} = Lang.stage(Lang.new(), "c", File.read!("test/fixtures/yabu/counter.yabu"))
+      iex> {:ok, {_model, _cmd}, _type} = Exec.eval(u, "Counter.init()")
+      iex> {:ok, {model, _cmd}, _} = Exec.eval(u, "Counter.update(Counter.Msg.Add(5), %Counter.Model{count: 1})")
+      iex> Exec.show(model, {:named, "Counter.Model"})
+      "%Counter.Model{count: 6}"
+
+  The REPL walkthrough (load counter, init, update with `Add(5)`, view, stage
+  a broken def and read its reason, fix it, eval it) is in `Kinoko.Repl`.
+
   ## Images
 
   `load/1` compiles a universe's committed code (`Kinoko.Lang.Codegen`) and
