@@ -6,7 +6,8 @@ defmodule KinokoWeb.YabuHtml do
   The tree holds only strings and tuples (no Yabu terms), so nothing from the
   evaluator reaches the browser; `handlers` maps `"eN"` ids (assigned in
   pre-order render order) to what the LiveView must do with the event:
-  a message term (`on-click` and friends), or `{:change, fun}` (`on-change`).
+  `{kind, msg}` with kind `:click|:blur|:focus|:keydown|:keyup|:submit`, or
+  `{:change, fun}` (`on-change`).
 
   Tree shapes:
 
@@ -28,9 +29,12 @@ defmodule KinokoWeb.YabuHtml do
   Events (params of the LiveView `"yabu"` event; `id` is the `"eN"` handler id):
 
     * `on-click|blur|focus|keydown|keyup`: `phx-<event>="yabu"` plus
-      `phx-value-h="id"`. Params `%{"h" => id}` (key events add `"key"`, `"value"`).
+      `phx-value-<event>="id"` (per-event key, so several events on one element
+      do not collide). Params `%{"click" => id}` (or `"blur"`, `"focus"`,
+      `"keydown"`, `"keyup"`; key events add `"key"`, `"value"`).
     * `on-submit` on a `form`: `phx-submit="yabu"` and a hidden input named
       `yabu_submit` holding the id. Params `%{"yabu_submit" => id, ...fields}`.
+      A `form` nested in another Yabu form renders as a `div`; its on-submit is lost.
     * `on-change` on `input`/`textarea`/`select`: the element is named
       `yabu[id]` and the handler is read from `_target`. Params
       `%{"_target" => ["yabu", id], "yabu" => %{id => value}}`. LiveView only
@@ -62,6 +66,15 @@ defmodule KinokoWeb.YabuHtml do
   @data ~r/\Adata-[a-z0-9][a-z0-9-]*\z/
 
   @simple_events ~w(click blur focus keydown keyup)
+  # Handler kinds are fixed atoms (never built from user strings).
+  @event_kinds %{
+    "click" => :click,
+    "blur" => :blur,
+    "focus" => :focus,
+    "keydown" => :keydown,
+    "keyup" => :keyup
+  }
+
   @change_tags ~w(input textarea select)
 
   # ---------- prepare ----------
@@ -81,6 +94,9 @@ defmodule KinokoWeb.YabuHtml do
   defp walk({:var, "Html", "Element", [tag, attrs, children]}, in_form?, acc)
        when is_binary(tag) and is_list(attrs) and is_list(children) do
     tag = String.downcase(tag)
+    # A form inside a form is a `div`: the HTML parser would drop the inner
+    # `<form>` anyway, so the DOM matches the tree. Its on-submit is lost.
+    tag = if tag == "form" and in_form?, do: "div", else: tag
     if tag in @tags, do: element(tag, attrs, children, in_form?, acc), else: {nil, acc}
   end
 
@@ -120,7 +136,8 @@ defmodule KinokoWeb.YabuHtml do
   defp mark_changed({n, hs, _}), do: {n, hs, true}
 
   defp name_change({:el, tag, attrs, kids}, id),
-    do: {:el, tag, List.keystore(attrs, "name", 0, {"name", "yabu[#{id}]"}), kids}
+    do:
+      {:el, tag, Enum.reject(attrs, &match?({"name", _}, &1)) ++ [{"name", "yabu[#{id}]"}], kids}
 
   # Handler ids are assigned in attribute order within an element.
   defp events(tag, attrs, acc) do
@@ -130,12 +147,12 @@ defmodule KinokoWeb.YabuHtml do
 
         cond do
           event in @simple_events and not is_function(value) ->
-            {evs ++ [{"phx-#{event}", "yabu"}, {"phx-value-h", id}], change,
-             {n + 1, Map.put(hs, id, value), c}}
+            {evs ++ [{"phx-#{event}", "yabu"}, {"phx-value-#{event}", id}], change,
+             {n + 1, Map.put(hs, id, {@event_kinds[event], value}), c}}
 
           event == "submit" and tag == "form" and not is_function(value) ->
             {evs ++ [{"phx-submit", "yabu"}, {"data-yabu-submit", id}], change,
-             {n + 1, Map.put(hs, id, value), c}}
+             {n + 1, Map.put(hs, id, {:submit, value}), c}}
 
           event == "change" and tag in @change_tags and is_function(value) and change == nil ->
             {evs, id, {n + 1, Map.put(hs, id, {:change, value}), c}}
@@ -152,10 +169,24 @@ defmodule KinokoWeb.YabuHtml do
   defp plain_attr(name, value) when is_binary(name) do
     name = String.downcase(name)
 
-    if valid_name?(name), do: coerce(name, value)
+    with true <- valid_name?(name),
+         {_, v} = attr when is_binary(v) or v == true <- coerce(name, value),
+         true <- reserved_ok?(name, v) do
+      attr
+    else
+      _ -> nil
+    end
   end
 
   defp plain_attr(_, _), do: nil
+
+  # `name`s the event routing owns, and `id`s LiveView owns.
+  defp reserved_ok?("name", v) when is_binary(v),
+    do:
+      v not in ["yabu_submit", "_target", "h"] and not String.starts_with?(v, ["yabu[", "yabu_"])
+
+  defp reserved_ok?("id", v) when is_binary(v), do: not String.starts_with?(v, "phx-")
+  defp reserved_ok?(_, _), do: true
 
   # Strict: every name is exact-listed or matches an anchored pattern, so no
   # whitespace, `=`, quote or `>` can ever reach the tag.

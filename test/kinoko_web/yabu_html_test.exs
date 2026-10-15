@@ -116,8 +116,8 @@ defmodule KinokoWeb.YabuHtmlTest do
     {doc, handlers} = render(el("button", [{"on-click", msg}], [txt("go")]))
 
     assert attr(doc, "button", "phx-click") == ["yabu"]
-    assert attr(doc, "button", "phx-value-h") == ["e0"]
-    assert handlers == %{"e0" => msg}
+    assert attr(doc, "button", "phx-value-click") == ["e0"]
+    assert handlers == %{"e0" => {:click, msg}}
   end
 
   test "standalone on-change gets a minimal form wrapper, named yabu[id]" do
@@ -156,7 +156,7 @@ defmodule KinokoWeb.YabuHtmlTest do
     assert attr(doc, "form", "phx-change") == ["yabu"]
     assert attr(doc, "form input[name=yabu_submit]", "value") == ["e0"]
     assert attr(doc, "form input[name='yabu[e1]']", "name") == ["yabu[e1]"]
-    assert handlers["e0"] == :go
+    assert handlers["e0"] == {:submit, :go}
   end
 
   test "on-submit puts its id in the yabu_submit hidden field" do
@@ -165,7 +165,7 @@ defmodule KinokoWeb.YabuHtmlTest do
     assert attr(doc, "form", "phx-change") == []
     assert attr(doc, "form input[type=hidden]", "name") == ["yabu_submit"]
     assert attr(doc, "form input[type=hidden]", "value") == ["e0"]
-    assert handlers == %{"e0" => :msg}
+    assert handlers == %{"e0" => {:submit, :msg}}
   end
 
   test "attribute names are validated strictly" do
@@ -212,6 +212,46 @@ defmodule KinokoWeb.YabuHtmlTest do
     assert LazyHTML.query(doc, "svg") |> Enum.count() == 0
   end
 
+  test "duplicate user names on an on-change element are all replaced" do
+    {doc, _} =
+      render(el("input", [{"name", "a"}, {"name", "b"}, {"on-change", fn s -> s end}]))
+
+    assert attr(doc, "input", "name") == ["yabu[e0]"]
+  end
+
+  test "several simple events on one element keep separate ids" do
+    {doc, handlers} = render(el("input", [{"on-click", :c}, {"on-blur", :b}]))
+    assert attr(doc, "input", "phx-value-click") == ["e0"]
+    assert attr(doc, "input", "phx-value-blur") == ["e1"]
+    assert attr(doc, "input", "phx-click") == ["yabu"]
+    assert attr(doc, "input", "phx-blur") == ["yabu"]
+    assert handlers == %{"e0" => {:click, :c}, "e1" => {:blur, :b}}
+  end
+
+  test "a form nested in a form renders as a div; one outer binding set" do
+    inner = el("form", [{"on-submit", :inner}], [el("input", [{"on-change", fn s -> s end}])])
+    {doc, handlers} = render(el("form", [{"on-submit", :outer}], [inner]))
+
+    assert LazyHTML.query(doc, "form") |> Enum.count() == 1
+    assert LazyHTML.query(doc, "input[name=yabu_submit]") |> Enum.count() == 1
+    assert attr(doc, "form", "phx-change") == ["yabu"]
+    assert LazyHTML.query(doc, "form > div > input[name='yabu[e1]']") |> Enum.count() == 1
+    assert Map.has_key?(handlers, "e0") and match?({:change, _}, handlers["e1"])
+    refute Enum.any?(Map.values(handlers), &(&1 == {:submit, :inner}))
+  end
+
+  test "reserved names and phx- ids are dropped" do
+    for n <- ["yabu_submit", "_target", "h", "yabu[e0]", "yabu_x"] do
+      {doc, _} = render(el("input", [{"name", n}]))
+      assert attr(doc, "input", "name") == [], n
+    end
+
+    {doc, _} = render(el("div", [{"id", "phx-F123"}]))
+    assert attr(doc, "div", "id") == []
+    {doc, _} = render(el("div", [{"id", "ok"}]))
+    assert attr(doc, "div", "id") == ["ok"]
+  end
+
   test "unknown events and mistyped handlers are ignored" do
     {_doc, handlers} =
       render(el("div", [{"on-mouseover", :m}, {"on-click", fn x -> x end}, {"on-change", :m}]))
@@ -229,11 +269,11 @@ defmodule KinokoWeb.YabuHtmlTest do
     {t1, h1} = YabuHtml.prepare(tree)
     {t2, h2} = YabuHtml.prepare(tree)
     assert {t1, h1} == {t2, h2}
-    assert h1 == %{"e0" => :a, "e1" => :b, "e2" => :c}
+    assert h1 == %{"e0" => {:click, :a}, "e1" => {:click, :b}, "e2" => {:click, :c}}
 
     {doc, _} = render(tree)
-    assert attr(doc, "ul > li:first-child > span", "phx-value-h") == ["e1"]
-    assert attr(doc, "ul > li:last-child", "phx-value-h") == ["e2"]
+    assert attr(doc, "ul > li:first-child > span", "phx-value-click") == ["e1"]
+    assert attr(doc, "ul > li:last-child", "phx-value-click") == ["e2"]
   end
 
   test "void elements render without children" do
