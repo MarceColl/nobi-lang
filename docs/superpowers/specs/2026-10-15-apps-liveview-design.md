@@ -1,132 +1,159 @@
-# Running apps in the browser — design (piece 5)
+# Routes, deployments and serving apps — design (piece 5)
 
 Piece 5 of 7. It builds on piece 3 (`Kinoko.Universe`), piece 4 (`Kinoko.Exec`) and the Elm foundation (`KinokoWeb.ElmLiveView`). Terms are defined in `docs/GLOSSARY.md`.
 
 ## Goal
 
-Any `defapp` in any universe runs in the browser at `/u/:universe/:app`. It is a live Elm loop: Yabu's `init`, `update` and `view` drive a LiveView. When the universe promotes new code, running apps pick it up without a reload. An index page per universe lists its apps, symbols, staged patches and history. `mix kinoko.start` brings the whole thing up.
+Kinoko serves products, not single apps. A product is many `defapp`s over shared models. A **route table** declared in Yabu maps URLs, with parameters, to apps. A **deployment** serves one universe's route table on one or more hosts. Locally, a deployment follows the universe's head, so every promotion goes live. Kinoko's own UIs (console, MCP) are ordinary Phoenix routes, outside any deployment.
 
 ## Decisions (Marce)
 
-- **Effects:** only `Cmd.none`, `Cmd.batch`, `Cmd.time.now` and `Cmd.random.int` run. Every other effect (`store`, `blob`, `ai`) delivers nothing and shows a visible "not available yet" notice. No scope creep.
-- **Live code and the model:** when a commit leaves `App.Model`'s signature unchanged, the running model carries over. When it changes, the app re-runs `App.init` and shows "Model changed; app restarted". There is no migration. A change to `App.Model` that breaks `update` or `view` doesn't promote in the first place, because it doesn't typecheck.
+- **Three kinds of routing:**
+  1. **Deployed apps:** URL → deployment, through an internal production routing table. This is what makes rollback a pointer change.
+  2. **Local apps:** the same mechanism; a deployment that follows a universe's head.
+  3. **Kinoko UIs:** plain Phoenix, not served through deployments.
+- **Apps have internal routes with parameters.** `/post/:id` → `Forum.Post`, and `id` is part of the app's input.
+- **Effects:** only `Cmd.none`, `Cmd.batch`, `Cmd.time.now` and `Cmd.random.int` run, plus `Cmd.navigate` (below). Every other effect shows a visible "not available yet" notice.
+- **Live code and the model:** if `App.Model`'s signature is unchanged, the running model carries over. If it changed, the app re-runs `init` and shows "Model changed; app restarted".
+- **Users are deferred, but the design leaves room for them:**
+  - operators will get auth on the Kinoko UIs and MCP;
+  - app viewers will get an identity passed in through the app's input, the same way route parameters are.
 
-## Out of scope
+## Out of scope (this piece)
 
-- Persistent app state across reloads, or shared between viewers.
-- `store`, `blob` and `ai` effects.
-- Model migration.
-- Auth.
-- A standalone `kinoko` binary.
-- Running apps in production. The routes are mounted in dev and test only, like `/mcp`.
+- **Pinned deployments in production use:** remote nodes, pushing to them, rollback commands and real domains. Those are piece 7, deploy; this piece builds the table they use.
+- **Query parameters**, and any route parameter type other than `Int`, `String` and `Uuid`.
+- **Users and auth**, and app state persisted or shared between viewers.
+- **`store`, `blob` and `ai` effects**, and model migration.
+- **Serving outside dev/test.** Deployment serving is mounted in dev and test only, like `/mcp`, until auth exists.
 
-## Shape
+## Language: `defroutes`
 
 ```
-browser ──phx events──▶ KinokoWeb.AppLive (ElmLiveView, one per tab)
-                          model   = the Yabu model value
-                          handlers = %{"e17" => msg | {:change, ctor_fun}}   (server-side only)
-                          image   = {universe, image_hash}
-   init:    Universe.call(u, "App.init", [])            → {model, cmd}
-   event:   Universe.call(u, "App.update", [msg, model]) → {model, cmd}
-   render:  Universe.call(u, "App.view", [model])        → Html value → <.yabu_html> (HEEx)
-   cmd:     Cmd → Kinoko.Elm.Effect (now/random) → result msg via Universe.apply(u, cb, [v])
-   commits: PubSub "universe:<name>" → re-render on the new image (model kept or re-init)
+defroutes Forum do
+  "/"           -> Forum.Threads
+  "/post/:id"   -> Forum.Post
+  "/settings"   -> Forum.Settings
+end
+
+def Forum.Post.init(id : Uuid) : (Forum.Post.Model, Cmd<Forum.Post.Msg>) do … end
 ```
 
-Everything goes through `Kinoko.Universe`, which keeps the binding rule.
+- **A new declaration kind.** It is parsed, formatted, CID'd, staged, checked and committed like any other, and its symbol is the route table's name (`Forum`).
+- **Patterns** are literal segments plus `:param` segments. Ordered, first match wins. Two patterns that match the same URLs are refused with `"duplicate-route"`.
+- **Each target must be a `defapp`.** Its `init` parameters must be exactly the pattern's params, by name, with types `Int`, `String` or `Uuid` (`"route-mismatch"` otherwise).
+- **The app-shape rule relaxes:** `init` may take parameters now. An app whose `init` takes parameters can only be opened through a route.
+- **`Cmd.navigate(App, args…)`** is a new effect, type-checked as a special form:
+  - `App` must be the target of exactly one route in the routes declaration that names it;
+  - `args` must match that route's params.
 
-## Components
+  The host turns it into a URL in the same deployment. Plain `<a href="/post/…">` links also work, as ordinary navigation.
+- **Image:** `__yabu__(:routes)` exports each route table as data, `%{name => [{pattern_segments, app, param_types}]}`, so the host can resolve URLs without re-reading declarations.
 
-### `Kinoko.Universe` additions
+## Platform
 
-- **`apply(universe, fun, args, opts)`** applies a Yabu function value, such as a `Cmd` callback or an `on-change` constructor, inside an Exec worker against that universe's current image. It returns `{:ok, value} | {:error, reason}`. Under the hood it is `Exec.apply(image, fun, args)`, a new Exec entry point.
-- **`apps(universe)`** returns `[app_name]`, the committed `defapp` symbols.
-- **Commit notifications.** The CodeDb broadcasts `{:committed, universe, %{image_hash, model_signatures}}` on `Phoenix.PubSub` topic `"universe:<name>"` after every promotion. That is an effect of the step, so it is performed after the state is persisted. `Universe.subscribe(universe)` subscribes the caller.
+### Deployments (`deployments` table, process-free like the CAS)
 
-### `KinokoWeb.AppLive`
-
-An `ElmLiveView` with `params: true`, mounted at `live "/u/:universe/:app"`.
-
-**Model.**
 ```
-%{universe, app, model, html, handlers, notice, error, model_sig}
+deployments(name text pk, universe text not null, routes text not null,
+            commit integer null,          -- null = follow the universe's head
+            hosts text[] not null default '{}',
+            inserted_at, updated_at)
 ```
-- `model` is the Yabu value.
-- `html` is the last view value.
-- `handlers` maps handler ids to msgs.
-- `model_sig` is the signature of `App.Model` the model was built under.
 
-**Lifecycle.**
-- **init:**
-  1. Check the universe and app exist; otherwise render a clear "no such app" page.
-  2. Call `App.init()` and render.
-  3. On the connected mount only, subscribe to the universe's commits, then perform the `Cmd`.
-- **Event `{"yabu", %{"h" => id, "value" => v}}`:** look the id up in `handlers`.
-  - A plain msg: call `update`.
-  - A `{:change, f}`: `Universe.apply(f, [v])` gives the msg, then call `update`.
-  - Either way: perform the `Cmd`, then re-render.
-- **Errors.** A runtime error, timeout or `degraded` result from any Yabu call keeps the previous model and view, and shows an error banner with the code and message. It never crashes the LiveView.
-- **Commit message:**
-  - If `App.Model`'s signature is unchanged, re-render with the new code.
-  - Otherwise re-run `init` and set the notice "Model changed; app restarted".
-  - If `App` was removed, show "app no longer exists".
+- **`Kinoko.Deployment`** is the interface, and it is the only module that touches the table:
+  - `list/0`, `get/1`, `create(name, universe, routes, opts)`;
+  - `pin(name, commit)` and `follow(name)`;
+  - `resolve(host) :: {:ok, deployment} | :error`.
+- **At boot**, a deployment named `local` (universe `main`, routes `"Main"`, following head, hosts `["localhost", "127.0.0.1"]`) is created if missing. `<name>.localhost` resolves to deployment `<name>`, so several deployments can run side by side locally.
+- **A pinned deployment** serves the image of that commit: replay history to that commit, then build the image, cached by hash. Rollback is `pin(name, older_commit)`. The mechanism exists in this piece; piece 7 adds its UX and remote use.
 
-**Effects.** `Cmd` values are data, `{:cmd, …}`. They are lowered to `Kinoko.Elm.Effect`:
-- `none` → `[]`.
-- `batch` → each item.
-- `{:effect, "Cmd.time.now", _, [cb]}` → `Effect.now`. The callback applies `cb` to Unix milliseconds via `Universe.apply`, which yields the msg.
-- `Cmd.random.int(lo, hi, cb)` → `Effect.random(lo..hi)`, then the same callback path.
-- Anything else → a notice `"<effect> is not available yet"`, and no msg.
+### Serving: `KinokoWeb.DeploymentLive`
+
+One generic `ElmLiveView` mounted on a catch-all route (`live "/*path"`), after every reserved Kinoko route.
+
+1. **`handle_params`:**
+   1. Resolve the host to a deployment.
+   2. Resolve the path through that deployment's route table, parsing params by type. A miss gives a 404 page.
+   3. Mount the target app: `init(params…)`.
+2. **The app loop**, through `Kinoko.Universe` at the deployment's universe:
+   - `update` on events;
+   - `view` gives an `Html` value, rendered by `<.yabu_html>`.
+
+   A runtime error, timeout or `degraded` result keeps the previous view and shows a banner. It never crashes.
+3. **Events never send Yabu values to the browser.** Each render assigns handler ids (`e0`, `e1`, …) and keeps id → msg server-side.
+   - `on-click` → `phx-click`.
+   - `on-change` → the LiveView-idiomatic input binding, which the implementer picks and documents.
+   - A constructor handler is applied to the input value through `Universe.apply`.
+4. **Effects.**
+   - `none` and `batch` are performed directly.
+   - `time.now` and `random.int` map to the corresponding `Kinoko.Elm.Effect`. The callback is applied through `Universe.apply`, which gives the msg.
+   - `Cmd.navigate` becomes `push_patch` to the resolved URL, swapping the mounted app without a page reload.
+   - Anything else shows a notice.
+5. **Live code.** For a following deployment, the host subscribes to its universe's commits:
+   - the route table is re-resolved;
+   - the model carries over when `App.Model`'s signature is unchanged, otherwise `init` re-runs with a notice;
+   - if the route or app disappears, a 404 page.
+
+   A pinned deployment never changes until it is re-pinned.
 
 ### `KinokoWeb.YabuHtml`
 
-A function component, `<.yabu_html html={@html} handlers=… />`, that renders an `Html` value safely:
-- **Elements** pass through by tag name.
-- **Attributes:**
-  - `class`, `id`, `type`, `value`, `placeholder`, `href` (http, https or relative only), `src` (same), `alt`, `title`, `name`, `checked`, `disabled`, `for` and `aria-*`/`data-*` are allowed.
-  - Anything else is dropped.
-  - `phx-*` and `on*` names written as plain attributes are dropped, so code can't inject bindings.
-- **Event attributes:**
-  - `on-click` → `phx-click="yabu" phx-value-h="eN"`.
-  - `on-change` → `phx-change` on an enclosing `<form>` is awkward, so inputs with `on-change` get `phx-change="yabu"` through a small form wrapper or `phx-keyup`. The implementer picks the LiveView-idiomatic way and documents it.
-  - Other `on-<event>` → `phx-<event>` where LiveView supports it; otherwise dropped with a notice.
-- **Children:** text is escaped by HEEx; nothing ever renders as raw HTML.
-- **Handler ids** are assigned in render order (`e0`, `e1`, …) and rebuilt on every render. The id → msg map lives in the LiveView process and is never sent to the browser.
+Safe rendering of `Html` values:
+- elements pass through by tag;
+- an allow-list of attributes, `href`/`src` restricted to http, https or relative;
+- `phx-*` and `on*` names written as plain attributes are dropped;
+- text is escaped and nothing renders as raw HTML.
 
-### `KinokoWeb.UniverseLive`, at `/u/:universe`
+### `Kinoko.Universe` additions
 
-The index page: apps, linking to `/u/:universe/:app`; symbols with their signatures; staged patches with reasons; history; and health. It subscribes to commits and refreshes. `/` lists the universes and links to each one.
+- `apply(universe, fun, args, opts)`, with `Exec.apply` underneath.
+- `apps(universe)` and `routes(universe)`.
+- The CodeDb broadcasts `{:committed, universe, %{commit, image_hash}}` on `"universe:<name>"` after each promotion, performed after the state is persisted. `subscribe(universe)`.
+
+### Kinoko UIs (plain Phoenix, reserved prefix `/_`)
+
+- `/_` lists universes and deployments.
+- `/_/u/:universe` is the console: apps, routes, symbols, staged patches, history, health. It refreshes on commits.
+- `/_/d/:deployment` shows a deployment: universe, routes, following or pinned commit, hosts, and links.
+- **Reserved paths:** `/mcp` stays, and LiveDashboard moves under `/_` (`/dev/*` → `/_/dev/*`). The catch-all never sees `/_`, `/mcp`, `/live`, `/assets` or `/phoenix`.
 
 ### `mix kinoko.start`
 
-Creates and migrates the DB if needed, ensures `main` exists, starts the endpoint, and prints:
-- `Kinoko running at http://127.0.0.1:4000`
-- the MCP URL `/mcp`
-- the `/u/main` link.
+Creates and migrates the DB if needed, ensures `main` and the `local` deployment exist, starts the endpoint, and prints:
+- the app URL (`http://localhost:4000`);
+- the console (`/_`);
+- MCP (`/mcp`).
 
 ## Testing
 
-- **YabuHtml:**
-  - attributes on the allow-list render and others are dropped;
-  - `phx-` injection is dropped;
-  - `href` of `javascript:` is dropped;
-  - text is escaped;
-  - nesting is handled;
-  - handler ids are assigned and returned.
-- **AppLive** with `Phoenix.LiveViewTest`, on a fresh universe per test:
-  - the counter corpus renders, and clicking `+` increments;
-  - an `on-change` input updates the model;
-  - a `Cmd.random.int` app eventually renders the random value;
-  - a `Cmd.store.*` app shows the "not available yet" notice;
-  - a runtime error in `update` (division by zero) shows the banner and keeps the previous view;
-  - an unknown app gives a clear page.
-- **Live code:**
-  - stage a body-only change to `view`: the open LiveView re-renders with the new text and keeps its count;
-  - stage a change to `App.Model` together with `init`/`update`/`view`: it re-inits and shows the notice.
-- **UniverseLive:** lists apps and symbols, and refreshes after a commit.
-- **`mix kinoko.start`:** a smoke test of the task's pure parts. The server start itself is checked manually.
+- **Language:**
+  - parse, format and CID round-trip for `defroutes`;
+  - the checker refuses unknown targets, param name or type mismatches, and duplicate routes;
+  - `init` with parameters is accepted, and an unrouted parameterised app can still be committed;
+  - `Cmd.navigate` is checked against the route table;
+  - all piece-1 oracle tests stay green.
+- **Codegen:** `__yabu__(:routes)` matches the declaration. A route-resolution unit test covers param parsing and a 404 on a type mismatch.
+- **Deployment:**
+  - create, get and resolve by host, including `<name>.localhost`;
+  - pin and follow;
+  - a pinned deployment serves the old commit after a new promotion;
+  - rollback by re-pinning.
+- **DeploymentLive**, with `Phoenix.LiveViewTest` on a fresh universe and deployment per test, using a small forum fixture (`Forum.Threads`, `Forum.Post(id)`, `Forum.Settings`):
+  - `/` renders;
+  - `/post/:id` passes `id`;
+  - `Cmd.navigate` moves between apps;
+  - a bad param gives a 404;
+  - clicking and input changes update the model;
+  - `random.int` renders;
+  - an unsupported effect shows a notice;
+  - a runtime error shows a banner;
+  - live code: a body change re-renders and keeps the model, and a Model change re-inits.
+- **YabuHtml:** the allow-list, injection, `javascript:` links, escaping and handler ids.
+- **Console pages:** they render and refresh on commits.
 
 ## Done when
 
-The tests pass, `mix precommit` is green, the counter app runs at `/u/<universe>/Counter` on the dev server and updates live when a patch is staged over MCP, and the glossary gains **AppLive**.
+- The tests pass and `mix precommit` is green.
+- On the dev server, staging a forum fixture into `main` with a `Main` route table serves it at `http://localhost:4000`, and a patch staged over MCP shows up live.
+- The glossary gains **Route table**, **Deployment**, **Routing table** and **Console**.
