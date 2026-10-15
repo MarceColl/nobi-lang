@@ -64,3 +64,14 @@ The tests use `Kinoko.DataCase`, with the sandbox in shared mode so the server p
 ## Done when
 
 The tests above pass, `mix precommit` is green, and the moduledoc has a persistent counter example.
+
+## Amendments from the final review
+
+- **Rows record the owning module.** A new `module text` column; boot refuses when a key was written by a different module. The name is compared as a string and never turned into an atom.
+- **`durable(state)` callback**, default identity. Change detection and `encode` run on this projection, so a volatile cache never causes a write. Piece 3 projects a universe to its history and texts, and rebuilds it with `Kinoko.Lang.restore/2`.
+- **`start/3`** runs a server under `Kinoko.Elm.Supervisor`, a `DynamicSupervisor` with a tolerant restart limit. Its children are `:transient`.
+- **Durability is written down in the moduledoc:**
+  - effects run at most once, and the stored state may be ahead of them;
+  - a call that times out has an unknown outcome;
+  - the `(key, seq)` primary key fences out a late write from a dying process.
+- **Follow-up, not done:** one poisoned key can exhaust the supervisor's restart budget. That happens when a state is written but every boot from it fails, for example a `resume/1` that raises. Fixing it means adding a per-child backoff, or not restarting when the boot fails for a reason other than the database.
