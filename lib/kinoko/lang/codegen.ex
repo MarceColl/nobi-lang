@@ -24,13 +24,19 @@ defmodule Kinoko.Lang.Codegen do
   same term inside the module and in an expression evaluated against it
   (`expr_forms/3`).
 
-  No atom is made from user text (see `Kinoko.Lang.Codegen.Expr`).
+  No atom is made from user text (see `Kinoko.Lang.Codegen.Expr`), and the
+  positional atoms are bounded: an image holds at most `max_functions/0`
+  defs and tests (`d0`..`d19999`), a function at most
+  `Kinoko.Lang.Codegen.Expr.max_vars/0` variables (`V0`..`V9999`), and
+  every image reuses the same names. Past either cap `compile/1` answers
+  `{:error, %{code: "compile", message}}` before making the atom.
   """
 
   alias Kinoko.Lang.Codegen.Expr
   alias Kinoko.Lang.Format
 
   @a 1
+  @max_functions 20_000
 
   @compile_options [
     :binary,
@@ -79,6 +85,7 @@ defmodule Kinoko.Lang.Codegen do
     runnable =
       committed
       |> Enum.filter(fn {_, %{typed: {kind, _, _}}} -> kind in [:def, :deftest] end)
+      |> limit_functions!()
       |> Enum.sort()
       |> Enum.with_index()
       |> Enum.map(fn {{name, %{typed: typed}}, i} -> {name, :"d#{i}", typed} end)
@@ -119,6 +126,19 @@ defmodule Kinoko.Lang.Codegen do
     {module, forms, names, tests}
   end
 
+  # Counted before any `dN` atom is made: every image reuses `d0`, `d1`, …,
+  # so the cap bounds the atoms all images share.
+  defp limit_functions!(runnable) do
+    if length(runnable) > @max_functions do
+      throw(
+        {:codegen_limit,
+         "the image has #{length(runnable)} defs and tests; at most #{@max_functions} compile"}
+      )
+    end
+
+    runnable
+  end
+
   defp arity({:def, _, [_, ps, _, _]}), do: length(ps)
   defp arity({:deftest, _, _}), do: 0
 
@@ -148,7 +168,8 @@ defmodule Kinoko.Lang.Codegen do
   `{:ok, %{module, binary, hash, names, tests, sometimes}}`, where
   `sometimes` is `%{test => [source]}`: each `sometimes` site written in the
   test (`sometimes_sites/1`). `{:error, %{code: "compile", message}}` when
-  the compiler refuses the forms, `{:error, %{code: "internal", message}}`
+  the compiler refuses the forms or the code is past a cap (see the
+  moduledoc), `{:error, %{code: "internal", message}}`
   when lowering them faults.
   """
   @spec compile(map()) :: {:ok, map()} | {:error, %{code: String.t(), message: String.t()}}
@@ -178,7 +199,13 @@ defmodule Kinoko.Lang.Codegen do
     end
   rescue
     e -> {:error, %{code: "internal", message: Exception.message(e)}}
+  catch
+    :throw, {:codegen_limit, message} -> {:error, %{code: "compile", message: message}}
   end
+
+  @doc "The most defs and tests (together) one image may hold."
+  @spec max_functions() :: pos_integer()
+  def max_functions, do: @max_functions
 
   @doc """
   The source of each `sometimes` site in `tree`, in the order written, each
@@ -207,7 +234,9 @@ defmodule Kinoko.Lang.Codegen do
   A checked expression's forms, for `:erl_eval.exprs/2` with no bindings:
   it calls the image's defs remotely (`module:dN(...)`), its models through
   `module:'__yabu__'(models)`, and the runtime through
-  `Kinoko.Lang.Rt`. `names` is the image's `names`.
+  `Kinoko.Lang.Rt`. `names` is the image's `names`. Throws
+  `{:codegen_limit, message}` when the expression needs more variables
+  than `Kinoko.Lang.Codegen.Expr.max_vars/0`.
   """
   @spec expr_forms(tuple(), map(), atom()) :: [tuple()]
   def expr_forms(typed, names, module) do

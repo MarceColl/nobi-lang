@@ -42,6 +42,7 @@ defmodule Kinoko.Lang.Codegen.Expr do
   @hooks Kinoko.Exec.Hooks
   @i64_min -9_223_372_036_854_775_808
   @i64_max 9_223_372_036_854_775_807
+  @max_vars 10_000
 
   @typedoc """
   `n` is the next variable's number, `env` each local's variable, `names`
@@ -97,14 +98,37 @@ defmodule Kinoko.Lang.Codegen.Expr do
   defp scoped(outer, inner), do: %{outer | n: inner.n}
 
   defp bind(ctx, name) do
-    v = :"V#{ctx.n}"
+    v = next_var!(ctx)
     {{:var, @a, v}, %{ctx | n: ctx.n + 1, env: Map.put(ctx.env, name, v)}}
   end
 
   defp fresh(ctx) do
-    v = :"V#{ctx.n}"
+    v = next_var!(ctx)
     {{:var, @a, v}, %{ctx | n: ctx.n + 1}}
   end
+
+  # The variable numbered `ctx.n`, refused past the cap before its atom is
+  # made: every function names its variables `V0`, `V1`, … afresh, so no
+  # program, however large, adds atoms beyond `V0`..`V#{@max_vars - 1}`.
+  defp next_var!(%{n: n} = ctx) when n >= @max_vars do
+    where = if ctx.decl, do: "`#{ctx.decl}`", else: "the expression"
+
+    throw(
+      {:codegen_limit,
+       "#{where} needs more than #{@max_vars} Erlang variables (the limit per " <>
+         "compiled function); split it into smaller defs"}
+    )
+  end
+
+  defp next_var!(%{n: n}), do: :"V#{n}"
+
+  @doc """
+  The most Erlang variables one compiled function may use. Lowering past
+  it throws `{:codegen_limit, message}`, which `Kinoko.Lang.Codegen`
+  answers as a `"compile"` error.
+  """
+  @spec max_vars() :: pos_integer()
+  def max_vars, do: @max_vars
 
   # ---------- expressions ----------
 

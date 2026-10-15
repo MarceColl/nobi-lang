@@ -222,6 +222,8 @@ defmodule Kinoko.Exec do
     {:ok, Codegen.expr_forms(typed, image.names, image.module)}
   rescue
     e -> {:error, %{code: "internal", message: Exception.message(e)}}
+  catch
+    :throw, {:codegen_limit, message} -> {:error, %{code: "compile", message: message}}
   end
 
   defp erl_eval(forms) do

@@ -147,6 +147,43 @@ defmodule Kinoko.Lang.CodegenTest do
 
   defp atoms(_), do: []
 
+  describe "caps on generated atoms" do
+    # A def binding `n` locals, each one Erlang variable.
+    defp bindings(n) do
+      stmts = Enum.map_join(0..(n - 1), "\n", &"  x#{&1} = #{&1}")
+      "def Big.f() : Int do\n#{stmts}\n  0\nend\n"
+    end
+
+    test "a def may use up to max_vars variables, and is refused past it" do
+      max = Codegen.Expr.max_vars()
+      assert max == 10_000
+      assert {:ok, image} = bindings(max) |> universe() |> Lang.image()
+      assert load(image) |> apply(:d0, []) == 0
+
+      assert {:error, %{code: "compile", message: message}} =
+               bindings(max + 1) |> universe() |> Lang.image()
+
+      assert message =~ "`Big.f` needs more than 10000 Erlang variables"
+      # The refusal came before the atom past the cap was made.
+      assert_raise ArgumentError, fn -> String.to_existing_atom("V#{max}") end
+    end
+
+    test "an image of more than max_functions defs and tests is refused before naming them" do
+      max = Codegen.max_functions()
+      assert max == 20_000
+
+      committed =
+        for i <- 0..max, into: %{} do
+          name = "Many.f#{i}"
+          {name, %{cid: "c#{i}", typed: {:def, [], [name, [], :int, {:int, [], [0]}]}}}
+        end
+
+      assert {:error, %{code: "compile", message: message}} = Codegen.compile(committed)
+      assert message =~ "20001 defs and tests; at most 20000"
+      assert_raise ArgumentError, fn -> String.to_existing_atom("d#{max}") end
+    end
+  end
+
   describe "the image module" do
     test "__yabu__ answers names, image, models, types and tests" do
       image = image!(@split)

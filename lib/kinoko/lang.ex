@@ -245,8 +245,10 @@ defmodule Kinoko.Lang do
   `{:ok, %{module:, binary:, hash:, names:, tests:, sometimes:}}`, where
   `names` is `%{def => {fun, arity}}`, `tests` `%{test => fun}` and
   `sometimes` `%{test => [source]}` (the `sometimes` sites each test
-  writes); or `{:error, %{code: "compile" | "internal", message: m}}`.
-  Nothing is loaded (`Kinoko.Exec.load/1` loads).
+  writes); or `{:error, %{code: "compile" | "internal", message: m}}`,
+  `"compile"` also when the code is past a cap (more than 20_000 defs and
+  tests, or a def needing more than 10_000 Erlang variables). Nothing is
+  loaded (`Kinoko.Exec.load/1` loads).
   """
   @spec image(Universe.t()) :: {:ok, map()} | {:error, %{code: String.t(), message: String.t()}}
   def image(u), do: u |> committed() |> Codegen.compile()
