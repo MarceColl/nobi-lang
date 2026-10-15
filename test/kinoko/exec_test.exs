@@ -818,6 +818,42 @@ defmodule Kinoko.ExecTest do
       assert value(doubled.("x10 == x10")) == true
     end
 
+    # Rust's `Function` equality: `=:=` would compare two closures'
+    # captured environments, as large as they come, without yielding.
+    test "a closure equals nothing; a def or constructor equals only itself" do
+      element = String.duplicate("List<", 29) <> "Int" <> String.duplicate(">", 29)
+
+      src = """
+      def A.mk(x : #{element}) : (Int -> Int) do fn (k : Int) -> k + List.length(x) end end
+      def A.f(n : Int) : Int do n end
+      def A.same(g : (Int -> Int)) : Bool do g == g end
+      deftype A.Box do Full(Int) | Empty end
+      """
+
+      bind = fn v ->
+        Enum.map_join(1..28, "\n", fn i -> "  #{v}#{i} = [#{v}#{i - 1}, #{v}#{i - 1}]" end)
+      end
+
+      apart = &"do\n  x0 = [1]\n  y0 = [1]\n#{bind.("x")}\n#{bind.("y")}\n  #{&1}\nend"
+
+      for expr <- ["A.mk(x28) == A.mk(y28)", "List.member([A.mk(x28)], A.mk(y28))"] do
+        {us, result} = :timer.tc(fn -> Exec.eval(universe(src), apart.(expr), timeout: 100) end)
+        assert {:ok, false, _} = result, expr
+        assert us < 100_000, "#{expr}: #{us} µs"
+      end
+
+      assert value_in(src, "A.mk(x28) != A.mk(y28)" |> apart.()) == true
+      assert value_in(src, "A.same(fn (n : Int) -> n end)") == false
+      assert value_in(src, "A.same(A.f)") == true
+      assert value_in(src, "A.f == A.f") == true
+      assert value_in(src, "[A.f] == [A.f]") == true
+      assert value_in(src, "String.length == String.length") == true
+      assert value_in(src, "A.Box.Full == A.Box.Full") == true
+      assert value_in(src, "(1, A.Box.Full) == (1, A.Box.Full)") == true
+      assert value_in(src, "List.member([A.f], A.f)") == true
+      assert value_in(src, "List.member([fn (n : Int) -> n end], A.f)") == false
+    end
+
     test "a map key too large to compare runs out of steps" do
       binds = Enum.map_join(1..40, "\n", fn i -> "  x#{i} = [x#{i - 1}, x#{i - 1}]" end)
       doubled = &"do\n  x0 = [1]\n#{binds}\n  #{&1}\nend"
@@ -826,6 +862,12 @@ defmodule Kinoko.ExecTest do
                "evaluation took more than 1000000 steps"
 
       assert value(doubled.("%{x2 => 1, x2 => 2}")) == value("%{[[[1], [1]], [[1], [1]]] => 2}")
+    end
+
+    test "a deadline kill is a timeout, never the heap limit" do
+      # The reason the guardian kills a worker with at its deadline.
+      assert {:error, %{code: "timeout"}} =
+               Kinoko.Exec.Worker.run(fn -> Process.exit(self(), :kinoko_deadline) end)
     end
 
     test "a fault that is no Yabu error is internal" do

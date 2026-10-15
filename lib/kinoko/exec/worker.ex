@@ -27,6 +27,7 @@ defmodule Kinoko.Exec.Worker do
   @bytes_per_node 64
 
   @unloaded :kinoko_exec_unloaded
+  @deadline :kinoko_deadline
 
   @type error :: %{code: String.t(), message: String.t()}
 
@@ -70,6 +71,9 @@ defmodule Kinoko.Exec.Worker do
       {:DOWN, ^monitor, :process, ^pid, :killed} ->
         {:error, %{code: "heap", message: "evaluation used more than #{heap} words of memory"}}
 
+      {:DOWN, ^monitor, :process, ^pid, @deadline} ->
+        timed_out(timeout)
+
       {:DOWN, ^monitor, :process, ^pid, @unloaded} ->
         {:error, %{code: "unloaded", message: "the image was unloaded while it ran"}}
 
@@ -90,9 +94,12 @@ defmodule Kinoko.Exec.Worker do
           0 -> :ok
         end
 
-        {:error, %{code: "timeout", message: "evaluation took more than #{timeout} ms"}}
+        timed_out(timeout)
     end
   end
+
+  defp timed_out(timeout),
+    do: {:error, %{code: "timeout", message: "evaluation took more than #{timeout} ms"}}
 
   @doc """
   The exit reason `Kinoko.Exec.unload/1` stops a worker running the
@@ -113,7 +120,9 @@ defmodule Kinoko.Exec.Worker do
         {:DOWN, ^worker, :process, _, _} -> :ok
         {:DOWN, ^owner, :process, _, _} -> Process.exit(pid, :kill)
       after
-        timeout -> Process.exit(pid, :kill)
+        # A reason of its own (the worker traps no exits), so the caller
+        # never reads a guardian-first deadline as the heap limit's `:killed`.
+        timeout -> Process.exit(pid, @deadline)
       end
     end)
   end

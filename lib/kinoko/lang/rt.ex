@@ -53,6 +53,10 @@ defmodule Kinoko.Lang.Rt do
 
   @type value :: term()
 
+  # The walk budget (see "the walk budget" below).
+  @budget 1_000_000
+  @bytes_per_step 64
+
   defguardp is_i64(n) when is_integer(n) and n >= @i64_min and n <= @i64_max
 
   # ---------- errors ----------
@@ -88,14 +92,112 @@ defmodule Kinoko.Lang.Rt do
 
   # ---------- equality and order ----------
 
-  @doc "Yabu `==`: structural, within the walk budget (`charge_comparison/2`)."
+  @doc """
+  Yabu `==`: structural, within the walk budget (`charge_comparison/2`),
+  with Rust's rule for functions (`fun_eq/2`). Values holding no function
+  compare with `=:=`; any other pair is walked in ordinary code, so `=:=`
+  never meets a closure (it would compare captured environments, however
+  large, without yielding).
+  """
   def eq(a, b) when is_number(a) or is_atom(a) or is_number(b) or is_atom(b), do: a === b
   def eq(a, b) when is_binary(a) and is_binary(b), do: a === b
+  def eq({:uuid, a}, {:uuid, b}), do: a === b
+  def eq(a, b) when is_function(a) and is_function(b), do: fun_eq(a, b)
 
   def eq(a, b) do
-    charge_comparison(a, b)
-    a === b
+    {wa, fa} = scan(a, @budget + 1)
+    {wb, fb} = scan(b, @budget + 1)
+    if min(wa, wb) > @budget, do: out_of_steps!()
+
+    # A scan cut short at the budget may have missed a function.
+    if fa or fb or max(wa, wb) > @budget,
+      do: deep_eq([{a, b}]),
+      else: a === b
   end
+
+  # Pairs to compare, walked side by side: never deeper into either than the
+  # other goes, so no further than the lighter one's weight.
+  defp deep_eq([]), do: true
+
+  defp deep_eq([{a, b} | rest]) do
+    case {a, b} do
+      {f, g} when is_function(f) and is_function(g) ->
+        fun_eq(f, g) and deep_eq(rest)
+
+      {f, g} when is_function(f) or is_function(g) ->
+        false
+
+      {[x | xs], [y | ys]} ->
+        deep_eq([{x, y}, {xs, ys} | rest])
+
+      {l, m} when is_list(l) and is_list(m) ->
+        l === m and deep_eq(rest)
+
+      {m, n} when is_map(m) and is_map(n) ->
+        map_size(m) == map_size(n) and deep_eq_entries(:maps.next(:maps.iterator(m)), n, rest)
+
+      {t, u} when is_tuple(t) and is_tuple(u) ->
+        tuple_size(t) == tuple_size(u) and
+          deep_eq(Enum.zip(Tuple.to_list(t), Tuple.to_list(u)) ++ rest)
+
+      _ ->
+        a === b and deep_eq(rest)
+    end
+  end
+
+  # A map's keys never hold functions (the checker keeps them out) and were
+  # charged when inserted, so looking one up is cheap.
+  defp deep_eq_entries(:none, _n, rest), do: deep_eq(rest)
+
+  defp deep_eq_entries({k, v, it}, n, rest) do
+    case n do
+      %{^k => w} -> deep_eq_entries(:maps.next(it), n, [{v, w} | rest])
+      _ -> false
+    end
+  end
+
+  @doc """
+  Rust's `Function` equality: a closure equals nothing, not even itself; a
+  def taken as a value (an external fun, `fun Mod:dN/K` or a stdlib
+  function) equals only the same def; a constructor taken as a value
+  (`ctor/3`'s fun) equals only the same constructor. Never compares a
+  closure's environment.
+
+  A constructor of more than 8 arguments taken as a value is built inline
+  by codegen, as a closure, so it equals nothing.
+  """
+  @spec fun_eq(fun(), fun()) :: boolean()
+  def fun_eq(f, g) do
+    case {fun_key(f), fun_key(g)} do
+      {{:closure, _, _, _}, _} -> false
+      {_, {:closure, _, _, _}} -> false
+      {k, k} -> true
+      _ -> false
+    end
+  end
+
+  # What a function is, read without its environment: `{:def, m, f, a}`,
+  # `{:ctor, owner, variant, arity}` or `{:closure, m, index, uniq}`.
+  defp fun_key(f) do
+    info = Function.info(f)
+
+    cond do
+      info[:type] == :external ->
+        {:def, info[:module], info[:name], info[:arity]}
+
+      ctor_fun?(info) ->
+        # It only builds the variant: applied to placeholders it names it.
+        {:var, owner, variant, _} = apply(f, List.duplicate(nil, info[:arity]))
+        {:ctor, owner, variant, info[:arity]}
+
+      true ->
+        {:closure, info[:module], info[:new_index], info[:new_uniq]}
+    end
+  end
+
+  defp ctor_fun?(info),
+    do:
+      info[:module] == __MODULE__ and String.starts_with?(Atom.to_string(info[:name]), "-ctor/3-")
 
   @doc "Rust's `Value` `Ord`: `:lt`, `:eq` or `:gt`, within the walk budget."
   @spec compare(value, value) :: :lt | :eq | :gt
@@ -135,9 +237,6 @@ defmodule Kinoko.Lang.Rt do
   # a walk past `step_budget/0` steps is an error, found by a preemptible
   # walk that stops at the budget.
 
-  @budget 1_000_000
-  @bytes_per_step 64
-
   @doc "The most steps one walk may take (Rust's `STEP_BUDGET`)."
   def step_budget, do: @budget
 
@@ -167,6 +266,27 @@ defmodule Kinoko.Lang.Rt do
     if weight(key, @budget + 1) * comparisons > @budget, do: out_of_steps!(), else: :ok
   end
 
+  defp fun_order(f) do
+    case fun_key(f) do
+      {:closure, m, i, u} -> {0, m, i, u}
+      {:def, m, n, a} -> {1, m, n, a}
+      {:ctor, o, v, a} -> {2, o, v, a}
+    end
+  end
+
+  # `{weight up to cap, whether a function was met}` (see `weight/2`).
+  defp scan(v, cap), do: scan([v], 0, cap, false)
+
+  defp scan(_, total, cap, fun?) when total >= cap, do: {cap, fun?}
+  defp scan([], total, _, fun?), do: {total, fun?}
+  defp scan([f | rest], total, cap, _) when is_function(f), do: scan(rest, total + 1, cap, true)
+  defp scan(stack, total, cap, fun?), do: scan_step(stack, total, cap, fun?)
+
+  defp scan_step([v | rest], total, cap, fun?) do
+    {pushed, cost} = expand(v)
+    scan(pushed ++ rest, total + cost, cap, fun?)
+  end
+
   defp ceil_log2(n), do: ceil_log2(n, 0)
   defp ceil_log2(n, k) when Bitwise.bsl(1, k) >= n, do: k
   defp ceil_log2(n, k), do: ceil_log2(n, k + 1)
@@ -189,66 +309,30 @@ defmodule Kinoko.Lang.Rt do
   ordinary code, so it yields, and stops at `cap`.
   """
   @spec weight(value, non_neg_integer()) :: non_neg_integer()
-  def weight(v, cap), do: walk([v], 0, cap)
+  def weight(v, cap), do: v |> scan(cap) |> elem(0)
 
-  defp walk(_, total, cap) when total >= cap, do: cap
-  defp walk([], total, _), do: total
-
-  defp walk([v | rest], total, cap) do
+  # What walking `v` (or a walk marker) costs, and what it leaves to walk.
+  # Markers are tagged with atoms no Yabu value holds.
+  defp expand(v) do
     case v do
-      s when is_binary(s) ->
-        walk(rest, total + 1 + Kernel.div(byte_size(s), @bytes_per_step), cap)
-
-      l when is_list(l) ->
-        walk([{:"$items", l} | rest], total + 1, cap)
-
-      {:"$items", []} ->
-        walk(rest, total, cap)
-
-      {:"$items", [x | xs]} ->
-        walk([x, {:"$items", xs} | rest], total, cap)
-
-      m when is_map(m) ->
-        walk([{:"$entries", :maps.next(:maps.iterator(m))} | rest], total + 1, cap)
-
-      {:"$entries", :none} ->
-        walk(rest, total, cap)
-
-      {:"$entries", {k, x, it}} ->
-        walk([k, x, {:"$entries", :maps.next(it)} | rest], total, cap)
-
-      {:rec, _, fields} ->
-        walk([{:"$values", :maps.next(:maps.iterator(fields))} | rest], total + 1, cap)
-
-      {:"$values", :none} ->
-        walk(rest, total, cap)
-
-      {:"$values", {_, x, it}} ->
-        walk([x, {:"$values", :maps.next(it)} | rest], total, cap)
-
-      {:var, _, _, args} ->
-        walk([{:"$items", args} | rest], total + 1, cap)
-
-      {:cmd, c} ->
-        walk([{:"$cmd", c} | rest], total + 1, cap)
-
-      {:"$cmd", {:batch, cs}} ->
-        walk(Enum.map(cs, &{:"$cmd", &1}) ++ rest, total, cap)
-
-      {:"$cmd", {:effect, _, _, args}} ->
-        walk([{:"$items", args} | rest], total, cap)
-
-      {:"$cmd", _} ->
-        walk(rest, total, cap)
-
-      {:uuid, _} ->
-        walk(rest, total + 1, cap)
-
-      t when is_tuple(t) ->
-        walk(Tuple.to_list(t) ++ rest, total + 1, cap)
-
-      _ ->
-        walk(rest, total + 1, cap)
+      s when is_binary(s) -> {[], 1 + Kernel.div(byte_size(s), @bytes_per_step)}
+      l when is_list(l) -> {[{:"$items", l}], 1}
+      {:"$items", []} -> {[], 0}
+      {:"$items", [x | xs]} -> {[x, {:"$items", xs}], 0}
+      m when is_map(m) -> {[{:"$entries", :maps.next(:maps.iterator(m))}], 1}
+      {:"$entries", :none} -> {[], 0}
+      {:"$entries", {k, x, it}} -> {[k, x, {:"$entries", :maps.next(it)}], 0}
+      {:rec, _, fields} -> {[{:"$values", :maps.next(:maps.iterator(fields))}], 1}
+      {:"$values", :none} -> {[], 0}
+      {:"$values", {_, x, it}} -> {[x, {:"$values", :maps.next(it)}], 0}
+      {:var, _, _, args} -> {[{:"$items", args}], 1}
+      {:cmd, c} -> {[{:"$cmd", c}], 1}
+      {:"$cmd", {:batch, cs}} -> {Enum.map(cs, &{:"$cmd", &1}), 0}
+      {:"$cmd", {:effect, _, _, args}} -> {[{:"$items", args}], 0}
+      {:"$cmd", _} -> {[], 0}
+      {:uuid, _} -> {[], 1}
+      t when is_tuple(t) -> {Tuple.to_list(t), 1}
+      _ -> {[], 1}
     end
   end
 
@@ -283,7 +367,9 @@ defmodule Kinoko.Lang.Rt do
     end)
   end
 
-  defp same_kind(9, a, b), do: order(a, b)
+  # Rust orders closures before defs and constructors; here closures by
+  # their code's identity, the rest by what they name. Never by environment.
+  defp same_kind(9, a, b), do: order(fun_order(a), fun_order(b))
   defp same_kind(10, {:cmd, a}, {:cmd, b}), do: bare_cmd(a, b)
 
   # Rust's `Cmd` Ord: None < Batch < Effect, then their parts.

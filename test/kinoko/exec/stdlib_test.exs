@@ -105,16 +105,15 @@ defmodule Kinoko.Exec.StdlibTest do
     assert got == {[1], [1, 2, 3], [1, 2, 3, 4, 1, 2, 3]}
   end
 
-  # A known divergence (spec, "Equality"): on the BEAM the same closure is
-  # equal to itself, where Rust's closure equals nothing.
-  test "List.member finds a def; a closure is BEAM fun equality" do
+  # As Rust: a closure equals nothing, not even itself.
+  test "List.member finds a def, and no closure, as equality does" do
     src = """
     def A.f(n : Int) : Int do n end
     def A.has(f : (Int -> Int)) : Bool do List.member([f], f) end
     """
 
     assert value_in(src, "A.has(A.f)") == true
-    assert value_in(src, "A.has(fn (n : Int) -> n end)") == true
+    assert value_in(src, "A.has(fn (n : Int) -> n end)") == false
   end
 
   @effects ~S"""
