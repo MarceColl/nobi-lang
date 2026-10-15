@@ -79,6 +79,12 @@ defmodule Kinoko.Lang.RoutesTest do
       assert fail(~s(defroutes A do\n  "/a b" -> A.B\nend)) =~
                ~r/^2:3: route pattern "\/a b" has segment "a b"/
 
+      assert fail(~s(defroutes A do\n  "/a/.." -> A.B\nend)) =~
+               ~r/^2:3: route pattern "\/a\/\.\." has segment "\.\."/
+
+      assert fail(~s(defroutes A do\n  "/." -> A.B\nend)) =~ ~r/has segment "\."/
+      assert {:ok, _} = Parser.program(~s(defroutes A do "/v1.2/a..b" -> A.B end))
+
       assert fail(~s(defroutes A do\n  "/:id/:id" -> A.B\nend)) =~
                ~r/^2:3: route pattern "\/:id\/:id" names parameter `id` twice/
     end
@@ -123,6 +129,9 @@ defmodule Kinoko.Lang.RoutesTest do
 
   # ---------- checking ----------
 
+  # forum.yabu (Yabu has no comments, so its notes live here): topics would
+  # come from the store, whose effects do not run yet, so the thread list
+  # starts empty and `Forum.Post` is reachable only by its URL, "/post/:id".
   @fixture File.read!("test/fixtures/yabu/forum.yabu")
 
   # A one-model app `name` whose init takes `params` (source text).
@@ -348,6 +357,13 @@ defmodule Kinoko.Lang.RoutesTest do
       assert [{"bad-navigate", m}] = errors(c, "A.go")
       assert m =~ "`n : Int`"
       assert m =~ "String"
+    end
+
+    test "refuses an argument whose type can never be the parameter's" do
+      c = check(navigating("id : Uuid", "Cmd.navigate(T, [])"))
+      assert [{"bad-navigate", m}] = errors(c, "A.go")
+      assert m =~ "`id : Uuid`"
+      assert m =~ "List<"
     end
 
     test "refuses a first argument that is not an app" do

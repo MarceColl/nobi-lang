@@ -212,12 +212,15 @@ defmodule Kinoko.Lang.RtTest do
 
   describe "function_for" do
     test "every stdlib def has a function of its arity, named by its snake-cased name" do
-      for {name, {:def, params, _}} <- Sigs.signatures() do
-        assert {Stdlib, fun, arity} = Stdlib.function_for(name), name
-        assert arity == length(params), name
-        assert Atom.to_string(fun) == name |> String.replace(".", "_") |> String.downcase()
-        assert function_exported?(Stdlib, fun, arity), name
-      end
+      checked =
+        for {name, {:def, params, _, _}} <- Sigs.signatures() do
+          assert {Stdlib, fun, arity} = Stdlib.function_for(name), name
+          assert arity == length(params), name
+          assert Atom.to_string(fun) == name |> String.replace(".", "_") |> String.downcase()
+          assert function_exported?(Stdlib, fun, arity), name
+        end
+
+      assert length(checked) > 60
 
       assert Stdlib.function_for("List.map") == {Stdlib, :list_map, 2}
       assert Stdlib.function_for("Option.with_default") == {Stdlib, :option_with_default, 2}

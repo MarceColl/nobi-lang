@@ -508,6 +508,9 @@ defmodule Kinoko.Lang.Parser do
         {:error,
          "has `:` inside segment #{inspect(part)} — a parameter is a whole segment, as in \"/post/:id\""}
 
+      part in [".", ".."] ->
+        {:error, "has segment #{inspect(part)} — `.` and `..` are not route segments"}
+
       Regex.match?(~r/\A[A-Za-z0-9_.~-]+\z/, part) ->
         {:ok, {:lit, part}}
 

@@ -197,16 +197,23 @@ defmodule Kinoko.Lang.Types.Routes do
   defp needs, do: "`Cmd.navigate` opens a `defapp` with its init's arguments, as in #{@example}"
 
   # An argument of exactly its parameter's type; one still open is unified
-  # with it.
+  # with it when it can be.
   defp navigate_arg(ctx, e, app, arg, {n, t}) do
     {s, ctx} = Check.synth(ctx, arg)
     {resolved, ctx} = Ctx.resolve_deep(ctx, ty(s), fn -> Quote.expr(arg) end)
+
+    # Tried on a copy: a type still open that can never be `t` is this
+    # form's error, not the generic mismatch.
+    fits? =
+      resolved == t or
+        (Infer.contains_uvar?(resolved) and
+           match?({:ok, _}, Infer.unify(ctx.infer, ty(s), t, arg)))
 
     cond do
       resolved == t ->
         {s, ctx}
 
-      Infer.contains_uvar?(resolved) ->
+      fits? ->
         {s, Ctx.unify!(ctx, ty(s), t, arg)}
 
       true ->
