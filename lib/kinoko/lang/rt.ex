@@ -32,7 +32,10 @@ defmodule Kinoko.Lang.Rt do
 
   ## Equality and order
 
-  `eq/2` is `===` (Erlang `=:=`): structural, a map's order ignored. Rust says a closure
+  `eq/2` is `===` (Erlang `=:=`): structural, a map's order ignored. It,
+  `compare/2` and a map literal's keys (`map_from_list/1`) are charged by
+  weight first (see "the walk budget" below): past a million steps they
+  throw Rust's `"evaluation took more than 1000000 steps"`. Rust says a closure
   equals nothing (not even itself); here funs compare by Erlang's fun
   equality. The checker keeps functions out of map keys, so the difference
   shows only for `==` on closures.
@@ -85,17 +88,20 @@ defmodule Kinoko.Lang.Rt do
 
   # ---------- equality and order ----------
 
-  @doc "Yabu `==`: structural."
-  def eq(a, b), do: a === b
+  @doc "Yabu `==`: structural, within the walk budget (`charge_comparison/2`)."
+  def eq(a, b) when is_number(a) or is_atom(a) or is_number(b) or is_atom(b), do: a === b
+  def eq(a, b) when is_binary(a) and is_binary(b), do: a === b
 
-  @doc "Rust's `Value` `Ord`: `:lt`, `:eq` or `:gt`."
+  def eq(a, b) do
+    charge_comparison(a, b)
+    a === b
+  end
+
+  @doc "Rust's `Value` `Ord`: `:lt`, `:eq` or `:gt`, within the walk budget."
   @spec compare(value, value) :: :lt | :eq | :gt
   def compare(a, b) do
-    case {kind(a), kind(b)} do
-      {k, k} -> same_kind(k, a, b)
-      {k, j} when k < j -> :lt
-      _ -> :gt
-    end
+    charge_comparison(a, b)
+    cmp(a, b)
   end
 
   @doc "`compare(a, b) != :gt`: a sorter for `Enum.sort/2`."
@@ -104,6 +110,146 @@ defmodule Kinoko.Lang.Rt do
   @doc "A map's entries in Yabu key order (`compare/2`)."
   def sorted_entries(map) when is_map(map) do
     map |> Map.to_list() |> Enum.sort(fn {a, _}, {b, _} -> le(a, b) end)
+  end
+
+  # Within a comparison already charged.
+  defp sorted(map),
+    do: map |> Map.to_list() |> Enum.sort(fn {a, _}, {b, _} -> cmp(a, b) != :gt end)
+
+  defp cmp(a, b) do
+    case {kind(a), kind(b)} do
+      {k, k} -> same_kind(k, a, b)
+      {k, j} when k < j -> :lt
+      _ -> :gt
+    end
+  end
+
+  # ---------- the walk budget ----------
+
+  # Comparing two values, hashing a map key and handing a result back walk
+  # them whole, however much of them is shared: `x40 = [x39, x39]` is forty
+  # nodes in memory and 2^40 to walk. Erlang's `=:=` and map hashing are
+  # BIFs that never yield, so a walk that long would hold a scheduler past
+  # any timeout. As Rust charges such a walk by the value's weight
+  # (`program.rs`'s `weight`, `eval.rs`'s `charge_comparison`), so does this:
+  # a walk past `step_budget/0` steps is an error, found by a preemptible
+  # walk that stops at the budget.
+
+  @budget 1_000_000
+  @bytes_per_step 64
+
+  @doc "The most steps one walk may take (Rust's `STEP_BUDGET`)."
+  def step_budget, do: @budget
+
+  @doc "Rust's error for a walk past the budget."
+  @spec out_of_steps!() :: no_return()
+  def out_of_steps!, do: error!("evaluation took more than #{@budget} steps")
+
+  @doc """
+  Throws `out_of_steps!/0` when comparing `a` with `b` would walk more than
+  the budget: at most the lighter one's weight, as Rust charges it.
+  """
+  @spec charge_comparison(value, value) :: :ok
+  def charge_comparison(a, b) do
+    if weight(b, weight(a, @budget + 1)) > @budget, do: out_of_steps!(), else: :ok
+  end
+
+  @doc """
+  Throws `out_of_steps!/0` when inserting `key` into a map of `len` keys
+  would walk more than the budget: `Ord` compares it with up to
+  ⌈log2(len + 1)⌉ + 1 keys (Rust's `charge_insertion`).
+  """
+  @spec charge_insertion(value, non_neg_integer()) :: :ok
+  def charge_insertion(key, _len) when is_number(key) or is_atom(key), do: :ok
+
+  def charge_insertion(key, len) do
+    comparisons = ceil_log2(len + 1) + 1
+    if weight(key, @budget + 1) * comparisons > @budget, do: out_of_steps!(), else: :ok
+  end
+
+  defp ceil_log2(n), do: ceil_log2(n, 0)
+  defp ceil_log2(n, k) when Bitwise.bsl(1, k) >= n, do: k
+  defp ceil_log2(n, k), do: ceil_log2(n, k + 1)
+
+  @doc """
+  A map literal's pairs, a later key replacing an earlier one, each key
+  charged as an insertion (`charge_insertion/2`) before it is hashed.
+  """
+  @spec map_from_list([{value, value}]) :: map()
+  def map_from_list(pairs) do
+    Enum.reduce(pairs, %{}, fn {k, v}, acc ->
+      charge_insertion(k, map_size(acc))
+      Map.put(acc, k, v)
+    end)
+  end
+
+  @doc """
+  `v`'s weight (Rust's `weight`), up to `cap`: a node per value, a string
+  one more per #{@bytes_per_step} bytes. Walked with an explicit stack in
+  ordinary code, so it yields, and stops at `cap`.
+  """
+  @spec weight(value, non_neg_integer()) :: non_neg_integer()
+  def weight(v, cap), do: walk([v], 0, cap)
+
+  defp walk(_, total, cap) when total >= cap, do: cap
+  defp walk([], total, _), do: total
+
+  defp walk([v | rest], total, cap) do
+    case v do
+      s when is_binary(s) ->
+        walk(rest, total + 1 + Kernel.div(byte_size(s), @bytes_per_step), cap)
+
+      l when is_list(l) ->
+        walk([{:"$items", l} | rest], total + 1, cap)
+
+      {:"$items", []} ->
+        walk(rest, total, cap)
+
+      {:"$items", [x | xs]} ->
+        walk([x, {:"$items", xs} | rest], total, cap)
+
+      m when is_map(m) ->
+        walk([{:"$entries", :maps.next(:maps.iterator(m))} | rest], total + 1, cap)
+
+      {:"$entries", :none} ->
+        walk(rest, total, cap)
+
+      {:"$entries", {k, x, it}} ->
+        walk([k, x, {:"$entries", :maps.next(it)} | rest], total, cap)
+
+      {:rec, _, fields} ->
+        walk([{:"$values", :maps.next(:maps.iterator(fields))} | rest], total + 1, cap)
+
+      {:"$values", :none} ->
+        walk(rest, total, cap)
+
+      {:"$values", {_, x, it}} ->
+        walk([x, {:"$values", :maps.next(it)} | rest], total, cap)
+
+      {:var, _, _, args} ->
+        walk([{:"$items", args} | rest], total + 1, cap)
+
+      {:cmd, c} ->
+        walk([{:"$cmd", c} | rest], total + 1, cap)
+
+      {:"$cmd", {:batch, cs}} ->
+        walk(Enum.map(cs, &{:"$cmd", &1}) ++ rest, total, cap)
+
+      {:"$cmd", {:effect, _, _, args}} ->
+        walk([{:"$items", args} | rest], total, cap)
+
+      {:"$cmd", _} ->
+        walk(rest, total, cap)
+
+      {:uuid, _} ->
+        walk(rest, total + 1, cap)
+
+      t when is_tuple(t) ->
+        walk(Tuple.to_list(t) ++ rest, total + 1, cap)
+
+      _ ->
+        walk(rest, total + 1, cap)
+    end
   end
 
   defp kind(v) when is_integer(v), do: 0
@@ -120,9 +266,9 @@ defmodule Kinoko.Lang.Rt do
 
   defp same_kind(k, a, b) when k in [0, 1, 2], do: order(a, b)
   defp same_kind(3, {:uuid, a}, {:uuid, b}), do: order(a, b)
-  defp same_kind(4, a, b), do: lexicographic(a, b, &compare/2)
-  defp same_kind(5, a, b), do: lexicographic(sorted_entries(a), sorted_entries(b), &entry/2)
-  defp same_kind(6, a, b), do: lexicographic(Tuple.to_list(a), Tuple.to_list(b), &compare/2)
+  defp same_kind(4, a, b), do: lexicographic(a, b, &cmp/2)
+  defp same_kind(5, a, b), do: lexicographic(sorted(a), sorted(b), &entry/2)
+  defp same_kind(6, a, b), do: lexicographic(Tuple.to_list(a), Tuple.to_list(b), &cmp/2)
 
   defp same_kind(7, {:rec, m, f}, {:rec, n, g}) do
     # field names are unique, so sorting the pairs sorts them by name
@@ -133,7 +279,7 @@ defmodule Kinoko.Lang.Rt do
 
   defp same_kind(8, {:var, o, v, xs}, {:var, p, w, ys}) do
     ord_then(order(o, p), fn ->
-      ord_then(order(v, w), fn -> lexicographic(xs, ys, &compare/2) end)
+      ord_then(order(v, w), fn -> lexicographic(xs, ys, &cmp/2) end)
     end)
   end
 
@@ -158,7 +304,7 @@ defmodule Kinoko.Lang.Rt do
 
   defp bare_cmd_parts({:effect, n, m, xs}, {:effect, o, p, ys}) do
     ord_then(order(n, o), fn ->
-      ord_then(model_order(m, p), fn -> lexicographic(xs, ys, &compare/2) end)
+      ord_then(model_order(m, p), fn -> lexicographic(xs, ys, &cmp/2) end)
     end)
   end
 
@@ -168,7 +314,7 @@ defmodule Kinoko.Lang.Rt do
   defp model_order(_, nil), do: :gt
   defp model_order(a, b), do: order(a, b)
 
-  defp entry({k, v}, {l, w}), do: ord_then(compare(k, l), fn -> compare(v, w) end)
+  defp entry({k, v}, {l, w}), do: ord_then(cmp(k, l), fn -> cmp(v, w) end)
 
   defp lexicographic([], [], _), do: :eq
   defp lexicographic([], _, _), do: :lt

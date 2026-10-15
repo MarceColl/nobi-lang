@@ -3,11 +3,13 @@ defmodule Kinoko.Exec.Worker do
   Runs one evaluation in a process of its own, bounded in time and memory,
   and hands back its answer or why it has none.
 
-  The worker is `spawn_monitor`ed. Inside it, `max_heap_size` is set (with
-  `kill: true` and the bytes of the binaries it holds counted, since a
-  string's bytes live off the process heap). The caller waits for the
-  answer for at most `timeout` ms, then kills the worker and waits for its
-  `DOWN`, so no worker outlives the call.
+  The worker is spawned monitored with `max_heap_size` set from its first
+  instruction (`kill: true`, the bytes of the binaries it holds counted,
+  since a string's bytes live off the process heap). The caller waits for
+  the answer for at most `timeout` ms, then kills the worker and waits for
+  its `DOWN`. A guardian process holds the same deadline independently and
+  kills the worker should the caller die first, so no worker outlives its
+  call or its caller.
 
   A worker's answer is copied into the caller, which has no heap limit of
   its own. So before handing a value back the worker weighs it, walking it
@@ -24,14 +26,17 @@ defmodule Kinoko.Exec.Worker do
   # `BYTES_PER_STEP`).
   @bytes_per_node 64
 
+  @unloaded :kinoko_exec_unloaded
+
   @type error :: %{code: String.t(), message: String.t()}
 
   @doc """
   Runs `fun` (no arguments) in a bounded worker.
 
   `{:ok, value}`, or `{:error, %{code, message}}` with code `"runtime"` (a
-  thrown `{:yabu_error, message}`), `"timeout"`, `"heap"` or `"internal"`
-  (any other crash, its message included).
+  thrown `{:yabu_error, message}`), `"timeout"`, `"heap"`, `"unloaded"`
+  (`Kinoko.Exec.unload/1` stopped it) or `"internal"` (any other crash, its
+  message included).
 
   Options: `:timeout` (ms, default #{@default_timeout}), `:max_heap_size`
   (words, default 1 GB's worth) and `:max_result` (nodes the answer may
@@ -46,27 +51,27 @@ defmodule Kinoko.Exec.Worker do
     caller = self()
     ref = make_ref()
 
+    # The heap limit holds from the worker's first instruction.
     {pid, monitor} =
-      spawn_monitor(fn ->
-        Process.flag(:max_heap_size, %{
-          size: heap,
-          kill: true,
-          error_logger: false,
-          include_shared_binaries: true
-        })
+      :erlang.spawn_opt(fn -> send(caller, {ref, evaluate(fun, max_result)}) end, [
+        :monitor,
+        {:max_heap_size,
+         %{size: heap, kill: true, error_logger: false, include_shared_binaries: true}}
+      ])
 
-        send(caller, {ref, evaluate(fun, max_result)})
-      end)
+    guard(pid, caller, timeout)
 
     receive do
       {^ref, answer} ->
         Process.demonitor(monitor, [:flush])
         answer
 
-      # Killed by its heap limit. (Purging the module it runs, which
-      # `Kinoko.Exec.unload/1` does, kills it with this reason too.)
+      # Killed by its heap limit.
       {:DOWN, ^monitor, :process, ^pid, :killed} ->
         {:error, %{code: "heap", message: "evaluation used more than #{heap} words of memory"}}
+
+      {:DOWN, ^monitor, :process, ^pid, @unloaded} ->
+        {:error, %{code: "unloaded", message: "the image was unloaded while it ran"}}
 
       {:DOWN, ^monitor, :process, ^pid, reason} ->
         {:error, %{code: "internal", message: "the evaluation died: #{inspect(reason)}"}}
@@ -87,6 +92,30 @@ defmodule Kinoko.Exec.Worker do
 
         {:error, %{code: "timeout", message: "evaluation took more than #{timeout} ms"}}
     end
+  end
+
+  @doc """
+  The exit reason `Kinoko.Exec.unload/1` stops a worker running the
+  unloaded image with; the caller then answers code `"unloaded"`.
+  """
+  def unloaded_reason, do: @unloaded
+
+  # The worker's deadline, kept by a guardian of its own rather than by the
+  # caller alone: should the caller die (killed, or its own process timed
+  # out) the worker dies with it, and in any case at the deadline. The
+  # guardian ends when the worker does.
+  defp guard(pid, caller, timeout) do
+    spawn(fn ->
+      worker = Process.monitor(pid)
+      owner = Process.monitor(caller)
+
+      receive do
+        {:DOWN, ^worker, :process, _, _} -> :ok
+        {:DOWN, ^owner, :process, _, _} -> Process.exit(pid, :kill)
+      after
+        timeout -> Process.exit(pid, :kill)
+      end
+    end)
   end
 
   defp evaluate(fun, max_result) do
@@ -121,8 +150,12 @@ defmodule Kinoko.Exec.Worker do
       l when is_list(l) ->
         weigh_list(l, rest, left - 1)
 
+      # Charged its size before its entries are spread on the stack.
+      m when is_map(m) and map_size(m) >= left ->
+        false
+
       m when is_map(m) ->
-        weigh(Enum.reduce(m, rest, fn {k, x}, acc -> [k, x | acc] end), left - 1)
+        weigh(Enum.reduce(m, rest, fn {k, x}, acc -> [k, x | acc] end), left - 1 - map_size(m))
 
       t when is_tuple(t) ->
         weigh(Tuple.to_list(t) ++ rest, left - 1)

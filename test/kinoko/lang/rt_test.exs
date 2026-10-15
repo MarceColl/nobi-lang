@@ -461,4 +461,43 @@ defmodule Kinoko.Lang.RtTest do
       assert Stdlib.json_stringify([1]) == {:var, "Result", "Ok", ["[1]"]}
     end
   end
+
+  describe "the walk budget" do
+    # `[x, x]` forty times over: forty-one nodes in memory, 2^41 - 1 to walk.
+    defp doubled(n), do: Enum.reduce(1..n, [1], fn _, x -> [x, x] end)
+
+    test "weight counts as Rust's does, and stops at the cap" do
+      assert Rt.weight(1, 10) == 1
+      assert Rt.weight(String.duplicate("a", 128), 10) == 3
+      assert Rt.weight([1, 2], 10) == 3
+      assert Rt.weight(%{"a" => 1}, 10) == 3
+      assert Rt.weight({:rec, "M", %{"x" => 1}}, 10) == 2
+      assert Rt.weight({:var, "O", "V", [1, 2]}, 10) == 3
+      assert Rt.weight({:cmd, {:batch, [:none, {:effect, "Cmd.time.now", nil, [1]}]}}, 10) == 2
+      assert Rt.weight(doubled(2), 100) == 11
+      assert Rt.weight(doubled(40), 1_000) == 1_000
+    end
+
+    test "eq, compare and map keys past the budget throw Rust's error" do
+      big = doubled(40)
+      out = {:yabu_error, "evaluation took more than 1000000 steps"}
+      assert catch_throw(Rt.eq(big, big)) == out
+      assert catch_throw(Rt.compare(big, doubled(40))) == out
+      assert catch_throw(Rt.map_from_list([{big, 1}])) == out
+      assert catch_throw(Rt.sorted_entries(%{big => 1, [big] => 2})) == out
+    end
+
+    test "within the budget they answer as before" do
+      assert Rt.eq(doubled(10), doubled(10))
+      assert Rt.compare(doubled(10), doubled(11)) == :lt
+
+      assert Rt.map_from_list([{"a", 1}, {"a", 2}, {doubled(3), 3}]) == %{
+               "a" => 2,
+               doubled(3) => 3
+             }
+
+      # A lighter side bounds the walk: comparing with a small value is cheap.
+      refute Rt.eq(doubled(40), [1])
+    end
+  end
 end

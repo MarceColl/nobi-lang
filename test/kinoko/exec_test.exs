@@ -82,6 +82,45 @@ defmodule Kinoko.ExecTest do
     end
   end
 
+  # As `spawned_during/1`, for the processes `pid` spawns.
+  defp spawned_by(pid, f) do
+    tracer = spawn_link(fn -> collect_spawns([]) end)
+    1 = :erlang.trace(pid, true, [:procs, {:tracer, tracer}])
+    result = f.()
+    me = self()
+    send(tracer, {:spawned, me})
+
+    receive do
+      {:spawned, pids} -> {result, pids}
+    end
+  end
+
+  # Returns once some process runs `module`'s code.
+  defp wait_until_running(module, tries \\ 500) do
+    running? =
+      Enum.any?(Process.list(), fn pid ->
+        match?({:current_function, {^module, _, _}}, Process.info(pid, :current_function))
+      end)
+
+    cond do
+      running? ->
+        :ok
+
+      tries == 0 ->
+        flunk("nothing runs #{module}")
+
+      true ->
+        Process.sleep(10)
+        wait_until_running(module, tries - 1)
+    end
+  end
+
+  # `pid` is dead, or dies within a second.
+  defp assert_gone(pid) do
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _}, 1_000
+  end
+
   defp collect_spawns(acc) do
     receive do
       {:trace, _, :spawn, pid, _} -> collect_spawns([pid | acc])
@@ -662,8 +701,9 @@ defmodule Kinoko.ExecTest do
       for name <- ["A.loop", "A.ping"] do
         {result, spawned} = spawned_during(fn -> Exec.call(u, name, [0], timeout: 50) end)
         assert {:error, %{code: "timeout", message: _}} = result
-        assert [pid] = spawned
-        refute Process.alive?(pid)
+        # The worker and its guardian, both gone.
+        assert length(spawned) == 2
+        Enum.each(spawned, &assert_gone/1)
       end
 
       assert {:error, %{code: "timeout"}} = Exec.eval(u, "A.fib(40)", timeout: 50)
@@ -673,13 +713,14 @@ defmodule Kinoko.ExecTest do
     test "a runaway allocation is killed at the heap limit, and the worker is gone" do
       u = universe(@loops)
 
-      {result, [pid]} =
+      {result, spawned} =
         spawned_during(fn ->
           Exec.call(u, "A.grow", [10_000_000, []], max_heap_size: 200_000, timeout: 5_000)
         end)
 
       assert {:error, %{code: "heap", message: _}} = result
-      refute Process.alive?(pid)
+      assert length(spawned) == 2
+      Enum.each(spawned, &assert_gone/1)
 
       assert {:error, %{code: "heap"}} =
                Exec.call(u, "A.deep", [0], max_heap_size: 200_000, timeout: 5_000)
@@ -687,6 +728,41 @@ defmodule Kinoko.ExecTest do
       # A string's bytes live off the process heap: they count too.
       assert {:error, %{code: "heap"}} =
                Exec.call(u, "A.twice", ["x", 60], max_heap_size: 200_000, timeout: 5_000)
+    end
+
+    test "a worker dies with its caller, long before its own deadline" do
+      u = universe(@loops)
+      test = self()
+
+      caller =
+        spawn(fn ->
+          receive do
+            :go -> send(test, {:result, Exec.call(u, "A.loop", [0], timeout: 60_000)})
+          end
+        end)
+
+      {_, spawned} =
+        spawned_by(caller, fn ->
+          send(caller, :go)
+          {:ok, image} = Exec.load(u)
+          wait_until_running(image.module)
+          Process.exit(caller, :kill)
+          assert_gone(caller)
+        end)
+
+      # The worker and its guardian.
+      assert length(spawned) == 2
+      Enum.each(spawned, &assert_gone/1)
+      refute_received {:result, _}
+    end
+
+    test "a worker stopped by unload answers unloaded" do
+      u = universe("def Unl.loop(n : Int) : Int do Unl.loop(n + 1) end")
+      {:ok, image} = Exec.load(u)
+      task = Task.async(fn -> Exec.call(image, "Unl.loop", [0], timeout: 10_000) end)
+      wait_until_running(image.module)
+      assert Exec.unload(image) == :ok
+      assert {:error, %{code: "unloaded"}} = Task.await(task)
     end
 
     test "deep recursion within the limits runs" do
@@ -700,6 +776,9 @@ defmodule Kinoko.ExecTest do
       doubled = &"do\n  x0 = [1]\n#{binds}\n  #{&1}\nend"
 
       assert error_in("", doubled.("x40")) == "result too large"
+      # A huge map is charged its size before its entries are walked.
+      assert {:error, %{code: "runtime", message: "result too large"}} =
+               Kinoko.Exec.Worker.run(fn -> Map.new(1..1_000_001, &{&1, &1}) end)
 
       element = String.duplicate("List<", 40) <> "Int" <> String.duplicate(">", 40)
       assert value(doubled.("List.map(x40, fn (x : #{element}) -> 1 end)")) == [1, 1]
@@ -714,6 +793,39 @@ defmodule Kinoko.ExecTest do
       leaf = var("A.T", "Leaf")
       assert call(src, "A.grow", [leaf, 60]) == {:error, "result too large"}
       assert call(src, "A.grow", [leaf, 1]) == {:ok, var("A.T", "Node", [leaf, leaf])}
+    end
+
+    # kinoko-next interp_eval.rs: `=:=` and map hashing never yield, so a
+    # value too large to walk is refused before it is compared or hashed.
+    test "comparing a value too large to walk runs out of steps" do
+      binds = Enum.map_join(1..40, "\n", fn i -> "  x#{i} = [x#{i - 1}, x#{i - 1}]" end)
+      doubled = &"do\n  x0 = [1]\n#{binds}\n  #{&1}\nend"
+      out_of_steps = "evaluation took more than 1000000 steps"
+
+      {us, message} = :timer.tc(fn -> error_in("", doubled.("x40 == x40")) end)
+      assert message == out_of_steps
+      assert us < 3_000_000
+      assert error_in("", doubled.("x40 != x40")) == out_of_steps
+      assert error_in("", doubled.("List.member([x40], x40)")) == out_of_steps
+
+      # Two values built apart, each 2^30 elements to walk.
+      ys = Enum.map_join(1..30, "\n", fn i -> "  y#{i} = [y#{i - 1}, y#{i - 1}]" end)
+      apart = "do\n  x0 = [1]\n  y0 = [1]\n#{binds}\n#{ys}\n  x30 == y30\nend"
+      {us, message} = :timer.tc(fn -> error_in("", apart) end)
+      assert message == out_of_steps
+      assert us < 3_000_000
+
+      assert value(doubled.("x10 == x10")) == true
+    end
+
+    test "a map key too large to compare runs out of steps" do
+      binds = Enum.map_join(1..40, "\n", fn i -> "  x#{i} = [x#{i - 1}, x#{i - 1}]" end)
+      doubled = &"do\n  x0 = [1]\n#{binds}\n  #{&1}\nend"
+
+      assert error_in("", doubled.("%{x40 => 1, x40 => 2}")) ==
+               "evaluation took more than 1000000 steps"
+
+      assert value(doubled.("%{x2 => 1, x2 => 2}")) == value("%{[[[1], [1]], [[1], [1]]] => 2}")
     end
 
     test "a fault that is no Yabu error is internal" do

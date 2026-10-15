@@ -127,10 +127,11 @@ defmodule Kinoko.Lang.Codegen.Expr do
   def expr({:map, _, entries}, ctx) do
     parts = Enum.flat_map(entries, fn {k, v} -> [{:e, k}, {:e, v}] end)
 
-    # A later key replaces an earlier one, as Rust's insertions do.
+    # A later key replaces an earlier one, as Rust's insertions do; each
+    # key is charged by its weight before it is hashed (`Rt.map_from_list/1`).
     seq(parts, ctx, fn fs ->
       pairs = fs |> Enum.chunk_every(2) |> Enum.map(fn [k, v] -> {:tuple, @a, [k, v]} end)
-      remote(:maps, :from_list, [List.foldr(pairs, {nil, @a}, &{:cons, @a, &1, &2})])
+      rt(:map_from_list, [List.foldr(pairs, {nil, @a}, &{:cons, @a, &1, &2})])
     end)
   end
 
@@ -247,8 +248,10 @@ defmodule Kinoko.Lang.Codegen.Expr do
     {:map, @a, assocs}
   end
 
-  defp binary(:==, l, r), do: {:op, @a, :"=:=", l, r}
-  defp binary(:!=, l, r), do: {:op, @a, :"=/=", l, r}
+  # Through `Rt.eq/2`: `=:=` never yields, so a value too large to walk is
+  # refused before it is compared.
+  defp binary(:==, l, r), do: rt(:eq, [l, r])
+  defp binary(:!=, l, r), do: {:op, @a, :not, rt(:eq, [l, r])}
   defp binary(:<, l, r), do: {:op, @a, :<, l, r}
   defp binary(:>, l, r), do: {:op, @a, :>, l, r}
   defp binary(:<=, l, r), do: {:op, @a, :"=<", l, r}

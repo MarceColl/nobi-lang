@@ -22,6 +22,17 @@ defmodule Kinoko.Exec do
   `:persistent_term` write, which costs a global GC pass; that is paid once
   per distinct code.)
 
+  Images are never evicted automatically. Each distinct image ever loaded
+  keeps one atom (its module name, which is never freed), one loaded
+  module and one `:persistent_term` entry until `unload/1`. Whoever loads
+  images in bulk (a long-lived host stepping many versions) owns calling
+  `unload/1` for the ones no longer needed.
+
+  `unload/1` is global: the image is shared by every universe with the
+  same code, so unloading it stops every worker running it, other
+  callers' included. Those callers get `{:error, %{code: "unloaded"}}`;
+  their next `load/1` loads it again.
+
   ## Runs
 
   Every call, evaluation and test runs in a fresh worker process
@@ -32,8 +43,10 @@ defmodule Kinoko.Exec do
 
   - `"runtime"`: the program's error, worded as Rust's `EvalError`
     (`"division by zero"`, `"integer overflow"`, `"no case arm matched"`,
-    `"result too large"`, `"no def named `X`"`, …);
+    `"result too large"`, `"evaluation took more than 1000000 steps"` (a
+    comparison or map key too large to walk), `"no def named `X`"`, …);
   - `"timeout"`, `"heap"`: the worker hit a limit and was killed;
+  - `"unloaded"`: `unload/1` stopped the worker;
   - `"compile"`, `"internal"`: a fault of the codegen or the runtime;
   - for `eval/3`, `"parse"` or a checker code (`"unbound"`, `"mismatch"`,
     …) when the expression does not check; nothing is run then.
@@ -108,15 +121,37 @@ defmodule Kinoko.Exec do
   end
 
   @doc """
-  Purges the image's module and forgets it: anything still running its
-  code is killed. `:ok` whether or not it was loaded.
+  Purges the image's module and forgets it. Every worker running its code
+  (anyone's) is stopped and its caller answers code `"unloaded"`; any
+  other process still running it is killed by the purge. `:ok` whether or
+  not it was loaded.
   """
   @spec unload(image) :: :ok
   def unload(%{module: module, hash: hash}) do
+    :persistent_term.erase(key(hash))
+    # Its current code becomes old code, which `check_process_code` finds.
     :code.purge(module)
     :code.delete(module)
+
+    stopping =
+      for pid <- Process.list(),
+          pid != self(),
+          :erlang.check_process_code(pid, module) do
+        monitor = Process.monitor(pid)
+        Process.exit(pid, Worker.unloaded_reason())
+        monitor
+      end
+
+    # Each stopped before the purge would kill it under another reason.
+    for monitor <- stopping do
+      receive do
+        {:DOWN, ^monitor, :process, _, _} -> :ok
+      after
+        100 -> Process.demonitor(monitor, [:flush])
+      end
+    end
+
     :code.purge(module)
-    :persistent_term.erase(key(hash))
     :ok
   end
 
