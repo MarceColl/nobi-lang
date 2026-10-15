@@ -46,6 +46,17 @@ defmodule KinokoWeb.Router do
     live "/sim", SimLive
   end
 
+  # The console: Kinoko's own UI, never served through a deployment.
+  if @mcp_enabled do
+    scope "/_", KinokoWeb.Console do
+      pipe_through :browser
+
+      live "/", IndexLive
+      live "/u/:universe", UniverseLive
+      live "/d/:name", DeploymentLive
+    end
+  end
+
   # Other scopes may use custom stacks.
   # scope "/api", KinokoWeb do
   #   pipe_through :api

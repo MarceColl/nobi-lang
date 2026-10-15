@@ -53,6 +53,11 @@
 
 ## System
 
+- **Route table** (`defroutes`): a symbol mapping URL path patterns to apps (`"/post/:id" -> Forum.Post`). `:name` params are typed Int, String or Uuid and become the target app's `init` arguments; an app opens another with `Cmd.navigate(App, args…)`.
+- **Deployment**: a named, served view of a universe: a **route table** to serve, following the universe's head or pinned to a commit, and the hosts that reach it. Reached through `Kinoko.Deployment`.
+- **Routing table**: the `deployments` table, which maps a request's host to a deployment (`<name>.localhost` reaches deployment `<name>` unlisted).
+- **Console**: Kinoko's own UI under `/_` (`/_/u/:universe`, `/_/d/:name`). It reads universes and deployments directly; it is never served through a deployment.
+
 - **MCP**: the protocol agents use to drive universes, through `Kinoko.Universe`. The **REPL** (`Y.…` in iex) is the human front end to the same operations.
 - **Deploy**: send a universe's code to a remote **endpoint** as source plus CIDs. The remote compares CIDs and rebuilds only what is new.
 - **Rollback**: load an older commit's image.

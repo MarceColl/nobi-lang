@@ -47,6 +47,10 @@ defmodule KinokoWeb.Mcp.Instructions do
   end
 
   defapp Counter
+
+  defroutes Main do
+    "/" -> Counter
+  end
   """
 
   @head """
@@ -89,6 +93,16 @@ defmodule KinokoWeb.Mcp.Instructions do
   - JSX: attributes are strings or `{expr}`; `on-click={Msg}` sends that
     message to update; `{expr}` in a body renders its value.
   - defapp Counter wires Counter.init / Counter.update / Counter.view.
+  - defroutes Main maps URL paths to apps; a deployment serves one route table
+    (`Main` is what the local deployment serves). `:name` captures a segment
+    and is passed to the app's `init` as a parameter, typed Int, String or
+    Uuid: `"/post/:id" -> Forum.Post` needs
+    `def Forum.Post.init(id : Uuid) : (Forum.Post.Model, Cmd<Forum.Post.Msg>)`
+    (the names match the pattern's params, in order). A URL that does not
+    parse as its type is a 404.
+  - Cmd.navigate(App, args...) goes to the route that opens App with those
+    args: `Cmd.navigate(Forum.Post, topic.id)` from update, `Cmd.navigate(Forum.Settings)`
+    when it takes none. The target must be an app some route reaches.
 
   THE LOOP
   1. Look first: `symbols` (every committed signature), then `read` the
