@@ -42,13 +42,21 @@ defmodule KinokoWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
-  plug Plug.Parsers,
-    parsers: [:urlencoded, :multipart, :json],
-    pass: ["*/*"],
-    json_decoder: Phoenix.json_library()
+  @parsers Plug.Parsers.init(
+             parsers: [:urlencoded, :multipart, :json],
+             pass: ["*/*"],
+             json_decoder: Phoenix.json_library()
+           )
+
+  # `/mcp` reads its own body: malformed JSON there must be a JSON-RPC
+  # parse error (-32700), not Plug.Parsers' 400 page.
+  plug :parse_body
 
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
   plug KinokoWeb.Router
+
+  defp parse_body(%Plug.Conn{path_info: ["mcp"]} = conn, _opts), do: conn
+  defp parse_body(conn, _opts), do: Plug.Parsers.call(conn, @parsers)
 end

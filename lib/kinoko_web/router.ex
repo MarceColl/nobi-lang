@@ -14,6 +14,20 @@ defmodule KinokoWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # MCP over streamable HTTP: JSON in and out, no session or CSRF. The
+  # endpoint leaves the body unparsed for this path (see `KinokoWeb.Endpoint`).
+  pipeline :mcp do
+    plug :accepts, ["json"]
+  end
+
+  scope "/", KinokoWeb do
+    pipe_through :mcp
+
+    post "/mcp", McpController, :post
+    get "/mcp", McpController, :not_allowed
+    delete "/mcp", McpController, :not_allowed
+  end
+
   scope "/", KinokoWeb do
     pipe_through :browser
 
