@@ -19,6 +19,8 @@ defmodule Kinoko.Exec.Worker do
   small in the worker and astronomically large once copied.
   """
 
+  import Bitwise, only: [<<<: 2]
+
   @default_timeout 5_000
   @default_heap div(1_073_741_824, :erlang.system_info(:wordsize))
   @default_result 1_000_000
@@ -69,13 +71,13 @@ defmodule Kinoko.Exec.Worker do
 
       # Killed by its heap limit.
       {:DOWN, ^monitor, :process, ^pid, :killed} ->
-        {:error, %{code: "heap", message: "evaluation used more than #{heap} words of memory"}}
+        {:error, %{code: "heap", message: heap_message(heap)}}
 
       {:DOWN, ^monitor, :process, ^pid, @deadline} ->
         timed_out(timeout)
 
       {:DOWN, ^monitor, :process, ^pid, @unloaded} ->
-        {:error, %{code: "unloaded", message: "the image was unloaded while it ran"}}
+        unloaded_error()
 
       {:DOWN, ^monitor, :process, ^pid, reason} ->
         {:error, %{code: "internal", message: "the evaluation died: #{inspect(reason)}"}}
@@ -98,6 +100,24 @@ defmodule Kinoko.Exec.Worker do
     end
   end
 
+  @doc """
+  What a worker killed at its heap limit of `words` answers:
+  `"evaluation exceeded the memory limit (1 GB, 134217728 words)"`.
+  """
+  @spec heap_message(pos_integer()) :: String.t()
+  def heap_message(words) do
+    "evaluation exceeded the memory limit (#{bytes(words * :erlang.system_info(:wordsize))}, " <>
+      "#{words} words)"
+  end
+
+  @units [{1 <<< 30, "GB"}, {1 <<< 20, "MB"}, {1 <<< 10, "KB"}]
+
+  defp bytes(n) do
+    {size, unit} = Enum.find(@units, {1, "bytes"}, fn {size, _} -> n >= size end)
+    rounded = Float.round(n / size, 1)
+    "#{if rounded == trunc(rounded), do: trunc(rounded), else: rounded} #{unit}"
+  end
+
   defp timed_out(timeout),
     do: {:error, %{code: "timeout", message: "evaluation took more than #{timeout} ms"}}
 
@@ -106,6 +126,11 @@ defmodule Kinoko.Exec.Worker do
   unloaded image with; the caller then answers code `"unloaded"`.
   """
   def unloaded_reason, do: @unloaded
+
+  @doc "What a worker stopped by `Kinoko.Exec.unload/1` answers."
+  @spec unloaded_error() :: {:error, error}
+  def unloaded_error,
+    do: {:error, %{code: "unloaded", message: "the image was unloaded while it ran"}}
 
   # The worker's deadline, kept by a guardian of its own rather than by the
   # caller alone: should the caller die (killed, or its own process timed

@@ -248,7 +248,7 @@ defmodule Kinoko.Lang do
   writes); or `{:error, %{code: "compile" | "internal", message: m}}`,
   `"compile"` also when the code is past a cap (more than 20_000 defs and
   tests, or a def needing more than 10_000 Erlang variables). Nothing is
-  loaded (`Kinoko.Exec.load/1` loads).
+  loaded (`Kinoko.Exec.load/2` loads).
   """
   @spec image(Universe.t()) :: {:ok, map()} | {:error, %{code: String.t(), message: String.t()}}
   def image(u), do: u |> committed() |> Codegen.compile()

@@ -28,13 +28,14 @@ defmodule Kinoko.Exec do
 
   ## Images
 
-  `load/1` compiles a universe's committed code (`Kinoko.Lang.Codegen`) and
-  loads it, keeping the image in `:persistent_term` under its hash: two
-  universes with the same code share one module, loaded once. The module
-  stays loaded after a promotion, so an image keeps answering with the
-  code it was made from until `unload/1` purges it. (Each new image is one
-  `:persistent_term` write, which costs a global GC pass; that is paid once
-  per distinct code.)
+  `load/2` compiles a universe's committed code (`Kinoko.Lang.Codegen`, in
+  a bounded worker) and loads it, keeping the image in `:persistent_term`
+  under its hash: two universes with the same code share one module,
+  loaded once. The module stays loaded after a promotion, so an image
+  keeps answering with the code it was made from until `unload/1` purges
+  it. (Putting a new key in `:persistent_term` costs no global GC pass;
+  erasing one, as `unload/1` does, makes every process that may reference
+  the term copy it on its next GC: a global GC pass, paid per unload.)
 
   Images are never evicted automatically. Each distinct image ever loaded
   keeps one atom (its module name, which is never freed), one loaded
@@ -45,7 +46,28 @@ defmodule Kinoko.Exec do
   `unload/1` is global: the image is shared by every universe with the
   same code, so unloading it stops every worker running it, other
   callers' included. Those callers get `{:error, %{code: "unloaded"}}`;
-  their next `load/1` loads it again.
+  their next `load/2` loads it again.
+
+  ## Hosting Yabu values (the contract for hosts)
+
+  A host that keeps Yabu running (piece 2's app runtime, stepping an app
+  across many messages) must:
+
+  - **hold the image, not the universe.** `call/4`, `eval/3` and `test/3`
+    take a universe too, but each such call re-hashes its committed code to
+    find the image (`Kinoko.Lang.Codegen.image_hash/1`): cheap once, waste
+    per message. `load/2` once, then call with the image.
+  - **invoke every Yabu value only through `Kinoko.Exec.Worker.run/2`.** A
+    closure, a callback carried in a Cmd effect, a def taken as a value:
+    any of them may loop, allocate without bound or throw a Yabu error.
+    Applied in the host's own process, none of that is bounded or caught.
+    `call/4` runs a def by name in a worker; for a value in hand, wrap the
+    application: `Worker.run(fn -> f.(arg) end, opts)`.
+  - **unload only what no live value needs.** A closure (and a def taken as
+    a value) points into its image's module: once `unload/1` purges it,
+    calling the closure raises (`:undef` for a def, `:badfun` for a
+    closure), which `Worker.run/2` answers as code `"internal"`. Keep the
+    image loaded while any of its values may still be called.
 
   ## Runs
 
@@ -70,6 +92,8 @@ defmodule Kinoko.Exec do
   alias Kinoko.Lang
   alias Kinoko.Lang.Codegen
 
+  @compile_timeout 30_000
+
   @type image :: %{
           module: atom(),
           binary: binary(),
@@ -88,15 +112,22 @@ defmodule Kinoko.Exec do
   The universe's image, loaded: `{:ok, image}` (see `t:image/0` and
   `Kinoko.Lang.image/1`), or the codegen's `{:error, %{code, message}}`.
   The image is cached by hash; its module is loaded only when it is not.
+
+  Compiling runs in a worker (`Kinoko.Exec.Worker`), bounded by
+  `:compile_timeout` (ms, default #{@compile_timeout}) and `:max_heap_size`:
+  past them the answer is code `"timeout"` or `"heap"`. Only installing the
+  compiled module holds the image's lock, so two callers compiling the
+  same new code each compile it, and the first to install it wins.
   """
-  @spec load(Lang.Universe.t()) :: {:ok, image} | {:error, error}
-  def load(u) do
+  @spec load(Lang.Universe.t(), keyword()) :: {:ok, image} | {:error, error}
+  def load(u, opts \\ []) do
     committed = Lang.committed(u)
     hash = Codegen.image_hash(committed)
 
     case :persistent_term.get(key(hash), nil) do
       nil ->
-        :global.trans({__MODULE__, hash}, fn -> compile_and_load(hash, committed) end, [node()])
+        with {:ok, image} <- compile(committed, opts),
+             do: locked(hash, fn -> install(image) end)
 
       image ->
         ensure_loaded(image)
@@ -105,22 +136,52 @@ defmodule Kinoko.Exec do
 
   defp key(hash), do: {__MODULE__, :image, hash}
 
-  defp compile_and_load(hash, committed) do
-    # Another caller may have loaded it while this one waited for the lock.
+  # `f` under the image's lock, which `load/2` and `unload/1` share: a
+  # module is never loaded while another caller purges it.
+  # (The lock's requester is the caller: `:global` lets one requester hold
+  # a resource's lock from several processes at once.)
+  defp locked(hash, f), do: :global.trans({{__MODULE__, hash}, self()}, f, [node()])
+
+  defp compile(committed, opts) do
+    timeout = Keyword.get(opts, :compile_timeout, @compile_timeout)
+
+    worker_opts =
+      opts
+      |> Keyword.take([:max_heap_size])
+      |> Keyword.merge(timeout: timeout, max_result: :infinity)
+
+    case Worker.run(fn -> Codegen.compile(committed) end, worker_opts) do
+      {:ok, compiled} ->
+        compiled
+
+      {:error, %{code: "timeout"} = error} ->
+        {:error, %{error | message: "compiling the image took more than #{timeout} ms"}}
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  defp install(%{hash: hash} = image) do
+    # Another caller may have installed it while this one compiled.
     case :persistent_term.get(key(hash), nil) do
       nil ->
-        with {:ok, image} <- Codegen.compile(committed),
-             {:ok, image} <- ensure_loaded(image) do
+        with {:ok, image} <- load_module(image) do
           :persistent_term.put(key(hash), image)
           {:ok, image}
         end
 
-      image ->
-        ensure_loaded(image)
+      cached ->
+        load_module(cached)
     end
   end
 
-  defp ensure_loaded(%{module: module, binary: binary} = image) do
+  defp ensure_loaded(%{module: module, hash: hash} = image) do
+    if :code.is_loaded(module), do: {:ok, image}, else: locked(hash, fn -> load_module(image) end)
+  end
+
+  # Under the lock.
+  defp load_module(%{module: module, binary: binary} = image) do
     if :code.is_loaded(module) do
       {:ok, image}
     else
@@ -138,10 +199,14 @@ defmodule Kinoko.Exec do
   Purges the image's module and forgets it. Every worker running its code
   (anyone's) is stopped and its caller answers code `"unloaded"`; any
   other process still running it is killed by the purge. `:ok` whether or
-  not it was loaded.
+  not it was loaded. Holds the image's lock, as `load/2` does.
   """
   @spec unload(image) :: :ok
   def unload(%{module: module, hash: hash}) do
+    locked(hash, fn -> purge(module, hash) end)
+  end
+
+  defp purge(module, hash) do
     :persistent_term.erase(key(hash))
     # Its current code becomes old code, which `check_process_code` finds.
     :code.purge(module)
@@ -177,10 +242,10 @@ defmodule Kinoko.Exec do
   @spec call(Lang.Universe.t() | image, String.t(), [term()], keyword()) ::
           {:ok, term()} | {:error, error}
   def call(u_or_image, name, args, opts \\ []) when is_binary(name) and is_list(args) do
-    with {:ok, image} <- image(u_or_image) do
+    with {:ok, image} <- image(u_or_image, opts) do
       case image.names do
         %{^name => {f, arity}} when arity == length(args) ->
-          Worker.run(fn -> apply(image.module, f, args) end, opts)
+          run(image, fn -> apply(image.module, f, args) end, opts)
 
         %{^name => {_, arity}} ->
           runtime("`#{name}` takes #{arity} argument(s), got #{length(args)}")
@@ -191,8 +256,20 @@ defmodule Kinoko.Exec do
     end
   end
 
-  defp image(%{module: _, binary: _} = image), do: ensure_loaded(image)
-  defp image(u), do: load(u)
+  # `fun` in a worker. A worker that started after `unload/1` looked for
+  # the image's workers finds the module gone: unloaded too, not internal.
+  defp run(image, fun, opts) do
+    case Worker.run(fun, opts) do
+      {:error, %{code: "internal"}} = error ->
+        if :code.is_loaded(image.module), do: error, else: Worker.unloaded_error()
+
+      result ->
+        result
+    end
+  end
+
+  defp image(%{module: _, binary: _} = image, _opts), do: ensure_loaded(image)
+  defp image(u, opts), do: load(u, opts)
 
   defp runtime(message), do: {:error, %{code: "runtime", message: message}}
 
@@ -207,9 +284,9 @@ defmodule Kinoko.Exec do
   def eval(u, source, opts \\ []) when is_binary(source) do
     case Lang.check_expr(u, source) do
       {:ok, typed, type} ->
-        with {:ok, image} <- load(u),
+        with {:ok, image} <- load(u, opts),
              {:ok, forms} <- expr_forms(typed, image),
-             {:ok, value} <- Worker.run(fn -> erl_eval(forms) end, opts) do
+             {:ok, value} <- run(image, fn -> erl_eval(forms) end, opts) do
           {:ok, value, type}
         end
 
@@ -244,23 +321,28 @@ defmodule Kinoko.Exec do
   3. `"never reached: <source>"` for each `sometimes` written in the test
      that never held, in the order written.
 
-  `message` is the failures joined by newlines. A name that is no test is
+  At most #{Hooks.max_failures()} failed `always`s are listed; past that
+  the last entry is `"…and K more"` (K the failures not listed). `message`
+  is the failures joined by newlines. A name that is no test is
   `{:error, %{code: "runtime", message: "no test named `X`"}}`; a test
   that hits a limit is the worker's `"timeout"` or `"heap"` error, with no
   failures (they died with the worker).
   """
   @spec test(Lang.Universe.t() | image, String.t(), keyword()) :: :ok | {:error, error}
   def test(u_or_image, name, opts \\ []) when is_binary(name) do
-    with {:ok, image} <- image(u_or_image) do
+    with {:ok, image} <- image(u_or_image, opts) do
       case image.tests do
-        %{^name => f} -> score(image, name, run_test(image.module, f, opts))
+        %{^name => f} -> score(image, name, run_test(image, f, opts))
         _ -> runtime("no test named `#{name}`")
       end
     end
   end
 
-  defp run_test(module, f, opts) do
-    Worker.run(
+  defp run_test(image, f, opts) do
+    module = image.module
+
+    run(
+      image,
       fn ->
         outcome =
           try do
@@ -272,7 +354,9 @@ defmodule Kinoko.Exec do
 
         {Hooks.take_failures(), Hooks.take_reached(), outcome}
       end,
-      Keyword.put(opts, :max_result, :infinity)
+      # Weighed as any answer: the failures are capped (`Kinoko.Exec.Hooks`)
+      # and the sites are the program's own.
+      opts
     )
   end
 

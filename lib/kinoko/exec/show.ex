@@ -66,7 +66,7 @@ defmodule Kinoko.Exec.Show do
   defp kind(map, left, below) when is_map(map) do
     {entries, left} =
       seq(
-        Rt.sorted_entries(map),
+        entries(map),
         left,
         below,
         fn {k, v}, left ->
@@ -124,6 +124,18 @@ defmodule Kinoko.Exec.Show do
   defp kind(t, left, below) when is_tuple(t) do
     {es, left} = all(Tuple.to_list(t), left, below)
     {node(:tuple, es), left}
+  end
+
+  # A map's entries in Yabu key order. All-Int and all-String keys order
+  # the same in Yabu and in Erlang's term order, so a plain sort serves
+  # (native, uncharged); only other keys take `Rt`'s charged comparator.
+  defp entries(map) do
+    pairs = Map.to_list(map)
+
+    if Enum.all?(pairs, fn {k, _} -> is_integer(k) end) or
+         Enum.all?(pairs, fn {k, _} -> is_binary(k) end),
+       do: Enum.sort(pairs),
+       else: Rt.sorted_entries(map)
   end
 
   # The call that builds `cmd`, its parts at depth `at`.

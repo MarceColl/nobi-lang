@@ -19,21 +19,40 @@ defmodule Kinoko.Exec.Hooks do
   """
 
   @failures :kinoko_exec_always_failures
+  @failed :kinoko_exec_always_failed
   @held :kinoko_exec_sometimes_held
+  @max_failures 1_000
 
-  @doc "Records a failed `always` at the site whose source is `source`; Unit."
+  @doc "The most failures `take_failures/0` lists one by one."
+  @spec max_failures() :: pos_integer()
+  def max_failures, do: @max_failures
+
+  @doc """
+  Records a failed `always` at the site whose source is `source`; Unit.
+  Past `max_failures/0` it is only counted.
+  """
   @spec always_failed(String.t()) :: {}
   def always_failed(source) when is_binary(source) do
-    Process.put(@failures, ["always failed: " <> source | Process.get(@failures, [])])
+    failed = Process.get(@failed, 0)
+
+    if failed < @max_failures,
+      do: Process.put(@failures, ["always failed: " <> source | Process.get(@failures, [])])
+
+    Process.put(@failed, failed + 1)
     {}
   end
 
-  @doc "The failures recorded in this process, oldest first, and forgets them."
+  @doc """
+  The failures recorded in this process, oldest first, and forgets them:
+  at most `max_failures/0`, then `"…and K more"` when K more were counted.
+  """
   @spec take_failures() :: [String.t()]
   def take_failures do
-    case Process.delete(@failures) do
-      nil -> []
-      failures -> Enum.reverse(failures)
+    failures = Enum.reverse(Process.delete(@failures) || [])
+
+    case (Process.delete(@failed) || 0) - @max_failures do
+      more when more > 0 -> failures ++ ["…and #{more} more"]
+      _ -> failures
     end
   end
 

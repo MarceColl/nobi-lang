@@ -654,6 +654,30 @@ defmodule Kinoko.ExecTest do
              ]
     end
 
+    test "a test failing 100k times lists the first 1000 failures and counts the rest" do
+      src = """
+      def A.spin(n : Int) : Int do
+        if n == 0 do
+          0
+        else
+          always(n < 0)
+          A.spin(n - 1)
+        end
+      end
+      deftest A.many do
+        always(A.spin(100000) == 0)
+      end
+      """
+
+      assert {:error, %{code: "test", failures: failures, message: message}} =
+               Exec.test(universe(src), "A.many")
+
+      assert length(failures) == 1_001
+      assert Enum.take(failures, 2) == ["always failed: n < 0", "always failed: n < 0"]
+      assert List.last(failures) == "…and 99000 more"
+      assert message =~ ~r/\n…and 99000 more$/
+    end
+
     test "running what is not a test is an error" do
       assert Exec.test(universe(@math), "Math.double") ==
                {:error, %{code: "runtime", message: "no test named `Math.double`"}}
@@ -697,6 +721,8 @@ defmodule Kinoko.ExecTest do
 
     test "infinite recursion times out, and the worker is gone afterwards" do
       u = universe(@loops)
+      # Compiled first: compiling spawns a worker of its own.
+      {:ok, _} = Exec.load(u)
 
       for name <- ["A.loop", "A.ping"] do
         {result, spawned} = spawned_during(fn -> Exec.call(u, name, [0], timeout: 50) end)
@@ -712,13 +738,15 @@ defmodule Kinoko.ExecTest do
 
     test "a runaway allocation is killed at the heap limit, and the worker is gone" do
       u = universe(@loops)
+      {:ok, _} = Exec.load(u)
 
       {result, spawned} =
         spawned_during(fn ->
           Exec.call(u, "A.grow", [10_000_000, []], max_heap_size: 200_000, timeout: 5_000)
         end)
 
-      assert {:error, %{code: "heap", message: _}} = result
+      assert {:error, %{code: "heap", message: message}} = result
+      assert message == "evaluation exceeded the memory limit (1.5 MB, 200000 words)"
       assert length(spawned) == 2
       Enum.each(spawned, &assert_gone/1)
 
@@ -732,6 +760,7 @@ defmodule Kinoko.ExecTest do
 
     test "a worker dies with its caller, long before its own deadline" do
       u = universe(@loops)
+      {:ok, image} = Exec.load(u)
       test = self()
 
       caller =
@@ -744,7 +773,6 @@ defmodule Kinoko.ExecTest do
       {_, spawned} =
         spawned_by(caller, fn ->
           send(caller, :go)
-          {:ok, image} = Exec.load(u)
           wait_until_running(image.module)
           Process.exit(caller, :kill)
           assert_gone(caller)
@@ -802,20 +830,36 @@ defmodule Kinoko.ExecTest do
       doubled = &"do\n  x0 = [1]\n#{binds}\n  #{&1}\nend"
       out_of_steps = "evaluation took more than 1000000 steps"
 
-      {us, message} = :timer.tc(fn -> error_in("", doubled.("x40 == x40")) end)
-      assert message == out_of_steps
-      assert us < 3_000_000
+      assert error_in("", doubled.("x40 == x40")) == out_of_steps
       assert error_in("", doubled.("x40 != x40")) == out_of_steps
       assert error_in("", doubled.("List.member([x40], x40)")) == out_of_steps
 
       # Two values built apart, each 2^30 elements to walk.
       ys = Enum.map_join(1..30, "\n", fn i -> "  y#{i} = [y#{i - 1}, y#{i - 1}]" end)
       apart = "do\n  x0 = [1]\n  y0 = [1]\n#{binds}\n#{ys}\n  x30 == y30\nend"
-      {us, message} = :timer.tc(fn -> error_in("", apart) end)
-      assert message == out_of_steps
-      assert us < 3_000_000
+      assert error_in("", apart) == out_of_steps
 
       assert value(doubled.("x10 == x10")) == true
+    end
+
+    # Wall clock: what the refusal saves. Only the evaluation is timed (the
+    # universe is staged and its image loaded first); the bound is generous,
+    # an unrefused walk of 2^40 nodes takes hours.
+    @tag :perf
+    test "refusing a comparison too large to walk is quick" do
+      binds = Enum.map_join(1..40, "\n", fn i -> "  x#{i} = [x#{i - 1}, x#{i - 1}]" end)
+      ys = Enum.map_join(1..30, "\n", fn i -> "  y#{i} = [y#{i - 1}, y#{i - 1}]" end)
+      u = Lang.new()
+      {:ok, _} = Exec.load(u)
+
+      for expr <- [
+            "do\n  x0 = [1]\n#{binds}\n  x40 == x40\nend",
+            "do\n  x0 = [1]\n  y0 = [1]\n#{binds}\n#{ys}\n  x30 == y30\nend"
+          ] do
+        {us, result} = :timer.tc(fn -> Exec.eval(u, expr, timeout: 60_000) end)
+        assert {:error, %{code: "runtime"}} = result
+        assert us < 10_000_000, "#{us} µs"
+      end
     end
 
     # Rust's `Function` equality: `=:=` would compare two closures'
@@ -836,10 +880,14 @@ defmodule Kinoko.ExecTest do
 
       apart = &"do\n  x0 = [1]\n  y0 = [1]\n#{bind.("x")}\n#{bind.("y")}\n  #{&1}\nend"
 
+      u = universe(src)
+      {:ok, _} = Exec.load(u)
+
+      # Comparing the environments (2^28 elements each, equal) would not
+      # end within the deadline: the answer coming back at all shows they
+      # were not compared.
       for expr <- ["A.mk(x28) == A.mk(y28)", "List.member([A.mk(x28)], A.mk(y28))"] do
-        {us, result} = :timer.tc(fn -> Exec.eval(universe(src), apart.(expr), timeout: 100) end)
-        assert {:ok, false, _} = result, expr
-        assert us < 100_000, "#{expr}: #{us} µs"
+        assert {:ok, false, _} = Exec.eval(u, apart.(expr), timeout: 2_000), expr
       end
 
       assert value_in(src, "A.mk(x28) != A.mk(y28)" |> apart.()) == true
@@ -920,6 +968,63 @@ defmodule Kinoko.ExecTest do
       :code.delete(image.module)
       :code.purge(image.module)
       assert Exec.call(u, "Behind.n", []) == {:ok, 8}
+    end
+
+    test "compiling is bounded by compile_timeout, and the caller survives" do
+      stmts = Enum.map_join(0..3_000, "\n", &"  x#{&1} = #{&1} + 1")
+      u = universe("def Slow.f() : Int do\n#{stmts}\n  0\nend")
+
+      assert {:error, %{code: "timeout", message: "compiling the image took more than 1 ms"}} =
+               Exec.load(u, compile_timeout: 1)
+
+      assert {:error, %{code: "timeout"}} = Exec.call(u, "Slow.f", [], compile_timeout: 1)
+      assert Exec.call(u, "Slow.f", []) == {:ok, 0}
+    end
+
+    test "concurrent loads and unloads never collide" do
+      u = universe("def Race.n() : Int do 5 end")
+      {:ok, image} = Exec.load(u)
+
+      results =
+        1..40
+        |> Task.async_stream(
+          fn i ->
+            if rem(i, 2) == 0,
+              do: Exec.unload(image),
+              else: Exec.call(u, "Race.n", [])
+          end,
+          max_concurrency: 40,
+          timeout: :infinity
+        )
+        |> Enum.map(fn {:ok, r} -> r end)
+
+      for r <- results do
+        assert r in [:ok, {:ok, 5}] or match?({:error, %{code: "unloaded"}}, r), inspect(r)
+      end
+
+      assert Exec.call(u, "Race.n", []) == {:ok, 5}
+    end
+
+    test "a closure or def value of an unloaded image raises when called, inside a worker" do
+      src = """
+      def Gone.f(n : Int) : Int do n end
+      def Gone.mk(n : Int) : (Int -> Int) do fn (k : Int) -> k + n end end
+      """
+
+      u = universe(src)
+      {:ok, image} = Exec.load(u)
+      {:ok, closure} = Exec.call(image, "Gone.mk", [1])
+      {:ok, def_value, _} = Exec.eval(u, "Gone.f")
+      assert Kinoko.Exec.Worker.run(fn -> closure.(1) end) == {:ok, 2}
+
+      assert Exec.unload(image) == :ok
+
+      for f <- [closure, def_value] do
+        assert {:error, %{code: "internal", message: m}} =
+                 Kinoko.Exec.Worker.run(fn -> f.(1) end)
+
+        assert m =~ "badfun" or m =~ "undef" or m =~ "UndefinedFunctionError", m
+      end
     end
 
     test "the image lists each test's sometimes sites" do
