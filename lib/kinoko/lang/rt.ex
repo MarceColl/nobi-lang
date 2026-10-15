@@ -35,15 +35,17 @@ defmodule Kinoko.Lang.Rt do
   `eq/2` is `===` (Erlang `=:=`): structural, a map's order ignored. It,
   `compare/2` and a map literal's keys (`map_from_list/1`) are charged by
   weight first (see "the walk budget" below): past a million steps they
-  throw Rust's `"evaluation took more than 1000000 steps"`. Rust says a closure
-  equals nothing (not even itself); here funs compare by Erlang's fun
-  equality. The checker keeps functions out of map keys, so the difference
-  shows only for `==` on closures.
+  throw Rust's `"evaluation took more than 1000000 steps"`. Functions
+  compare by `fun_eq/2`, as Rust's `Function` equality: a closure equals
+  nothing (not even itself), a def taken as a value equals only the same
+  def, a constructor only the same constructor; a closure's environment is
+  never compared.
 
   `compare/2` is Rust's `Value` `Ord`: first by kind (Int, String, Bool,
   Uuid, List, Map, tuple, record, variant, function, Cmd), then
-  structurally. Functions order by Erlang term order (Rust: closures by
-  identity, then defs and constructors by name).
+  structurally. Functions order as Rust's do, read without their
+  environment (`fun_order`): closures first (by their code's identity),
+  then defs, then constructors, each by name.
   """
 
   import Kernel, except: [div: 2]
@@ -509,19 +511,6 @@ defmodule Kinoko.Lang.Rt do
   defp child(b, acc) when is_boolean(b), do: [html_text(Atom.to_string(b)) | acc]
   defp child({:uuid, s}, acc), do: [html_text(s) | acc]
   defp child(v, _), do: mismatch!("Html, text or a list of them", v)
-
-  # ---------- assertions ----------
-
-  @doc "`always(held)`: Unit when it holds, else a runtime error."
-  def always!(true), do: {}
-  def always!(false), do: error!("always failed")
-
-  @doc "`always(held)` at the site whose source is `source`."
-  def always!(true, _source), do: {}
-  def always!(false, source), do: error!("always failed: #{source}")
-
-  @doc "`sometimes(held)`: evaluated for its effect on nothing; Unit."
-  def sometimes(_held), do: {}
 
   @doc "A `case` no arm matched (the checker makes this unreachable)."
   def no_arm!, do: error!("no case arm matched")

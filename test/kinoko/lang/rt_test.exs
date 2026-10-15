@@ -206,12 +206,6 @@ defmodule Kinoko.Lang.RtTest do
       {:cmd, inner_bare} = inner
       assert Rt.cmd_batch([Rt.cmd_none(), inner]) == {:cmd, {:batch, [:none, inner_bare]}}
     end
-
-    test "always holds or throws" do
-      assert Rt.always!(true) == {}
-      assert error(fn -> Rt.always!(false) end) == {:yabu_error, "always failed"}
-      assert error(fn -> Rt.always!(false, "x > 0") end) == {:yabu_error, "always failed: x > 0"}
-    end
   end
 
   # ---------- the stdlib table ----------
@@ -320,6 +314,27 @@ defmodule Kinoko.Lang.RtTest do
       for bad <- ["+1", "-", "1-", "1\n", "١", "0x10", "1_000", ""] do
         assert Stdlib.string_to_int(bad) == none(), inspect(bad)
       end
+    end
+
+    test "to_int refuses a huge digit string quickly, and reads past leading zeros" do
+      huge = String.duplicate("7", 2_000_000)
+      {micros, result} = :timer.tc(fn -> Stdlib.string_to_int(huge) end)
+      assert result == none()
+      assert Stdlib.string_to_int("-" <> huge) == none()
+      # Bignum parsing of 2M digits takes seconds; the refusal is a scan.
+      assert micros < 1_000_000
+
+      zeros = String.duplicate("0", 2_000_000)
+      assert Stdlib.string_to_int(zeros <> "42") == some(42)
+      assert Stdlib.string_to_int("-" <> zeros <> "9223372036854775808") == some(@min)
+      assert Stdlib.string_to_int(zeros) == some(0)
+    end
+
+    test "length counts code points, not graphemes" do
+      assert Stdlib.string_length("") == 0
+      assert Stdlib.string_length("e\u0301") == 2
+      assert Stdlib.string_length("👩‍👩‍👧") == 5
+      assert Stdlib.string_length(String.duplicate("ü", 1000)) == 1000
     end
 
     test "trim trims what Rust calls whitespace" do

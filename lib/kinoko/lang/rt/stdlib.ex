@@ -148,22 +148,41 @@ defmodule Kinoko.Lang.Rt.Stdlib do
 
   # ---------- String ----------
 
-  def string_length(s) when is_binary(s), do: s |> String.to_charlist() |> length()
+  # Code points (Rust's `chars().count()`), not graphemes, counted without
+  # building a charlist.
+  def string_length(s) when is_binary(s), do: code_points(s, 0)
+
+  defp code_points(<<_::utf8, rest::binary>>, n), do: code_points(rest, n + 1)
+  defp code_points(<<>>, n), do: n
   def string_concat(a, b) when is_binary(a) and is_binary(b), do: a <> b
   def string_from_int(n) when is_integer(n), do: Integer.to_string(n)
 
   @doc "Strict decimal: an optional `-` and ASCII digits, nothing else, as an i64."
   def string_to_int(s) when is_binary(s) do
-    digits = with "-" <> rest <- s, do: rest
+    {sign, digits} =
+      case s do
+        "-" <> rest -> {-1, rest}
+        _ -> {1, s}
+      end
 
+    # Past 19 significant digits no i64 fits: refused before parsing, so a
+    # huge digit string costs no bignum (nor `String.to_integer`'s limit).
     with true <- digits != "" and ascii_digits?(digits),
+         significant = without_leading_zeros(digits),
+         true <- byte_size(significant) <= 19,
          n when n >= -9_223_372_036_854_775_808 and n <= 9_223_372_036_854_775_807 <-
-           String.to_integer(s) do
+           sign * parse_digits(significant) do
       some(n)
     else
       _ -> none()
     end
   end
+
+  defp without_leading_zeros("0" <> rest), do: without_leading_zeros(rest)
+  defp without_leading_zeros(digits), do: digits
+
+  defp parse_digits(""), do: 0
+  defp parse_digits(digits), do: String.to_integer(digits)
 
   defp ascii_digits?(s), do: for(<<b <- s>>, reduce: true, do: (ok -> ok and b in ?0..?9))
 
