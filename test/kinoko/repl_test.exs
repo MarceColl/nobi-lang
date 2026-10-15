@@ -52,6 +52,23 @@ defmodule Kinoko.ReplTest do
     assert out =~ "42 : Int"
   end
 
+  test "a staged verdict says each reason once" do
+    # Both branches update a field the model lacks: two identical reasons.
+    src = """
+    defmodel Tally.Model do
+      n : Int
+    end
+    def Tally.update(b : Bool, model : Tally.Model) : Tally.Model do
+      if b do %Tally.Model{model | counts: 1} else %Tally.Model{model | counts: 2} end
+    end
+    """
+
+    out = capture_io(fn -> assert {:staged, _} = Y.load(src, id: "tally") end)
+    line = "Tally.update: [extra-field] model `Tally.Model` has no field `counts`"
+    assert out =~ line
+    assert length(String.split(out, line)) == 2, out
+  end
+
   test "source without an id gets repl-N ids" do
     out = capture_io(fn -> Y.load("def A.one() : Int do 1 end") end)
     assert out =~ "promoted: repl-1"

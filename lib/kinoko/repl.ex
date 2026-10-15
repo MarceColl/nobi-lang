@@ -152,7 +152,7 @@ defmodule Kinoko.Repl do
 
       {:degraded, reasons} = degraded ->
         IO.puts("degraded: #{current()}'s committed code no longer typechecks")
-        Enum.each(reasons, &IO.puts("  #{&1.name || "-"}: [#{&1.code}] #{&1.message}"))
+        print_reasons(reasons)
         IO.puts("stage a patch that fixes these; eval, call and test resume once it promotes")
         degraded
 
@@ -366,8 +366,16 @@ defmodule Kinoko.Repl do
 
   defp report_verdict(id, {:staged, reasons} = verdict) do
     IO.puts("staged: #{id}")
-    Enum.each(reasons, &IO.puts("  #{&1.name || "-"}: [#{&1.code}] #{&1.message}"))
+    print_reasons(reasons)
     verdict
+  end
+
+  # Each reason said once: a check can find the same fault twice (say, two
+  # branches updating the same missing field).
+  defp print_reasons(reasons) do
+    reasons
+    |> Enum.uniq_by(&{Map.get(&1, :name), &1.code, &1.message})
+    |> Enum.each(&IO.puts("  #{Map.get(&1, :name) || "-"}: [#{&1.code}] #{&1.message}"))
   end
 
   defp fail(error, universe \\ nil)
@@ -403,8 +411,7 @@ defmodule Kinoko.Repl do
         :ok
 
       reasons ->
-        for reason <- reasons,
-            do: IO.puts("  #{Map.get(reason, :name) || "-"}: [#{reason.code}] #{reason.message}")
+        print_reasons(reasons)
     end
 
     :ok

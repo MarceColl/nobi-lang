@@ -152,6 +152,7 @@ defmodule KinokoWeb.Mcp.Instructions do
     Built-in types: #{Enum.join(Extract.builtin_named(), ", ")}, List<a>, Map<k, v>, tuples,
     Cmd<msg>, Html<msg>. Stdlib types: #{Enum.join(types, "; ")}.
     #{Enum.join(defs, "\n")}
+    Map.keys/values/to_list come out in key order; there is no `m[k]`, use Map.get.
     That is all of it. If what you need is not listed, write it as your own def
     (fully qualified, in your patch) and say so rather than inventing a function.
     """

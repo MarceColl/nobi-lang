@@ -1,7 +1,8 @@
 defmodule Kinoko.Lang.Types.Stdlib do
   @moduledoc """
   Stdlib signatures (ported from `types/stdlib.rs`): the 59 rows the checker
-  resolves calls against, in the Rust/TS declared order. Generic positions use
+  resolves calls against, in the Rust/TS declared order, then the `Map` rows
+  this port adds (68 in all). Generic positions use
   lowercase `{:var, "a"}` for defs and `{:var, "T"}` for the `Option`/`Result`
   deftypes. Only what feeds the checker lives here; the evaluator's metadata
   (codegen, effect idempotency) belongs to the interpreter.
@@ -19,6 +20,9 @@ defmodule Kinoko.Lang.Types.Stdlib do
 
           a = tv.("a")
           b = tv.("b")
+          k = tv.("k")
+          v = tv.("v")
+          map = fn k, v -> {:applied, "Map", [k, v]} end
           int = nm.("Int")
           str = nm.("String")
           bool = nm.("Bool")
@@ -91,7 +95,18 @@ defmodule Kinoko.Lang.Types.Stdlib do
             {"Tx.Op", {:type, [], []}},
             {"Tx.insert", def_.([a], op)},
             {"Tx.update", def_.([uuid, a], op)},
-            {"Tx.delete", def_.([a], op)}
+            {"Tx.delete", def_.([a], op)},
+            # Map (Elixir-only; after the Rust/TS rows so their order holds).
+            # Keys and pairs come out in Yabu key order (`Rt.compare/2`).
+            {"Map.get", def_.([map.(k, v), k], option.(v))},
+            {"Map.put", def_.([map.(k, v), k, v], map.(k, v))},
+            {"Map.delete", def_.([map.(k, v), k], map.(k, v))},
+            {"Map.has_key", def_.([map.(k, v), k], bool)},
+            {"Map.size", def_.([map.(k, v)], int)},
+            {"Map.keys", def_.([map.(k, v)], list.(k))},
+            {"Map.values", def_.([map.(k, v)], list.(v))},
+            {"Map.to_list", def_.([map.(k, v)], list.({:tuple, [k, v]}))},
+            {"Map.from_list", def_.([list.({:tuple, [k, v]})], map.(k, v))}
           ]
         )
 

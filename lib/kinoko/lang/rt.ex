@@ -211,9 +211,19 @@ defmodule Kinoko.Lang.Rt do
   @doc "`compare(a, b) != :gt`: a sorter for `Enum.sort/2`."
   def le(a, b), do: compare(a, b) != :gt
 
-  @doc "A map's entries in Yabu key order (`compare/2`)."
+  @doc """
+  A map's entries in Yabu key order (`compare/2`). All-Int and all-String
+  keys order the same in Yabu and in Erlang's term order, so a plain sort
+  serves (native, uncharged: each key was charged when inserted); only
+  other keys take the charged comparator.
+  """
   def sorted_entries(map) when is_map(map) do
-    map |> Map.to_list() |> Enum.sort(fn {a, _}, {b, _} -> le(a, b) end)
+    pairs = Map.to_list(map)
+
+    if Enum.all?(pairs, fn {k, _} -> is_integer(k) end) or
+         Enum.all?(pairs, fn {k, _} -> is_binary(k) end),
+       do: Enum.sort(pairs),
+       else: Enum.sort(pairs, fn {a, _}, {b, _} -> le(a, b) end)
   end
 
   # Within a comparison already charged.

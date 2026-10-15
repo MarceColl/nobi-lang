@@ -105,6 +105,7 @@ defmodule KinokoWeb.McpTest do
         assert text =~ name <> "(", "missing #{name}"
       end
 
+      assert text =~ "Map.get("
       assert text =~ "list_universes"
       refute text =~ "fork_env"
       refute text =~ "workspace"
@@ -380,6 +381,28 @@ defmodule KinokoWeb.McpTest do
       assert ok!(conn, "unstage", %{"universe" => u, "id" => "f"}) =~ "unstaged: f"
       assert err!(conn, "unstage", %{"universe" => u, "id" => "f"}) =~ "nothing staged under f"
       assert ok!(conn, "list_staged", %{"universe" => u}) =~ "no staged patches"
+    end
+
+    test "a staged verdict says each reason once", %{conn: conn, u: u} do
+      # Both branches update a field the model lacks: two identical reasons.
+      src = """
+      defmodel Tally.Model do
+        n : Int
+      end
+      def Tally.update(b : Bool, model : Tally.Model) : Tally.Model do
+        if b do %Tally.Model{model | counts: 1} else %Tally.Model{model | counts: 2} end
+      end
+      """
+
+      line = "- Tally.update [extra-field] model `Tally.Model` has no field `counts`"
+
+      for text <- [
+            ok!(conn, "stage_patch", %{"universe" => u, "id" => "tally", "source" => src}),
+            ok!(conn, "list_staged", %{"universe" => u})
+          ] do
+        assert text =~ line
+        assert length(String.split(text, line)) == 2, text
+      end
     end
 
     test "a parse error is staged with a parse reason", %{conn: conn, u: u} do

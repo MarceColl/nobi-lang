@@ -9,7 +9,8 @@ defmodule Kinoko.Lang.Rt.Stdlib do
   lower case, at the def's arity: `List.map` is `list_map/2`,
   `String.to_int` is `string_to_int/1`, `Option.with_default` is
   `option_with_default/2`, `Cmd.store.insert` is `cmd_store_insert/2`,
-  `JSON.parse` is `json_parse/1`, `Tx.insert` is `tx_insert/1`.
+  `JSON.parse` is `json_parse/1`, `Tx.insert` is `tx_insert/1`,
+  `Map.has_key` is `map_has_key/2`.
   `function_for/1` answers that from a table built at compile time from
   `Kinoko.Lang.Types.Stdlib`, so codegen never makes an atom from text.
 
@@ -39,6 +40,7 @@ defmodule Kinoko.Lang.Rt.Stdlib do
   (`Kinoko.Exec`).
   """
 
+  import Kernel, except: [map_size: 1]
   import Kinoko.Lang.Rt, only: [error!: 1]
 
   alias Kinoko.Lang.Rt
@@ -305,6 +307,40 @@ defmodule Kinoko.Lang.Rt.Stdlib do
       {:some, x} -> f.(x)
       :none -> none()
     end
+  end
+
+  # ---------- Map ----------
+
+  # Every path that hashes a key charges it first, as a map literal's keys
+  # are (`Rt.charge_insertion/2`): Erlang hashes a key in a BIF that never
+  # yields, so a key too heavy to walk is the step-budget error instead. A
+  # lookup compares with as many keys as an insertion would.
+  defp charged(m, key) when is_map(m) do
+    Rt.charge_insertion(key, Kernel.map_size(m))
+    key
+  end
+
+  def map_get(m, key) when is_map(m) do
+    case Map.fetch(m, charged(m, key)) do
+      {:ok, v} -> some(v)
+      :error -> none()
+    end
+  end
+
+  def map_put(m, key, v) when is_map(m), do: Map.put(m, charged(m, key), v)
+  def map_delete(m, key) when is_map(m), do: Map.delete(m, charged(m, key))
+  def map_has_key(m, key) when is_map(m), do: Map.has_key?(m, charged(m, key))
+  def map_size(m) when is_map(m), do: Kernel.map_size(m)
+
+  # In Yabu key order (`Rt.sorted_entries/1`), as `show` and JSON write a map.
+  def map_keys(m) when is_map(m), do: for({k, _} <- Rt.sorted_entries(m), do: k)
+  def map_values(m) when is_map(m), do: for({_, v} <- Rt.sorted_entries(m), do: v)
+  def map_to_list(m) when is_map(m), do: Rt.sorted_entries(m)
+
+  @doc "A map of the pairs, a later key's value replacing an earlier one's."
+  def map_from_list(pairs) when is_list(pairs) do
+    Enum.each(pairs, fn p -> match?({_, _}, p) or wrong!("Map.from_list") end)
+    Rt.map_from_list(pairs)
   end
 
   # ---------- JSON, applied as values ----------

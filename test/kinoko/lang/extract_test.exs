@@ -113,11 +113,12 @@ defmodule Kinoko.Lang.ExtractTest do
   end
 
   describe "Stdlib" do
-    test "has 59 rows in declared order" do
-      assert map_size(Stdlib.signatures()) == 59
-      assert length(Stdlib.names()) == 59
+    test "has the 59 Rust rows in declared order, then the 9 Map rows" do
+      assert map_size(Stdlib.signatures()) == 68
+      assert length(Stdlib.names()) == 68
       assert Enum.take(Stdlib.names(), 2) == ["List.map", "List.filter"]
-      assert List.last(Stdlib.names()) == "Tx.delete"
+      assert Enum.at(Stdlib.names(), 58) == "Tx.delete"
+      assert Enum.drop(Stdlib.names(), 59) |> Enum.all?(&String.starts_with?(&1, "Map."))
       assert Enum.all?(Stdlib.names(), &Map.has_key?(Stdlib.signatures(), &1))
     end
 

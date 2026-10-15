@@ -228,6 +228,31 @@ defmodule Kinoko.UniverseTest do
       {:promoted, _} = Universe.stage(u, "p1b", "def A.g() : Int do\n  5\nend")
       assert {:ok, 5, _} = Universe.eval(u, "A.g()", [])
     end
+
+    test "a program built on the Map stdlib promotes and evaluates", %{u: u} do
+      src = """
+      def M.build() : Map<String, Int> do
+        m = Map.from_list([("b", 2), ("a", 1)])
+        Map.put(m, "c", 3)
+      end
+
+      def M.lookup(m : Map<String, Int>, k : String) : Int do
+        case Map.get(m, k) do
+          Option.Some(n) -> n
+          Option.None -> 0
+        end
+      end
+      """
+
+      assert {:promoted, ["maps"]} = Universe.stage(u, "maps", src)
+
+      assert {:ok, {3, 0, [{"a", 1}, {"b", 2}, {"c", 3}]}, _} =
+               Universe.eval(
+                 u,
+                 ~s|(M.lookup(M.build(), "c"), M.lookup(M.build(), "z"), Map.to_list(M.build()))|,
+                 []
+               )
+    end
   end
 
   # The process running `module`'s code (the eval's worker), once there is one.

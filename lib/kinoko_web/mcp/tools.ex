@@ -286,8 +286,13 @@ defmodule KinokoWeb.Mcp.Tools do
     )
   end
 
-  defp reason_lines(reasons),
-    do: Enum.map(reasons, &"- #{Map.get(&1, :name) || "(patch)"} [#{&1.code}] #{&1.message}")
+  # Each reason said once: a check can find the same fault twice (say, two
+  # branches updating the same missing field).
+  defp reason_lines(reasons) do
+    reasons
+    |> Enum.uniq_by(&{Map.get(&1, :name), &1.code, &1.message})
+    |> Enum.map(&"- #{Map.get(&1, :name) || "(patch)"} [#{&1.code}] #{&1.message}")
+  end
 
   defp patch_text(%{id: id, source: source, removes: removes, reasons: reasons}) do
     head = if removes == [], do: id, else: "#{id} (removes: #{Enum.join(removes, ", ")})"
