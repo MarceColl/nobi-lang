@@ -67,6 +67,10 @@ config :kinoko, KinokoWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :kinoko, dev_routes: true
 
+# Mount the unauthenticated /mcp endpoint (see KinokoWeb.McpController).
+# Off in prod until it has auth.
+config :kinoko, mcp_enabled: true
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 

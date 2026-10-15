@@ -5,6 +5,16 @@ defmodule KinokoWeb.McpController do
   endpoint, so `KinokoWeb.Mcp.Protocol` can answer malformed JSON with a
   JSON-RPC parse error. `GET` (the optional server-to-client stream) and
   `DELETE` (session end) are 405: this server has neither.
+
+  ## Mounted only where enabled
+
+  The endpoint has **no authentication yet** (deferred: per-caller keys
+  come later), and every tool can change a universe, `"main"` included. So
+  the router mounts `/mcp` only when
+  `Application.compile_env(:kinoko, :mcp_enabled, false)` is true:
+  `config/dev.exs` and `config/test.exs` set it, prod leaves it off, and
+  there `/mcp` is a 404. It is read at compile time: changing it needs a
+  recompile of the router.
   """
 
   use KinokoWeb, :controller

@@ -16,17 +16,21 @@ defmodule KinokoWeb.Router do
 
   # MCP over streamable HTTP: JSON in and out, no session or CSRF. The
   # endpoint leaves the body unparsed for this path (see `KinokoWeb.Endpoint`).
-  pipeline :mcp do
-    plug :accepts, ["json"]
-    plug KinokoWeb.Mcp.Guard
-  end
+  # It has no auth yet, so it is mounted only where `:mcp_enabled` is set
+  # (dev and test; never prod). See `KinokoWeb.McpController`.
+  if Application.compile_env(:kinoko, :mcp_enabled, false) do
+    pipeline :mcp do
+      plug :accepts, ["json"]
+      plug KinokoWeb.Mcp.Guard
+    end
 
-  scope "/", KinokoWeb do
-    pipe_through :mcp
+    scope "/", KinokoWeb do
+      pipe_through :mcp
 
-    post "/mcp", McpController, :post
-    get "/mcp", McpController, :not_allowed
-    delete "/mcp", McpController, :not_allowed
+      post "/mcp", McpController, :post
+      get "/mcp", McpController, :not_allowed
+      delete "/mcp", McpController, :not_allowed
+    end
   end
 
   scope "/", KinokoWeb do
