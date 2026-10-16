@@ -8,15 +8,26 @@ defmodule Kinoko.Data.Codec do
   (`Kinoko.Lang.Rt.Json`), an `Option` of it `None` as `NULL`. A JSON cell
   is written only when it reads back as the very value written, so a value
   JSON cannot hold faithfully (a function, `Some(None)` in an
-  `Option<Option<…>>`) is refused, never stored as another.
+  `Option<Option<…>>`) is refused, never stored as another. A deftype's value (`Result` too) is JSON, read
+  back by the image's deftype table.
 
   Reading is type-directed by the reader's signature (`decode_row/4`): a
   column the row lacks takes the field's default (an `Option` without one,
   `None`); `NULL` reads as `None` for an `Option` and as the default
   otherwise. A cell that is not a value of its field's type is an error,
-  never a value.
+  never a value. The error names the field and its type, never the stored
+  value (that is logged): a program's user reads it.
+
+  ## Tables
+
+  `tables` is what typing a value needs: `%{models: models, types:
+  types}`, the image's `__yabu__(:models)` and `__yabu__(:types)`
+  (`tables/1` makes it from either, or from a models table alone).
   """
 
+  require Logger
+
+  alias Kinoko.Lang.Format
   alias Kinoko.Lang.Rt.Json
 
   @scalars ["Int", "Bool", "String", "Uuid"]
@@ -24,6 +35,15 @@ defmodule Kinoko.Data.Codec do
   @i64_min -9_223_372_036_854_775_808
   @i64_max 9_223_372_036_854_775_807
   @uuid ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
+
+  @type tables :: %{models: map(), types: map()}
+
+  @doc "`tables` from `%{models:, types:}` or a models table alone (no deftypes)."
+  @spec tables(map()) :: tables()
+  def tables(%{models: models} = t) when is_map(models),
+    do: %{models: models, types: Map.get(t, :types, %{})}
+
+  def tables(models) when is_map(models), do: %{models: models, types: %{}}
 
   @doc "Whether a field of `type` is a plain column (not JSON)."
   @spec scalar?(term()) :: boolean()
@@ -43,7 +63,9 @@ defmodule Kinoko.Data.Codec do
   """
   @spec encode_row(String.t(), list(), term(), map()) ::
           {:ok, [{String.t(), term()}]} | {:error, String.t()}
-  def encode_row(model, columns, {:rec, model, fields}, models) when is_map(fields) do
+  def encode_row(model, columns, {:rec, model, fields}, tables) when is_map(fields) do
+    models = tables(tables)
+
     Enum.reduce_while(columns, {:ok, []}, fn {field, type, _default, col}, {:ok, acc} ->
       with {:ok, v} <- fetch_field(fields, field),
            {:ok, cell} <- encode(type, v, models) do
@@ -58,7 +80,7 @@ defmodule Kinoko.Data.Codec do
     end
   end
 
-  def encode_row(model, _columns, row, _models),
+  def encode_row(model, _columns, row, _tables),
     do: {:error, "a row of #{model} must be a #{model} record, got #{inspect_kind(row)}"}
 
   defp fetch_field(fields, field) do
@@ -68,8 +90,14 @@ defmodule Kinoko.Data.Codec do
     end
   end
 
-  @doc "The cell holding `v`, a value of `type`: `{:ok, cell}` or `{:error, why}`."
+  @doc """
+  The cell holding `v`, a value of `type`: `{:ok, cell}` or `{:error,
+  why}`. `models` is a `tables/1` argument.
+  """
   @spec encode(term(), term(), map()) :: {:ok, term()} | {:error, String.t()}
+  def encode(type, v, models) when not is_map_key(models, :models),
+    do: encode(type, v, tables(models))
+
   def encode({:named, "Int"}, n, _models) when is_integer(n) and n >= @i64_min and n <= @i64_max,
     do: {:ok, n}
 
@@ -98,10 +126,10 @@ defmodule Kinoko.Data.Codec do
 
   def encode(type, v, models), do: json(type, v, models)
 
-  defp json(type, v, models) do
+  defp json(type, v, %{models: models, types: types}) do
     case Json.stringify(v, type, models) do
       {:var, "Result", "Ok", [text]} ->
-        if Json.decode_stored(text, type, models) == {:ok, v},
+        if Json.decode_stored(text, type, models, types) == {:ok, v},
           do: {:ok, text},
           else:
             {:error, "the value does not read back as itself from JSON, so it cannot be stored"}
@@ -121,13 +149,22 @@ defmodule Kinoko.Data.Codec do
   message}`.
   """
   @spec decode_row(String.t(), list(), map(), map()) :: {:ok, term()} | {:error, String.t()}
-  def decode_row(model, columns, cells, models) do
+  def decode_row(model, columns, cells, tables) do
+    tables = tables(tables)
+
     with {:ok, id} <- decode_id(model, Map.get(cells, "id")) do
       Enum.reduce_while(columns, {:ok, %{"id" => id}}, fn {field, type, default, col},
                                                           {:ok, acc} ->
-        case decode_cell(type, default, Map.fetch(cells, col), models) do
-          {:ok, v} -> {:cont, {:ok, Map.put(acc, field, v)}}
-          {:error, why} -> {:halt, {:error, "#{model}.#{field}: #{why}"}}
+        case decode_cell(type, default, Map.fetch(cells, col), tables) do
+          {:ok, v} ->
+            {:cont, {:ok, Map.put(acc, field, v)}}
+
+          {:error, why} ->
+            {:halt, {:error, "#{model}.#{field}: #{why}"}}
+
+          {:error, why, detail} ->
+            Logger.warning("Kinoko.Data.Codec: #{model}.#{field}: #{detail}")
+            {:halt, {:error, "#{model}.#{field}: #{why}"}}
         end
       end)
       |> case do
@@ -138,9 +175,12 @@ defmodule Kinoko.Data.Codec do
   end
 
   defp decode_id(model, cell) do
-    if uuid_text?(cell),
-      do: {:ok, {:uuid, cell}},
-      else: {:error, "#{model}.id: the stored id #{inspect(cell)} is not a Uuid"}
+    if uuid_text?(cell) do
+      {:ok, {:uuid, cell}}
+    else
+      Logger.warning("Kinoko.Data.Codec: #{model}.id: #{inspect(cell, limit: 5)} is not a Uuid")
+      {:error, "#{model}.id: the stored id is not a Uuid"}
+    end
   end
 
   # The column is absent: written before the field existed.
@@ -178,20 +218,30 @@ defmodule Kinoko.Data.Codec do
 
   defp decode(type, cell, models), do: from_json(type, cell, models)
 
-  defp from_json(type, text, models) when is_binary(text) do
-    case Json.decode_stored(text, type, models) do
-      {:ok, v} -> {:ok, v}
-      {:error, why} -> {:error, "the stored JSON cannot be read: #{why}"}
+  # The stored value never reaches the message (`decode_row/4` logs the
+  # detail): a JSON reason can quote the cell, a map key's text included.
+  defp from_json(type, text, %{models: models, types: types}) when is_binary(text) do
+    case Json.decode_stored(text, type, models, types) do
+      {:ok, v} ->
+        {:ok, v}
+
+      {:error, why} ->
+        {:error, "the stored value cannot be read as #{Format.type(type)}",
+         "the stored JSON cannot be read: #{why}"}
     end
   end
 
-  defp from_json(_type, cell, _models),
-    do: {:error, "expected JSON text, the stored value is #{inspect(cell, limit: 5)}"}
+  defp from_json(type, cell, _tables),
+    do:
+      {:error, "the stored value cannot be read as #{Format.type(type)}",
+       "expected JSON text, the stored value is #{inspect(cell, limit: 5)}"}
 
   defp bad(t, cell) when is_binary(t), do: bad({:named, t}, cell)
 
   defp bad({:named, t}, cell),
-    do: {:error, "the stored value #{inspect(cell, limit: 5, printable_limit: 40)} is not a #{t}"}
+    do:
+      {:error, "the stored value is not a #{t}",
+       "the stored value #{inspect(cell, limit: 5, printable_limit: 40)} is not a #{t}"}
 
   defp inspect_kind(v), do: Kinoko.Lang.Rt.kind_name(v)
 end

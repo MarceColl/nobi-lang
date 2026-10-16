@@ -17,34 +17,66 @@ defmodule Kinoko.Data.Opener do
   The repo is linked: if it dies, the opener stops, and the next `open/2`
   starts a fresh one (`restart: :temporary`). Stopping drops the repo's
   schema cache entries (`Kinoko.Data.Cache.drop/1`).
+
+  ## The write lock
+
+  The opener also serves the file's write lock (`Kinoko.Data.Lock`, its
+  protocol there), registered as `Kinoko.Data.Lock.key(repo)` before the
+  repo is handed out. It grants the lock to one holder at a time, in the
+  order asked; a waiter still waiting after the file's `busy_timeout` (the
+  `busy_timeout:` option, else the repo's config, else 5_000 ms) is told
+  `:busy` and dropped. It monitors holder and waiters: a holder's death
+  releases the lock, a waiter's drops it from the queue.
   """
 
   use GenServer, restart: :temporary
 
-  alias Kinoko.Data.{Cache, Repo, Schema}
+  alias Kinoko.Data.{Cache, Lock, Repo, Schema}
 
   @registry Kinoko.Data.Registry
   @supervisor Kinoko.Data.Supervisor
+  @stale_tries 1_000
 
   @doc """
   The repo of the file at `path`, opening it if it is not open. Options:
   `busy_timeout:` (ms) for the repo, used only by the open that starts it.
   """
   @spec open(String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
-  def open(path, opts) do
+  def open(path, opts), do: open(path, opts, @stale_tries)
+
+  # An opener that just stopped (`close/1`) can linger in the registry
+  # for a moment after it is gone: its entry is waited out, never used.
+  defp open(path, opts, tries) do
     case Registry.lookup(@registry, path) do
-      [{_opener, repo}] when is_pid(repo) -> {:ok, repo}
-      _ -> start(path, opts)
+      [{opener, repo}] when is_pid(repo) ->
+        if Process.alive?(opener) and Process.alive?(repo),
+          do: {:ok, repo},
+          else: stale(path, opts, tries)
+
+      _ ->
+        start(path, opts, tries)
     end
   end
 
-  defp start(path, opts) do
+  defp stale(_path, _opts, 0), do: {:error, :opener_stopping}
+
+  defp stale(path, opts, tries) do
+    Process.sleep(1)
+    open(path, opts, tries - 1)
+  end
+
+  defp start(path, opts, tries) do
     spec = {__MODULE__, Keyword.put(Keyword.take(opts, [:busy_timeout]), :path, path)}
 
     case DynamicSupervisor.start_child(@supervisor, spec) do
-      {:ok, opener} -> repo(opener)
-      {:error, {:already_started, opener}} -> repo(opener)
-      {:error, reason} -> {:error, reason}
+      {:ok, opener} ->
+        repo(opener)
+
+      {:error, {:already_started, opener}} ->
+        if Process.alive?(opener), do: repo(opener), else: stale(path, opts, tries)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -79,7 +111,21 @@ defmodule Kinoko.Data.Opener do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
-    {:ok, %{repo: nil, path: Keyword.fetch!(opts, :path)}, {:continue, {:open, opts}}}
+
+    busy_timeout =
+      Keyword.get(opts, :busy_timeout) ||
+        Keyword.get(Application.get_env(:kinoko, Repo, []), :busy_timeout, 5_000)
+
+    state = %{
+      repo: nil,
+      path: Keyword.fetch!(opts, :path),
+      busy_timeout: busy_timeout,
+      holder: nil,
+      queue: :queue.new(),
+      waiting: %{}
+    }
+
+    {:ok, state, {:continue, {:open, opts}}}
   end
 
   # Opening runs after `init/1`, so a slow first open does not hold up the
@@ -93,7 +139,8 @@ defmodule Kinoko.Data.Opener do
          :ok <- create_wal(path),
          {:ok, repo} <- Repo.start_link(repo_opts),
          state = %{state | repo: repo},
-         :ok <- Schema.create_meta(repo) do
+         :ok <- Schema.create_meta(repo),
+         {:ok, _} <- Registry.register(@registry, Lock.key(repo), nil) do
       {_, _} = Registry.update_value(@registry, path, fn _ -> repo end)
       {:noreply, state}
     else
@@ -126,6 +173,80 @@ defmodule Kinoko.Data.Opener do
     do: {:stop, {:shutdown, {:repo_down, reason}}, state}
 
   def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
+
+  def handle_info({:kinoko_lock, :acquire, pid, ref}, state) do
+    mon = Process.monitor(pid)
+
+    if state.holder == nil do
+      {:noreply, grant(state, pid, ref, mon)}
+    else
+      timer = Process.send_after(self(), {:kinoko_lock, :expire, ref}, state.busy_timeout)
+
+      {:noreply,
+       %{
+         state
+         | queue: :queue.in(ref, state.queue),
+           waiting: Map.put(state.waiting, ref, {pid, mon, timer})
+       }}
+    end
+  end
+
+  def handle_info({:kinoko_lock, :release, ref}, %{holder: {_pid, ref, mon}} = state) do
+    Process.demonitor(mon, [:flush])
+    {:noreply, next(%{state | holder: nil})}
+  end
+
+  def handle_info({:kinoko_lock, :release, _ref}, state), do: {:noreply, state}
+
+  def handle_info({:kinoko_lock, :expire, ref}, state) do
+    case Map.pop(state.waiting, ref) do
+      {{pid, mon, _timer}, waiting} ->
+        Process.demonitor(mon, [:flush])
+        send(pid, {:kinoko_lock, ref, :busy})
+        {:noreply, %{state | waiting: waiting}}
+
+      {nil, _} ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:DOWN, mon, :process, _pid, _reason}, %{holder: {_, _, mon}} = state),
+    do: {:noreply, next(%{state | holder: nil})}
+
+  def handle_info({:DOWN, mon, :process, _pid, _reason}, state) do
+    case Enum.find(state.waiting, fn {_ref, {_pid, m, _timer}} -> m == mon end) do
+      {ref, {_pid, _mon, timer}} ->
+        Process.cancel_timer(timer)
+        {:noreply, %{state | waiting: Map.delete(state.waiting, ref)}}
+
+      nil ->
+        {:noreply, state}
+    end
+  end
+
+  defp grant(state, pid, ref, mon) do
+    send(pid, {:kinoko_lock, ref, :granted})
+    %{state | holder: {pid, ref, mon}}
+  end
+
+  # The next waiter still waiting gets the lock (refs dropped from
+  # `waiting`, by expiry or death, are skipped).
+  defp next(state) do
+    case :queue.out(state.queue) do
+      {{:value, ref}, queue} ->
+        case Map.pop(state.waiting, ref) do
+          {{pid, mon, timer}, waiting} ->
+            Process.cancel_timer(timer)
+            grant(%{state | queue: queue, waiting: waiting}, pid, ref, mon)
+
+          {nil, _} ->
+            next(%{state | queue: queue})
+        end
+
+      {:empty, _} ->
+        state
+    end
+  end
 
   @impl true
   def terminate(_reason, %{repo: nil}), do: :ok

@@ -8,9 +8,11 @@ defmodule Kinoko.Data.Tx do
 
   Each `run/4` spawns a short-lived coordinator process, which:
 
-  1. opens one `BEGIN IMMEDIATE` transaction on the deployment's file
-     (`Kinoko.Data.transaction/2`): SQLite serializes writers, so two
-     transactions never interleave and never lose an update;
+  1. takes the deployment's write lock (`Kinoko.Data.Lock`, waited for
+     without holding a connection) and opens one `BEGIN IMMEDIATE`
+     transaction on its file (`Kinoko.Data.transaction/2`): writers are
+     serialized, so two transactions never interleave and never lose an
+     update;
   2. runs the body in an Exec worker (`Kinoko.Exec.apply/4`, from a
      runner process linked to the coordinator, so the coordinator stays
      free) with the handle `{:store, coordinator, ref}`;
@@ -20,8 +22,10 @@ defmodule Kinoko.Data.Tx do
      commits.
 
   The caller waits for the coordinator's answer or its death. The
-  coordinator watches the caller: a caller that dies rolls the
-  transaction back and ends it.
+  coordinator watches the caller while the body runs: a caller that dies
+  then rolls the transaction back and ends it. Once the body has
+  answered, its ops are applied and committed whether or not the caller
+  is still there (the coordinator does not look again).
 
   ## What the body sees
 
@@ -52,11 +56,15 @@ defmodule Kinoko.Data.Tx do
   - the body past its heap: the worker's message;
   - an op failing: the store's message (`"not-found"`, `"store"`,
     `"too-many-rows"` errors name the model and field);
-  - the file busy (`SQLITE_BUSY`, past `busy_timeout`) on every try:
+  - the file busy on every try (the write lock not had within
+    `busy_timeout`, or SQLite's own `SQLITE_BUSY` past it):
     `"the store is busy …"`. Busy is retried up to 3 times, the body
     run again each time, which is safe as the body is pure;
   - the store down (closed, crashed): `"the store is unavailable …"`,
     never retried;
+  - a store operation inside the transaction that failed in a nested
+    one (a schema sync) without the body failing: `"a store operation
+    inside the transaction failed …"`;
   - anything internal (a crash in the runtime): a generic message; the
     details are logged, not shown. SQLite's own messages never reach the
     program (`Kinoko.Data` logs them).
@@ -68,9 +76,15 @@ defmodule Kinoko.Data.Tx do
   the body at most that long plus a 1_000 ms grace for the worker's
   own answer to arrive, then kills it itself. A read has no deadline of
   its own (`Kinoko.Data.Hooks`): the worker's governs it, and the
-  coordinator answers every read promptly. Waiting for the file's write
-  lock is bounded by the repo's `busy_timeout`, so one try takes at most
-  `busy_timeout + timeout + grace` and a run at most four tries.
+  coordinator answers every read promptly.
+
+  Waiting for the deployment's write lock is bounded by the file's
+  `busy_timeout` (`Kinoko.Data.Lock`), and a try that waits it out fails
+  busy before its body runs. So a run that is retried takes about `4 ×
+  busy_timeout + timeout + grace` (plus applying the ops) at worst: with
+  the defaults (5_000, 5_000, 1_000), about 26 s. Only another OS process
+  holding the file can add to that: SQLite's own wait for the file lock,
+  up to `busy_timeout` more in a try that has the write lock.
 
   ## Late messages
 
@@ -95,8 +109,8 @@ defmodule Kinoko.Data.Tx do
   Runs the transaction `body` (a Yabu function of the `Store` handle,
   answering `(List<Tx.Op>, r)`) on `repo` (`Kinoko.Data.open/2`), against
   `target`: an image, `%{image: image, signatures: _}` or a snapshot, as
-  `Kinoko.Exec.apply/4` takes. The stored models' signatures are the
-  image's `__yabu__(:models)`.
+  `Kinoko.Exec.apply/4` takes. Rows are typed by the image's
+  `__yabu__(:models)` and `__yabu__(:types)`.
 
   Options: `:timeout` (ms, default #{@default_timeout}) and
   `:max_heap_size`, the body's limits (see the moduledoc).
@@ -138,8 +152,9 @@ defmodule Kinoko.Data.Tx do
   defp wrap({:ok, image}), do: {:ok, image}
   defp wrap({:error, error}), do: {:error, {:body, error}}
 
+  # What the store types rows by: the image's models and deftypes.
   defp models(image) do
-    {:ok, image.module.__yabu__(:models)}
+    {:ok, %{models: image.module.__yabu__(:models), types: image.module.__yabu__(:types)}}
   rescue
     UndefinedFunctionError ->
       {:error, {:body, %{code: "unloaded", message: "the image was unloaded"}}}
@@ -369,6 +384,11 @@ defmodule Kinoko.Data.Tx do
 
   defp message({:shape, m}, _timeout), do: m
   defp message(:caller_down, _timeout), do: "the transaction's caller stopped"
+
+  # A nested transaction (a schema sync) rolled back while the body and
+  # its ops otherwise answered: its own error was logged where it failed.
+  defp message(:rollback, _timeout),
+    do: "a store operation inside the transaction failed; nothing was applied"
 
   defp message(reason, _timeout) do
     cond do

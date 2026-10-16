@@ -25,6 +25,21 @@ defmodule Kinoko.Data.TxTest do
     text : String
   end
   deftype T.Msg do Done(Result<(List<Uuid>, Int), String>) end
+  deftype T.Kind do A(Int) | B | C(Result<String, Int>) end
+  defmodel T.Tagged do
+    id : Uuid
+    kind : T.Kind
+    res : Result<Int, String>
+  end
+  def T.tag(kind : T.Kind, res : Result<Int, String>) : Cmd<T.Msg> do
+    Cmd.store.tx(
+      fn (s : Store) ->
+        ([Tx.insert(%T.Tagged{kind: kind, res: res})],
+         List.length((Store.list(s) : List<T.Tagged>)))
+      end,
+      T.Msg.Done
+    )
+  end
   def T.incr(id : Uuid) : Cmd<T.Msg> do
     Cmd.store.tx(
       fn (s : Store) ->
@@ -51,7 +66,12 @@ defmodule Kinoko.Data.TxTest do
     {u, r} = Lang.stage(Lang.new(), "t", @src)
     {:promoted, _} = r
     {:ok, image} = Exec.load(Lang.snapshot(u))
-    %{image: image, models: image.module.__yabu__(:models)}
+
+    %{
+      image: image,
+      models: image.module.__yabu__(:models),
+      tables: %{models: image.module.__yabu__(:models), types: image.module.__yabu__(:types)}
+    }
   end
 
   setup do
@@ -135,6 +155,29 @@ defmodule Kinoko.Data.TxTest do
     end
   end
 
+  describe "deftype and Result fields" do
+    test "are written and read back exactly", %{dir: dir, image: image, tables: tables} do
+      repo = open!(dir)
+
+      values = [
+        {{:var, "T.Kind", "A", [7]}, {:var, "Result", "Ok", [1]}},
+        {{:var, "T.Kind", "B", []}, {:var, "Result", "Err", ["no"]}},
+        {{:var, "T.Kind", "C", [{:var, "Result", "Err", [3]}]}, {:var, "Result", "Ok", [-1]}}
+      ]
+
+      for {{kind, res}, i} <- Enum.with_index(values) do
+        body = tx_body(image, "T.tag", [kind, res])
+        assert {:ok, {[id], ^i}} = Tx.run(repo, image, body, [])
+
+        assert {:ok, {:rec, "T.Tagged", %{"id" => ^id, "kind" => ^kind, "res" => ^res}}} =
+                 Data.get(repo, "T.Tagged", tables, id)
+      end
+
+      {:ok, rows} = Data.list(repo, "T.Tagged", tables)
+      assert Enum.map(rows, fn {:rec, _, f} -> {f["kind"], f["res"]} end) == values
+    end
+  end
+
   describe "ops" do
     test "an update of a missing id is an error, and rolls back the ops before it",
          %{dir: dir, image: image, models: models} do
@@ -192,6 +235,58 @@ defmodule Kinoko.Data.TxTest do
   end
 
   describe "failures roll back" do
+    test "a schema sync that fails says why, whether an op or a read needs it",
+         %{dir: dir, image: image, models: models} do
+      repo = open!(dir)
+      # Both names T.Note could have are another symbol's.
+      Data.Repo.put_dynamic_repo(repo)
+
+      Data.Repo.query!("INSERT INTO _kinoko_tables (symbol, tbl) VALUES (?, ?), (?, ?)", [
+        "X.One",
+        "t__note",
+        "X.Two",
+        Data.Schema.fallback("T.Note")
+      ])
+
+      insert = fn _ -> {[{:tx, :insert, "T.Note", note("a")}], 0} end
+      assert {:error, message} = Tx.run(repo, image, insert, [])
+      assert message =~ "T.Note: no table name is free"
+
+      read = fn s -> {[], Hooks.store_list(s, "T.Note")} end
+      assert {:error, message} = Tx.run(repo, image, read, [])
+      assert message =~ "T.Note: no table name is free"
+
+      both = fn s ->
+        _ = Hooks.store_list(s, "T.Counter")
+        {[{:tx, :insert, "T.Counter", counter(1)}, {:tx, :insert, "T.Note", note("a")}], 0}
+      end
+
+      assert {:error, message} = Tx.run(repo, image, both, [])
+      assert message =~ "T.Note: no table name is free"
+      assert {:ok, []} = Data.list(repo, "T.Counter", models)
+    end
+
+    test "a schema sync SQLite refuses says the store refused, inside a transaction",
+         %{dir: dir, image: image, models: models} do
+      repo = open!(dir)
+      Data.Repo.put_dynamic_repo(repo)
+      Data.Repo.query!("INSERT INTO _kinoko_tables (symbol, tbl) VALUES ('T.Note', 't__note')")
+      Data.Repo.query!("CREATE VIEW t__note AS SELECT 1 AS id, 1 AS _seq")
+
+      for body <- [
+            fn _ -> {[{:tx, :insert, "T.Note", note("a")}], 0} end,
+            fn s -> {[], Hooks.store_list(s, "T.Note")} end,
+            fn _ ->
+              {[{:tx, :insert, "T.Counter", counter(1)}, {:tx, :insert, "T.Note", note("a")}], 0}
+            end
+          ] do
+        {result, _log} = ExUnit.CaptureLog.with_log(fn -> Tx.run(repo, image, body, []) end)
+        assert {:error, "the store rejected the operation"} = result
+      end
+
+      assert {:ok, []} = Data.list(repo, "T.Counter", models)
+    end
+
     test "a body that throws a runtime error", %{dir: dir, image: image, models: models} do
       repo = open!(dir)
       body = fn s -> Hooks.store_list(s, "T.Note") && throw({:yabu_error, "division by zero"}) end

@@ -13,17 +13,28 @@ defmodule Kinoko.Data do
   call's duration, in the calling process only; a process that runs store
   work (an effect task, a transaction coordinator) is handed the pid.
 
+  ## Writers and readers
+
+  Every write (`insert/4`, `update/5`, `delete/4`, `transaction/2`, and a
+  schema sync) takes the deployment's write lock (`Kinoko.Data.Lock`)
+  before it checks out a connection, so a writer waiting its turn holds
+  none and reads (WAL) never wait behind writers. Reads take no lock.
+
   ## Rows
 
   A row is a record, `{:rec, model, %{field => value}}`, in the runtime's
   representation (`Kinoko.Lang.Rt`). `sig` is the model's signature as the
   running image has it, `[{field, type, default}]` (the image's
   `__yabu__(:models)` entry), or that whole models table, which a model
-  with nested models needs to write and read them. Each call first makes
+  with nested models needs to write and read them, or `%{models: models,
+  types: types}` with the image's deftype table (`__yabu__(:types)`)
+  too, which a field holding a deftype's value (or a `Result`) needs.
+  Each call first makes
   sure of the table (`ensure/3`, cached), then:
 
   - `insert/4` mints a v4 Uuid as the row's id (any `"id"` the row has is
-    overwritten) and appends the row;
+    overwritten) and appends the row (its `_seq` past every one the table
+    ever issued: `Kinoko.Data.Schema.next_seq/1`);
   - `list/4` reads every row, in insertion order, capped at
     `max_rows/0` (`"too-many-rows"` above it);
   - `get/4`, `update/5` (whole-row replace; the row keeps its place) and
@@ -38,8 +49,10 @@ defmodule Kinoko.Data do
 
   `{:error, %{code: code, message: message}}`:
 
-  - `"unavailable"`: the file is busy or locked past `busy_timeout`
-    (`reason: :busy`, "the store is busy; try again": safe to retry), or
+  - `"unavailable"`: the write lock or the file is busy past
+    `busy_timeout` (`reason: :busy`, "the store is busy; try again": safe
+    to retry; SQLite's busy and locked codes, recognized by their fixed
+    text), or
     the repo is gone, closed or crashed (`reason: :down`, "the store is
     unavailable": retrying does not help).
   - `"store"`: a constraint failed, a value cannot be stored, or a stored
@@ -56,7 +69,7 @@ defmodule Kinoko.Data do
 
   require Logger
 
-  alias Kinoko.Data.{Cache, Codec, Opener, Repo, Schema}
+  alias Kinoko.Data.{Cache, Codec, Lock, LockError, Opener, Repo, Schema}
 
   @max_rows 10_000
 
@@ -66,7 +79,10 @@ defmodule Kinoko.Data do
 
   @type repo :: pid()
   @type error :: %{code: String.t(), message: String.t()}
-  @type sig :: [{String.t(), term(), term()}] | %{String.t() => list()}
+  @type sig ::
+          [{String.t(), term(), term()}]
+          | %{String.t() => list()}
+          | %{models: %{String.t() => list()}, types: map()}
 
   @doc "The most rows `list/4` returns."
   @spec max_rows() :: pos_integer()
@@ -116,7 +132,7 @@ defmodule Kinoko.Data do
   @spec ensure(repo(), String.t(), sig()) :: :ok | {:error, error()}
   def ensure(repo, model, sig) do
     run(repo, fn ->
-      with {:ok, _layout, _models} <- layout(repo, model, sig), do: :ok
+      with {:ok, _layout, _tables} <- layout(repo, model, sig), do: :ok
     end)
   end
 
@@ -126,19 +142,21 @@ defmodule Kinoko.Data do
   @spec insert(repo(), String.t(), sig(), term()) ::
           {:ok, {:uuid, String.t()}} | {:error, error()}
   def insert(repo, model, sig, row) do
-    run(repo, fn ->
-      with {:ok, layout, models} <- layout(repo, model, sig),
-           {:ok, cells} <- encode(model, layout, row, models) do
+    write(repo, fn ->
+      with {:ok, layout, tables} <- layout(repo, model, sig),
+           {:ok, cells} <- encode(model, layout, row, tables) do
         id = Ecto.UUID.generate()
         t = Schema.quote_name(layout.table)
         cols = Enum.map_join(cells, "", fn {col, _} -> ", " <> Schema.quote_name(col) end)
         marks = String.duplicate(", ?", length(cells))
 
-        Repo.query!(
-          "INSERT INTO #{t} (id, _seq#{cols}) " <>
-            "VALUES (?, (SELECT COALESCE(MAX(_seq), 0) + 1 FROM #{t})#{marks})",
-          [id | Enum.map(cells, &elem(&1, 1))]
-        )
+        {:ok, _} =
+          transaction(fn ->
+            Repo.query!(
+              "INSERT INTO #{t} (id, _seq#{cols}) VALUES (?, ?#{marks})",
+              [id, Schema.next_seq(layout.table) | Enum.map(cells, &elem(&1, 1))]
+            )
+          end)
 
         {:ok, {:uuid, id}}
       end
@@ -154,7 +172,7 @@ defmodule Kinoko.Data do
     cap = Keyword.get(opts, :cap, @max_rows)
 
     run(repo, fn ->
-      with {:ok, layout, models} <- layout(repo, model, sig) do
+      with {:ok, layout, tables} <- layout(repo, model, sig) do
         result =
           Repo.query!("#{select(layout)} ORDER BY _seq LIMIT ?", [cap + 1])
 
@@ -164,7 +182,7 @@ defmodule Kinoko.Data do
             "#{model} has more than #{cap} rows, more than a list reads at once"
           )
         else
-          decode_all(model, layout, result, models)
+          decode_all(model, layout, result, tables)
         end
       end
     end)
@@ -176,8 +194,8 @@ defmodule Kinoko.Data do
   def get(repo, model, sig, id) do
     run(repo, fn ->
       with {:ok, text} <- id_text(id),
-           {:ok, layout, models} <- layout(repo, model, sig) do
-        fetch(model, layout, text, models)
+           {:ok, layout, tables} <- layout(repo, model, sig) do
+        fetch(model, layout, text, tables)
       end
     end)
   end
@@ -186,10 +204,10 @@ defmodule Kinoko.Data do
   @spec update(repo(), String.t(), sig(), {:uuid, String.t()}, term()) ::
           {:ok, {:uuid, String.t()}} | {:error, error()}
   def update(repo, model, sig, id, row) do
-    run(repo, fn ->
+    write(repo, fn ->
       with {:ok, text} <- id_text(id),
-           {:ok, layout, models} <- layout(repo, model, sig),
-           {:ok, cells} <- encode(model, layout, row, models) do
+           {:ok, layout, tables} <- layout(repo, model, sig),
+           {:ok, cells} <- encode(model, layout, row, tables) do
         sets =
           Enum.map_join(cells, ", ", fn {col, _} -> Schema.quote_name(col) <> " = ?" end)
 
@@ -217,11 +235,11 @@ defmodule Kinoko.Data do
   @spec delete(repo(), String.t(), sig(), {:uuid, String.t()}) ::
           {:ok, term() | nil} | {:error, error()}
   def delete(repo, model, sig, id) do
-    run(repo, fn ->
+    write(repo, fn ->
       with {:ok, text} <- id_text(id),
-           {:ok, layout, models} <- layout(repo, model, sig) do
+           {:ok, layout, tables} <- layout(repo, model, sig) do
         transaction(fn ->
-          case fetch(model, layout, text, models) do
+          case fetch(model, layout, text, tables) do
             {:ok, nil} ->
               nil
 
@@ -308,7 +326,7 @@ defmodule Kinoko.Data do
   """
   @spec transaction(repo(), (-> term())) :: {:ok, term()} | {:error, term()}
   def transaction(repo, fun) do
-    run(repo, fn ->
+    write(repo, fn ->
       if Repo.in_transaction?() do
         transaction(fun)
       else
@@ -334,6 +352,10 @@ defmodule Kinoko.Data do
 
   # ---------- internals ----------
 
+  # `run/2` under the deployment's write lock, taken before any
+  # connection is checked out (`Kinoko.Data.Lock`).
+  defp write(repo, fun), do: run(repo, fn -> Lock.with_lock(repo, fun) end)
+
   # Runs `fun` with `repo` as this process's dynamic repo, restoring the
   # previous one after; SQLite errors and a gone repo become error tuples.
   defp run(repo, fun) do
@@ -346,6 +368,14 @@ defmodule Kinoko.Data do
       rescue
         e in Exqlite.Error ->
           {:error, sql_error(e)}
+
+        e in LockError ->
+          if e.reason == :busy do
+            Logger.info("Kinoko.Data: busy: #{Exception.message(e)}")
+            {:error, %{code: "unavailable", reason: :busy, message: @busy}}
+          else
+            down(e)
+          end
 
         e in DBConnection.ConnectionError ->
           down(e)
@@ -369,16 +399,38 @@ defmodule Kinoko.Data do
   # states, pids) never leave here: they are logged, and the caller gets
   # one generic message per class.
   defp sql_error(%Exqlite.Error{message: message} = e) do
-    text = String.downcase(message || "")
+    case busy_code(message) do
+      nil ->
+        Logger.error("Kinoko.Data: SQLite refused: #{Exception.message(e)}")
+        %{code: "store", message: @rejected}
 
-    if String.contains?(text, "locked") or String.contains?(text, "busy") do
-      Logger.info("Kinoko.Data: busy: #{Exception.message(e)}")
-      %{code: "unavailable", reason: :busy, message: @busy}
-    else
-      Logger.error("Kinoko.Data: SQLite refused: #{Exception.message(e)}")
-      %{code: "store", message: @rejected}
+      code ->
+        Logger.info("Kinoko.Data: busy (#{code}): #{Exception.message(e)}")
+        %{code: "unavailable", reason: :busy, message: @busy}
     end
   end
+
+  # The busy and locked result codes, by the error text SQLite fixes for
+  # each (`sqlite3_errstr`): Exqlite (0.42) hands over `sqlite3_errmsg`'s
+  # text, not the code, and for these codes that text is the fixed one.
+  # Matched whole, never as a substring, so no table, column or
+  # constraint name can pass for one. "Database is busy" is Exqlite's own
+  # (a connection checked out twice, or a busy step).
+  @busy_codes %{
+    "database is locked" => "SQLITE_BUSY",
+    "database table is locked" => "SQLITE_LOCKED",
+    "Database is busy" => "exqlite busy"
+  }
+
+  defp busy_code(message) when is_binary(message) do
+    cond do
+      code = Map.get(@busy_codes, message) -> code
+      String.starts_with?(message, "database schema is locked: ") -> "SQLITE_LOCKED"
+      true -> nil
+    end
+  end
+
+  defp busy_code(_message), do: nil
 
   defp down(:closed) do
     Logger.warning("Kinoko.Data: a call on a closed store")
@@ -402,12 +454,15 @@ defmodule Kinoko.Data do
       )
 
   defp layout(repo, model, sig) do
-    models = if is_list(sig), do: %{model => sig}, else: sig
+    tables =
+      if is_list(sig),
+        do: %{models: %{model => sig}, types: %{}},
+        else: Codec.tables(sig)
 
-    case Map.fetch(models, model) do
+    case Map.fetch(tables.models, model) do
       {:ok, fields} when is_list(fields) ->
         case Schema.layout(repo, model, fields) do
-          {:ok, layout} -> {:ok, layout, models}
+          {:ok, layout} -> {:ok, layout, tables}
           {:error, why} -> store_error(why)
         end
 
@@ -416,8 +471,8 @@ defmodule Kinoko.Data do
     end
   end
 
-  defp encode(model, layout, row, models) do
-    case Codec.encode_row(model, layout.columns, row, models) do
+  defp encode(model, layout, row, tables) do
+    case Codec.encode_row(model, layout.columns, row, tables) do
       {:ok, cells} -> {:ok, cells}
       {:error, why} -> store_error(why)
     end
@@ -430,16 +485,16 @@ defmodule Kinoko.Data do
     "SELECT id#{cols} FROM #{Schema.quote_name(layout.table)}"
   end
 
-  defp fetch(model, layout, text, models) do
+  defp fetch(model, layout, text, tables) do
     case Repo.query!("#{select(layout)} WHERE id = ?", [text]) do
       %{rows: []} -> {:ok, nil}
-      result -> with {:ok, [row]} <- decode_all(model, layout, result, models), do: {:ok, row}
+      result -> with {:ok, [row]} <- decode_all(model, layout, result, tables), do: {:ok, row}
     end
   end
 
-  defp decode_all(model, layout, %{columns: names, rows: rows}, models) do
+  defp decode_all(model, layout, %{columns: names, rows: rows}, tables) do
     Enum.reduce_while(rows, {:ok, []}, fn cells, {:ok, acc} ->
-      case Codec.decode_row(model, layout.columns, Map.new(Enum.zip(names, cells)), models) do
+      case Codec.decode_row(model, layout.columns, Map.new(Enum.zip(names, cells)), tables) do
         {:ok, row} -> {:cont, {:ok, [row | acc]}}
         {:error, why} -> {:halt, store_error(why)}
       end

@@ -179,6 +179,9 @@ defmodule KinokoWeb.Mcp.Instructions do
     through Cmd.store.* or Tx (else `not-stored`). Never write `id`:
     construction omits it (`%Counter.Snapshot{count: 1, label: "x", saves: 1}`),
     insert mints it, and every row read back carries a real one.
+  - A stored model's fields may hold any data: scalars, List, Map, Option,
+    tuples, nested models, your own deftype and Result<T, E> too. Every
+    one is stored and read back exactly.
   - Cmd.store.insert(row, fn (id : Uuid) -> msg end)
     Cmd.store.list(fn (rows : List<M>) -> msg end)       insertion order, max 10000
     Cmd.store.get(id, fn (row : Option<M>) -> msg end)

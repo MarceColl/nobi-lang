@@ -516,8 +516,9 @@ defmodule KinokoWeb.DeploymentLive do
     end
   end
 
+  # What the store types rows by: the image's models and deftypes.
   defp models(image) do
-    {:ok, image.module.__yabu__(:models)}
+    {:ok, %{models: image.module.__yabu__(:models), types: image.module.__yabu__(:types)}}
   rescue
     UndefinedFunctionError ->
       {:error, %{code: "unloaded", message: "the code this effect came from was unloaded"}}

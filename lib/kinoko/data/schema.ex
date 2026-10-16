@@ -11,9 +11,29 @@ defmodule Kinoko.Data.Schema do
   `_seq`) or one another symbol of the file already has falls back to
   `fallback/1`: `m_` and the first 12 hex of the symbol's sha256.
 
-  Every mapping is recorded, in `_kinoko_tables(symbol, tbl)` and
-  `_kinoko_columns(tbl, field, col)`, and read back from there: a name, once
-  given, never changes. Names are strings throughout; none becomes an atom.
+  Every mapping is recorded, in `_kinoko_tables(symbol, tbl, seq)` and
+  `_kinoko_columns(tbl, field, col, stype)`, and read back from there: a
+  table's name, once given, never changes, and a field keeps its column
+  while its storage type does. Names are strings throughout; none becomes
+  an atom.
+
+  ## Storage types
+
+  A column holds the values of one storage type (`storage_type/1`): `Int`,
+  `Bool`, `String` or `Uuid` (an `Option` of one shares it), or `JSON` and
+  the field's whole type. It is recorded with the column. A field whose
+  type changes (a model removed and declared again under its name) never
+  reads the old column as the new type: SQLite would coerce (`"0042"` into
+  an `INTEGER` column is `42`), and `1` is as good a `Bool` as an `Int`.
+  Instead the old column is retired, untouched (`_kinoko_retired(tbl,
+  field, stype, col)`), and the field moves to a column of its own:
+  `<col>__v2` (`__v3`, …), or the column it had with that storage type
+  before, if it had one. Rows written before the change read the field as
+  absent (its default, `None`, or an error, as for any absent field).
+
+  A file from before storage types has its columns marked `legacy:` and
+  their SQL type at open (`create_meta/1`); the first sync that finds one
+  adopts it for a field of that SQL type, and retires it for any other.
 
   ## Columns
 
@@ -24,13 +44,21 @@ defmodule Kinoko.Data.Schema do
   nullable and has no SQL `DEFAULT`: defaults are read-time, from the
   reader's signature (a `NULL` in a non-`Option` column is "absent").
 
+  ## Insertion order
+
+  `_seq` orders a table's rows, and is never reused: `next_seq/1` takes
+  it from the table's counter in `_kinoko_tables.seq`, in the inserting
+  transaction, so a deleted newest row's number is not handed out again.
+
   ## Sync
 
-  `ensure/3` creates the table, and adds (`ALTER TABLE … ADD COLUMN`) each
-  field the table lacks (rows already there, and rows inserted by code that
-  predates the field, hold `NULL` there). It never drops or alters a
-  column. It runs in one `IMMEDIATE` transaction, so concurrent ensures of
-  one file serialize. Its layout is cached per `{repo, model, signature
+  `layout/3` first reads: a table that has every field's column with the
+  field's storage type is used as it is, with no write lock and no write
+  transaction. Otherwise it syncs, under the deployment's write lock
+  (`Kinoko.Data.Lock`), in one `IMMEDIATE` transaction: it creates the
+  table, and adds (`ALTER TABLE … ADD COLUMN`) each column a field lacks
+  (rows already there, and rows inserted by code that predates the field,
+  hold `NULL` there). It never drops or alters a column. Its layout is cached per `{repo, model, signature
   hash}` (`Kinoko.Data.Cache`). Inside an enclosing transaction
   (`Kinoko.Data.transaction/2`) a rollback would undo the table or
   columns the cache would claim, so there the layout is deferred: kept
@@ -38,7 +66,8 @@ defmodule Kinoko.Data.Schema do
   (`Kinoko.Data.Cache`'s "Deferred entries").
   """
 
-  alias Kinoko.Data.{Cache, Codec, Repo}
+  alias Kinoko.Data.{Cache, Codec, Lock, Repo}
+  alias Kinoko.Lang.Format
 
   @typedoc "A field's place: `{field, type, default, column}`."
   @type column :: {String.t(), term(), term(), String.t()}
@@ -83,25 +112,98 @@ defmodule Kinoko.Data.Schema do
 
   # ---------- meta tables ----------
 
-  @doc "Creates the meta tables of the file `repo` is open on, if missing."
+  @doc """
+  Creates the meta tables of the file `repo` is open on, if missing, and
+  brings an older file's up to date (see "Storage types" and "Insertion
+  order"), in one transaction. Runs once per open (`Kinoko.Data.Opener`).
+  """
   @spec create_meta(pid()) :: :ok | {:error, term()}
   def create_meta(repo) do
     Repo.put_dynamic_repo(repo)
 
-    Repo.query!(
-      "CREATE TABLE IF NOT EXISTS _kinoko_tables " <>
-        "(symbol TEXT PRIMARY KEY, tbl TEXT NOT NULL UNIQUE)"
-    )
+    {:ok, :ok} =
+      Repo.transaction(fn ->
+        Repo.query!(
+          "CREATE TABLE IF NOT EXISTS _kinoko_tables " <>
+            "(symbol TEXT PRIMARY KEY, tbl TEXT NOT NULL UNIQUE, seq INTEGER)"
+        )
 
-    Repo.query!(
-      "CREATE TABLE IF NOT EXISTS _kinoko_columns (tbl TEXT NOT NULL, field TEXT NOT NULL, " <>
-        "col TEXT NOT NULL, PRIMARY KEY (tbl, field), UNIQUE (tbl, col))"
-    )
+        Repo.query!(
+          "CREATE TABLE IF NOT EXISTS _kinoko_columns (tbl TEXT NOT NULL, field TEXT NOT NULL, " <>
+            "col TEXT NOT NULL, stype TEXT, PRIMARY KEY (tbl, field), UNIQUE (tbl, col))"
+        )
+
+        Repo.query!(
+          "CREATE TABLE IF NOT EXISTS _kinoko_retired (tbl TEXT NOT NULL, field TEXT NOT NULL, " <>
+            "stype TEXT NOT NULL, col TEXT NOT NULL, PRIMARY KEY (tbl, field, stype))"
+        )
+
+        add_meta_column("_kinoko_tables", "seq", "INTEGER")
+        add_meta_column("_kinoko_columns", "stype", "TEXT")
+        mark_legacy_columns()
+        :ok
+      end)
 
     :ok
   rescue
     e -> {:error, e}
   end
+
+  defp add_meta_column(table, col, type) do
+    unless col in column_names(table) do
+      Repo.query!("ALTER TABLE #{table} ADD COLUMN #{col} #{type}")
+    end
+  end
+
+  # A column recorded before storage types were: `legacy:` and its SQL
+  # type, all that is known of it (see "Storage types").
+  defp mark_legacy_columns do
+    tables = Repo.query!("SELECT DISTINCT tbl FROM _kinoko_columns WHERE stype IS NULL").rows
+
+    for [table] <- tables do
+      declared = declared_types(table)
+
+      for [col] <- Repo.query!(legacy_cols(), [table]).rows do
+        Repo.query!(
+          "UPDATE _kinoko_columns SET stype = ? WHERE tbl = ? AND col = ?",
+          ["legacy:" <> Map.get(declared, col, ""), table, col]
+        )
+      end
+    end
+  end
+
+  defp legacy_cols, do: "SELECT col FROM _kinoko_columns WHERE tbl = ? AND stype IS NULL"
+
+  defp column_names(table), do: Map.keys(declared_types(table))
+
+  # `%{column => declared SQL type}` of `table` (empty if it has none).
+  defp declared_types(table) do
+    Map.new(Repo.query!("PRAGMA table_info(#{quote_name(table)})").rows, fn row ->
+      {row |> Enum.at(1) |> String.downcase(), Enum.at(row, 2)}
+    end)
+  end
+
+  # ---------- storage types ----------
+
+  @doc """
+  The storage type of a field of `type`: what its column's cells hold, so
+  what they can be read as (see "Storage types"). `Option` of a scalar
+  shares its scalar's.
+  """
+  @spec storage_type(term()) :: String.t()
+  def storage_type({:named, t}) when t in ["Int", "Bool", "String", "Uuid"], do: t
+
+  def storage_type({:applied, "Option", [inner]} = type) do
+    if Codec.scalar?(inner), do: storage_type(inner), else: "JSON " <> Format.type(type)
+  end
+
+  def storage_type(type), do: "JSON " <> Format.type(type)
+
+  # A column recorded as `recorded` holds values a field of storage type
+  # `stype` reads: the same storage type, or a legacy column of the same
+  # SQL type (all an older file tells).
+  defp holds?(recorded, stype, type),
+    do: recorded == stype or recorded == "legacy:" <> column_type(type)
 
   # ---------- ensure ----------
 
@@ -109,9 +211,13 @@ defmodule Kinoko.Data.Schema do
   The layout of `model`'s table under its `fields` (`[{field, type,
   default}]`), the table synced first if this repo has not synced it for
   this signature. Runs in the caller, whose dynamic repo is set; raises
-  `Exqlite.Error` as a query does, and returns `{:error, message}` for a
-  name that cannot be given. Inside an enclosing transaction, that error
-  also marks the enclosing one for rollback.
+  `Exqlite.Error` as a query does (and `Kinoko.Data.LockError` when the
+  write lock cannot be had), and returns `{:error, message}` for a name
+  that cannot be given. Inside an enclosing transaction, that error also
+  marks the enclosing one for rollback.
+
+  A table that already matches the signature is read, never written: no
+  write lock, no write transaction (`matching/2`).
   """
   @spec layout(pid(), String.t(), list()) :: {:ok, layout()} | {:error, String.t()}
   def layout(repo, model, fields) do
@@ -125,33 +231,81 @@ defmodule Kinoko.Data.Schema do
         # Checked before `sync/3` opens its own transaction: only an
         # enclosing one can roll the sync back after it returns.
         if Repo.in_transaction?(),
-          do: enclosed_layout(key, model, fields),
-          else: synced(key, model, fields)
+          do: enclosed_layout(repo, key, model, fields),
+          else: synced(repo, key, model, fields)
     end
   end
 
-  defp synced(key, model, fields) do
-    with {:ok, layout} <- sync(model, fields) do
+  defp synced(repo, key, model, fields) do
+    with {:ok, layout} <- sync(repo, model, fields) do
       Cache.put(key, {fields, layout})
       {:ok, layout}
     end
   end
 
   # Inside a transaction: deferred until it commits (`Cache.defer/2`).
-  defp enclosed_layout(key, model, fields) do
+  defp enclosed_layout(repo, key, model, fields) do
     case Cache.deferred(key) do
       {:ok, {^fields, layout}} ->
         {:ok, layout}
 
       _ ->
-        with {:ok, layout} <- sync(model, fields) do
+        with {:ok, layout} <- sync(repo, model, fields) do
           Cache.defer(key, {fields, layout})
           {:ok, layout}
         end
     end
   end
 
-  defp sync(model, fields) do
+  defp sync(repo, model, fields) do
+    case matching(model, fields) do
+      {:ok, layout} -> {:ok, layout}
+      :no -> Lock.with_lock(repo, fn -> write_sync(model, fields) end)
+    end
+  end
+
+  # The layout read off the file when the table and every field's column
+  # are there with the field's storage type: reads only.
+  defp matching(model, fields) do
+    with [[table]] <- Repo.query!("SELECT tbl FROM _kinoko_tables WHERE symbol = ?", [model]).rows,
+         mapped = recorded_columns(table),
+         present = MapSet.new(column_names(table)),
+         columns when is_list(columns) <- matching_columns(fields, mapped, present) do
+      {:ok, %{table: table, columns: columns}}
+    else
+      _ -> :no
+    end
+  end
+
+  defp matching_columns(fields, mapped, present) do
+    Enum.reduce_while(stored_fields(fields), [], fn {field, type, default}, acc ->
+      case Map.fetch(mapped, field) do
+        {:ok, {col, stype}} ->
+          if stype == storage_type(type) and MapSet.member?(present, col),
+            do: {:cont, [{field, type, default, col} | acc]},
+            else: {:halt, :no}
+
+        :error ->
+          {:halt, :no}
+      end
+    end)
+    |> case do
+      :no -> :no
+      columns -> Enum.reverse(columns)
+    end
+  end
+
+  defp stored_fields(fields), do: Enum.reject(fields, fn {field, _, _} -> field == "id" end)
+
+  # `%{field => {col, stype}}` of `table`.
+  defp recorded_columns(table) do
+    Map.new(
+      Repo.query!("SELECT field, col, stype FROM _kinoko_columns WHERE tbl = ?", [table]).rows,
+      fn [field, col, stype] -> {field, {col, stype}} end
+    )
+  end
+
+  defp write_sync(model, fields) do
     tx =
       Repo.transaction(fn ->
         with {:ok, table} <- table_for(model),
@@ -207,24 +361,17 @@ defmodule Kinoko.Data.Schema do
   end
 
   defp columns_for(table, fields) do
-    mapped =
-      Map.new(
-        Repo.query!("SELECT field, col FROM _kinoko_columns WHERE tbl = ?", [table]).rows,
-        &List.to_tuple/1
-      )
-
-    present =
-      MapSet.new(Repo.query!("PRAGMA table_info(#{quote_name(table)})").rows, fn row ->
-        row |> Enum.at(1) |> String.downcase()
-      end)
+    state = %{
+      table: table,
+      mapped: recorded_columns(table),
+      present: MapSet.new(column_names(table))
+    }
 
     fields
-    |> Enum.reject(fn {field, _, _} -> field == "id" end)
-    |> Enum.reduce_while({:ok, [], mapped}, fn {field, type, default}, {:ok, acc, mapped} ->
-      with {:ok, col, mapped} <- column_for(table, field, mapped),
-           :ok <- add_column(table, col, present, type) do
-        {:cont, {:ok, [{field, type, default, col} | acc], mapped}}
-      else
+    |> stored_fields()
+    |> Enum.reduce_while({:ok, [], state}, fn {field, type, default}, {:ok, acc, state} ->
+      case column_for(state, field, type) do
+        {:ok, col, state} -> {:cont, {:ok, [{field, type, default, col} | acc], state}}
         {:error, _} = error -> {:halt, error}
       end
     end)
@@ -234,24 +381,31 @@ defmodule Kinoko.Data.Schema do
     end
   end
 
-  defp column_for(table, field, mapped) do
-    case Map.fetch(mapped, field) do
-      {:ok, col} ->
-        {:ok, col, mapped}
+  # The column of `field` as a `type`: its recorded one if that holds this
+  # storage type, else a column of its own (see "Storage types").
+  defp column_for(state, field, type) do
+    stype = storage_type(type)
+
+    case Map.fetch(state.mapped, field) do
+      {:ok, {col, recorded}} ->
+        if holds?(recorded, stype, type) do
+          if recorded != stype, do: record_stype(state.table, field, stype)
+          {:ok, col, add_column(state, col, type)}
+        else
+          retype(state, field, {col, recorded}, stype, type)
+        end
 
       :error ->
-        taken = MapSet.new(@reserved_columns ++ Map.values(mapped))
-        wanted = column_name(field)
+        candidates = [column_name(field), fallback(field)]
 
-        case Enum.reject([wanted, fallback(field)], &MapSet.member?(taken, &1)) do
+        case Enum.reject(candidates, &taken?(state, &1)) do
           [col | _] ->
-            Repo.query!("INSERT INTO _kinoko_columns (tbl, field, col) VALUES (?, ?, ?)", [
-              table,
-              field,
-              col
-            ])
+            Repo.query!(
+              "INSERT INTO _kinoko_columns (tbl, field, col, stype) VALUES (?, ?, ?, ?)",
+              [state.table, field, col, stype]
+            )
 
-            {:ok, col, Map.put(mapped, field, col)}
+            {:ok, col, state |> map(field, col, stype) |> add_column(col, type)}
 
           [] ->
             {:error, "no column name is free for `#{field}`"}
@@ -259,17 +413,109 @@ defmodule Kinoko.Data.Schema do
     end
   end
 
+  # `field`'s type changed: its column is retired, untouched, and the field
+  # moves to the column it had with this storage type before, if any, or
+  # to a fresh one (`col__v2`, `col__v3`, …).
+  defp retype(state, field, {old, recorded}, stype, type) do
+    Repo.query!(
+      "INSERT OR REPLACE INTO _kinoko_retired (tbl, field, stype, col) VALUES (?, ?, ?, ?)",
+      [state.table, field, recorded, old]
+    )
+
+    # A column retired with this storage type, or a legacy one that holds it.
+    retired =
+      Repo.query!(
+        "SELECT stype, col FROM _kinoko_retired WHERE tbl = ? AND field = ? AND stype IN (?, ?) " <>
+          "ORDER BY stype = ? DESC LIMIT 1",
+        [state.table, field, stype, "legacy:" <> column_type(type), stype]
+      ).rows
+
+    col =
+      case retired do
+        [[was, col]] ->
+          Repo.query!("DELETE FROM _kinoko_retired WHERE tbl = ? AND field = ? AND stype = ?", [
+            state.table,
+            field,
+            was
+          ])
+
+          col
+
+        [] ->
+          fresh(state, old)
+      end
+
+    with col when is_binary(col) <- col do
+      Repo.query!("UPDATE _kinoko_columns SET col = ?, stype = ? WHERE tbl = ? AND field = ?", [
+        col,
+        stype,
+        state.table,
+        field
+      ])
+
+      {:ok, col, state |> map(field, col, stype) |> add_column(col, type)}
+    end
+  end
+
+  defp fresh(state, old) do
+    Enum.find_value(2..1_000, {:error, "no column name is free for a retyped `#{old}`"}, fn n ->
+      col = "#{old}__v#{n}"
+      if taken?(state, col), do: nil, else: col
+    end)
+  end
+
+  defp record_stype(table, field, stype) do
+    Repo.query!("UPDATE _kinoko_columns SET stype = ? WHERE tbl = ? AND field = ?", [
+      stype,
+      table,
+      field
+    ])
+  end
+
+  # A name another field holds, or a column the table has (a retired one).
+  defp taken?(state, col) do
+    col in @reserved_columns or MapSet.member?(state.present, col) or
+      Enum.any?(state.mapped, fn {_, {c, _}} -> c == col end)
+  end
+
+  defp map(state, field, col, stype),
+    do: %{state | mapped: Map.put(state.mapped, field, {col, stype})}
+
   # No SQL `DEFAULT`: a NULL (or absent) cell means "absent", and reads as
   # the field's default in the reader's signature (`Kinoko.Data.Codec`), so
   # a changed default applies to every row written before the field.
-  defp add_column(table, col, present, type) do
-    unless MapSet.member?(present, col) do
+  defp add_column(state, col, type) do
+    if MapSet.member?(state.present, col) do
+      state
+    else
       Repo.query!(
-        "ALTER TABLE #{quote_name(table)} ADD COLUMN #{quote_name(col)} " <> column_type(type)
+        "ALTER TABLE #{quote_name(state.table)} ADD COLUMN #{quote_name(col)} " <>
+          column_type(type)
       )
-    end
 
-    :ok
+      %{state | present: MapSet.put(state.present, col)}
+    end
+  end
+
+  # ---------- insertion order ----------
+
+  @doc """
+  The next `_seq` of `table`: one past every `_seq` it ever issued, kept
+  in `_kinoko_tables.seq` (and past every `_seq` in the table, for a file
+  from before the counter). Must run in the transaction that inserts
+  the row, so a rollback takes the number back with the row.
+  """
+  @spec next_seq(String.t()) :: pos_integer()
+  def next_seq(table) do
+    %{rows: [[seq]]} =
+      Repo.query!(
+        "UPDATE _kinoko_tables SET seq = MAX(COALESCE(seq, 0), " <>
+          "(SELECT COALESCE(MAX(_seq), 0) FROM #{quote_name(table)})) + 1 " <>
+          "WHERE tbl = ? RETURNING seq",
+        [table]
+      )
+
+    seq
   end
 
   @doc "The SQLite column type of a field of `type` (see \"Columns\")."

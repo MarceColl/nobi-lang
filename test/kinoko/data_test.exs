@@ -2,6 +2,8 @@ defmodule Kinoko.DataTest do
   # Each test has its own data directory and real pools: no Ecto sandbox.
   use ExUnit.Case, async: true
 
+  @moduletag :capture_log
+
   alias Kinoko.Data
   alias Kinoko.Data.Repo
 
@@ -406,8 +408,44 @@ defmodule Kinoko.DataTest do
                {:rec, "Shop.Addr", %{"street" => "Old", "zip" => 0, "unit" => @none}}
 
       sql!(repo, ~s(UPDATE shop__item SET addr = '{"zip":1}'))
-      assert {:error, %{code: "store", message: m}} = Data.get(repo, "Shop.Item", @models, id)
-      assert m =~ "street"
+
+      {result, log} =
+        ExUnit.CaptureLog.with_log(fn -> Data.get(repo, "Shop.Item", @models, id) end)
+
+      assert {:error, %{code: "store", message: m}} = result
+      assert m == "Shop.Item.addr: the stored value cannot be read as Shop.Addr"
+      assert log =~ "street"
+    end
+
+    test "a decode error names the field and type, never the stored value", %{dir: dir} do
+      repo = open!(dir)
+      {:ok, id} = Data.insert(repo, "Shop.Item", @models, item(@none))
+      secret = "s3cret-#{System.unique_integer([:positive])}"
+      sql!(repo, "UPDATE shop__item SET counts = ?", [~s({"#{secret}":"x"})])
+      sql!(repo, "UPDATE shop__item SET id = ?", [secret])
+
+      {_, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          assert {:error, %{message: m}} = Data.list(repo, "Shop.Item", @models)
+          refute m =~ secret
+        end)
+
+      assert log =~ secret
+      sql!(repo, "UPDATE shop__item SET id = ?", [elem(id, 1)])
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, %{message: m}} = Data.get(repo, "Shop.Item", @models, id)
+        assert m == "Shop.Item.counts: the stored value cannot be read as Map<String, Int>"
+      end)
+
+      sig = [{"id", @uuid, :none}, {"n", @int, :none}]
+      {:ok, id} = Data.insert(repo, "A.N", sig, {:rec, "A.N", %{"n" => 1}})
+      sql!(repo, "UPDATE a__n SET n = ?", [secret])
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, %{message: "A.N.n: the stored value is not a Int"}} =
+                 Data.get(repo, "A.N", sig, id)
+      end)
     end
 
     test "a corrupt or mistyped JSON cell is a store error, never a crash", %{dir: dir} do
@@ -438,6 +476,365 @@ defmodule Kinoko.DataTest do
       assert {:error, %{code: "store"}} = Data.insert(repo, "A.Deep", sig, row)
 
       assert {:ok, []} = Data.list(repo, "A.Deep", sig)
+    end
+  end
+
+  describe "deftype and Result fields" do
+    @kind {:named, "S.Kind"}
+    @result {:applied, "Result", [@int, @str]}
+    @box {:applied, "S.Box", [{:applied, "Option", [@str]}]}
+
+    @tables %{
+      models: %{
+        "S.Row" => [
+          {"id", @uuid, :none},
+          {"kind", @kind, :none},
+          {"res", @result, :none},
+          {"box", @box, :none},
+          {"kinds", {:applied, "List", [@kind]}, :none},
+          {"maybe", {:applied, "Option", [@result]}, :none}
+        ]
+      },
+      types: %{
+        "S.Kind" => {[], [{"A", [@int]}, {"B", []}, {"C", [@str, {:applied, "List", [@int]}]}]},
+        "S.Box" => {["T"], [{"Full", [{:named, "T"}]}, {"Empty", []}]}
+      }
+    }
+
+    defp kind(v, args), do: {:var, "S.Kind", v, args}
+
+    test "round-trip exactly", %{dir: dir} do
+      repo = open!(dir)
+
+      rows = [
+        %{
+          "kind" => kind("A", [42]),
+          "res" => {:var, "Result", "Ok", [1]},
+          "box" => {:var, "S.Box", "Full", [some("x")]},
+          "kinds" => [kind("B", []), kind("C", ["c", [1, 2]])],
+          "maybe" => some({:var, "Result", "Err", ["no"]})
+        },
+        %{
+          "kind" => kind("B", []),
+          "res" => {:var, "Result", "Err", ["bad"]},
+          "box" => {:var, "S.Box", "Full", [@none]},
+          "kinds" => [],
+          "maybe" => @none
+        }
+      ]
+
+      for fields <- rows do
+        {:ok, id} = Data.insert(repo, "S.Row", @tables, {:rec, "S.Row", fields})
+
+        assert {:ok, {:rec, "S.Row", Map.put(fields, "id", id)}} ==
+                 Data.get(repo, "S.Row", @tables, id)
+      end
+    end
+
+    test "a stored variant must be one of the field's deftype", %{dir: dir} do
+      repo = open!(dir)
+
+      fields = %{
+        "kind" => kind("A", [1]),
+        "res" => {:var, "Result", "Ok", [1]},
+        "box" => {:var, "S.Box", "Empty", []},
+        "kinds" => [],
+        "maybe" => @none
+      }
+
+      {:ok, id} = Data.insert(repo, "S.Row", @tables, {:rec, "S.Row", fields})
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        for bad <- [
+              ~s({"$variant":"S.Kind.D","values":[]}),
+              ~s({"$variant":"S.Other.A","values":[1]}),
+              ~s({"$variant":"S.Kind.A","values":["1"]}),
+              ~s({"$variant":"S.Kind.A","values":[]}),
+              ~s({"$variant":"S.Kind.B"}),
+              ~s({"$variant":"S.Kind.B","values":[],"x":1}),
+              ~s("A")
+            ] do
+          sql!(repo, "UPDATE s__row SET kind = ?", [bad])
+
+          assert {:error, %{code: "store", message: "S.Row.kind: " <> _}} =
+                   Data.get(repo, "S.Row", @tables, id)
+        end
+      end)
+
+      # A variant of an unknown deftype cannot be written: it would not
+      # read back.
+      assert {:error, %{code: "store"}} =
+               Data.insert(repo, "S.Row", Map.put(@tables, :types, %{}), {:rec, "S.Row", fields})
+    end
+  end
+
+  describe "a field's storage type" do
+    @tags {:applied, "List", [@str]}
+    @n_int [{"id", @uuid, :none}, {"n", @int, :none}, {"tags", @tags, :none}]
+    @n_str [{"id", @uuid, :none}, {"n", @str, "absent"}, {"tags", @str, :none}]
+    @n_bool [{"id", @uuid, :none}, {"n", @bool, false}, {"tags", @tags, :none}]
+
+    defp rec(fields), do: {:rec, "A.M", fields}
+
+    test "Int then String: \"0042\" round-trips, the old Int never reads as a String",
+         %{dir: dir} do
+      repo = open!(dir)
+      {:ok, old} = Data.insert(repo, "A.M", @n_int, rec(%{"n" => 7, "tags" => ["x"]}))
+
+      {:ok, new} = Data.insert(repo, "A.M", @n_str, rec(%{"n" => "0042", "tags" => "hi"}))
+
+      assert {:ok, {:rec, _, %{"n" => "0042", "tags" => "hi"}}} =
+               Data.get(repo, "A.M", @n_str, new)
+
+      {:ok, new2} = Data.insert(repo, "A.M", @n_str, rec(%{"n" => "42", "tags" => "[1]"}))
+
+      assert {:ok, {:rec, _, %{"n" => "42", "tags" => "[1]"}}} =
+               Data.get(repo, "A.M", @n_str, new2)
+
+      # The old row's n is absent under String (its default); its JSON tags
+      # are absent too, and with no default that is an error, never "[\"x\"]".
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, %{code: "store", message: m}} = Data.get(repo, "A.M", @n_str, old)
+        assert m =~ "tags"
+      end)
+
+      str_no_tags = [{"id", @uuid, :none}, {"n", @str, "absent"}]
+      assert {:ok, {:rec, _, %{"n" => "absent"}}} = Data.get(repo, "A.M", str_no_tags, old)
+
+      # The old columns are untouched, and Int code still reads its rows.
+      assert {:ok, {:rec, _, %{"n" => 7, "tags" => ["x"]}}} = Data.get(repo, "A.M", @n_int, old)
+
+      assert sql!(repo, "SELECT n, tags FROM a__m WHERE id = ?", [elem(old, 1)]) == [
+               [7, ~s(["x"])]
+             ]
+
+      cols = columns(repo, "a__m")
+      assert cols["n"] == {"INTEGER", nil}
+      assert cols["n__v2"] == {"TEXT", nil}
+      assert cols["tags__v2"] == {"TEXT", nil}
+    end
+
+    test "Int then Bool: an old 1 is never read as true", %{dir: dir} do
+      repo = open!(dir)
+      {:ok, one} = Data.insert(repo, "A.M", @n_int, rec(%{"n" => 1, "tags" => []}))
+
+      assert {:ok, {:rec, _, %{"n" => false}}} = Data.get(repo, "A.M", @n_bool, one)
+      {:ok, b} = Data.insert(repo, "A.M", @n_bool, rec(%{"n" => true, "tags" => ["t"]}))
+      assert {:ok, {:rec, _, %{"n" => true, "tags" => ["t"]}}} = Data.get(repo, "A.M", @n_bool, b)
+      # JSON tags kept their column: same storage type.
+      assert {:ok, {:rec, _, %{"tags" => []}}} = Data.get(repo, "A.M", @n_bool, one)
+    end
+
+    test "back to the first type reads the first column again", %{dir: dir} do
+      repo = open!(dir)
+      {:ok, old} = Data.insert(repo, "A.M", @n_int, rec(%{"n" => 7, "tags" => ["x"]}))
+      {:ok, mid} = Data.insert(repo, "A.M", @n_str, rec(%{"n" => "s", "tags" => "t"}))
+      :ok = Data.close("app", dir: dir)
+      repo = open!(dir)
+
+      assert {:ok, {:rec, _, %{"n" => 7, "tags" => ["x"]}}} = Data.get(repo, "A.M", @n_int, old)
+      assert {:ok, {:rec, _, %{"n" => "s"}}} = Data.get(repo, "A.M", @n_str, mid)
+      assert map_size(columns(repo, "a__m")) == 6
+    end
+
+    test "survives reopening: the recorded type, not the cache, decides", %{dir: dir} do
+      repo = open!(dir)
+      {:ok, old} = Data.insert(repo, "A.M", @n_int, rec(%{"n" => 1, "tags" => []}))
+      :ok = Data.close("app", dir: dir)
+      repo = open!(dir)
+      assert {:ok, {:rec, _, %{"n" => false}}} = Data.get(repo, "A.M", @n_bool, old)
+
+      assert sql!(repo, "SELECT field, col, stype FROM _kinoko_columns ORDER BY field") == [
+               ["n", "n__v2", "Bool"],
+               ["tags", "tags", "JSON List<String>"]
+             ]
+    end
+
+    test "a file from before storage types is migrated on open", %{dir: dir} do
+      repo = open!(dir)
+      {:ok, old} = Data.insert(repo, "A.M", @n_int, rec(%{"n" => 7, "tags" => ["x"]}))
+      sql!(repo, "ALTER TABLE _kinoko_columns DROP COLUMN stype")
+      sql!(repo, "ALTER TABLE _kinoko_tables DROP COLUMN seq")
+      :ok = Data.close("app", dir: dir)
+      repo = open!(dir)
+
+      assert sql!(repo, "SELECT field, stype FROM _kinoko_columns ORDER BY field") == [
+               ["n", "legacy:INTEGER"],
+               ["tags", "legacy:TEXT"]
+             ]
+
+      # An INTEGER column is not a String's.
+      assert {:ok, {:rec, _, %{"n" => "absent"}}} =
+               Data.get(repo, "A.M", [{"id", @uuid, :none}, {"n", @str, "absent"}], old)
+
+      # Adopted by a field of its SQL type.
+      assert {:ok, {:rec, _, %{"tags" => ["x"]}}} = Data.get(repo, "A.M", @n_int, old)
+      {:ok, _} = Data.insert(repo, "A.M", @n_int, rec(%{"n" => 8, "tags" => []}))
+    end
+
+    test "an Option of a scalar shares the scalar's column", %{dir: dir} do
+      repo = open!(dir)
+      {:ok, id} = Data.insert(repo, "A.M", @n_int, rec(%{"n" => 7, "tags" => []}))
+      opt = [{"id", @uuid, :none}, {"n", option(@int), :none}]
+      assert {:ok, {:rec, "A.M", %{"n" => some(7)}}} == strip_id(Data.get(repo, "A.M", opt, id))
+    end
+  end
+
+  defp strip_id({:ok, {:rec, m, fields}}), do: {:ok, {:rec, m, Map.delete(fields, "id")}}
+
+  describe "insertion order" do
+    test "_seq is never reused, even after the newest row is deleted", %{dir: dir} do
+      repo = open!(dir)
+      {:ok, a} = Data.insert(repo, "Forum.Post", @v1, v1_post("a", 1))
+      {:ok, b} = Data.insert(repo, "Forum.Post", @v1, v1_post("b", 2))
+
+      seq = fn id ->
+        [[s]] = sql!(repo, "SELECT _seq FROM forum__post WHERE id = ?", [elem(id, 1)])
+        s
+      end
+
+      issued = seq.(b)
+
+      {:ok, _} = Data.delete(repo, "Forum.Post", @v1, b)
+      {:ok, c} = Data.insert(repo, "Forum.Post", @v1, v1_post("c", 3))
+      assert seq.(c) > issued
+
+      {:ok, _} = Data.delete(repo, "Forum.Post", @v1, a)
+      {:ok, _} = Data.delete(repo, "Forum.Post", @v1, c)
+      issued = issued + 1
+      {:ok, d} = Data.insert(repo, "Forum.Post", @v1, v1_post("d", 4))
+      assert seq.(d) > issued
+
+      issued = seq.(d)
+      {:ok, _} = Data.delete(repo, "Forum.Post", @v1, d)
+      :ok = Data.close("app", dir: dir)
+      repo = open!(dir)
+      {:ok, e} = Data.insert(repo, "Forum.Post", @v1, v1_post("e", 5))
+      [[s]] = sql!(repo, "SELECT _seq FROM forum__post WHERE id = ?", [elem(e, 1)])
+      assert s > issued
+    end
+
+    test "a rolled-back insert's _seq may be issued again (it was never seen)", %{dir: dir} do
+      repo = open!(dir)
+
+      {:error, :undo} =
+        Data.transaction(repo, fn ->
+          {:ok, _} = Data.insert(repo, "Forum.Post", @v1, v1_post("a", 1))
+          Data.rollback(:undo)
+        end)
+
+      {:ok, a} = Data.insert(repo, "Forum.Post", @v1, v1_post("a", 1))
+      assert sql!(repo, "SELECT _seq FROM forum__post WHERE id = ?", [elem(a, 1)]) == [[1]]
+    end
+  end
+
+  describe "the write lock" do
+    test "reads never wait for a writer queued behind a long transaction", %{dir: dir} do
+      repo = open!(dir)
+      {:ok, _} = Data.insert(repo, "Forum.Post", @v1, v1_post("a", 1))
+      test = self()
+
+      long =
+        Task.async(fn ->
+          Data.transaction(repo, fn ->
+            {:ok, _} = Data.insert(repo, "Forum.Post", @v1, v1_post("long", 2))
+            send(test, :holding)
+            Process.sleep(1_500)
+          end)
+        end)
+
+      assert_receive :holding, 2_000
+      queued = Task.async(fn -> Data.transaction(repo, fn -> :queued end) end)
+      queued_insert = Task.async(fn -> Data.insert(repo, "Forum.Post", @v1, v1_post("q", 3)) end)
+      Process.sleep(50)
+
+      for _ <- 1..3 do
+        {micros, result} =
+          :timer.tc(fn ->
+            1..4
+            |> Enum.map(fn _ -> Task.async(fn -> Data.list(repo, "Forum.Post", @v1) end) end)
+            |> Task.await_many()
+          end)
+
+        assert Enum.all?(result, &match?({:ok, [_]}, &1))
+        assert micros < 400_000, "reads took #{div(micros, 1000)} ms"
+      end
+
+      assert {:ok, _} = Task.await(long)
+      assert {:ok, :queued} = Task.await(queued)
+      assert {:ok, _} = Task.await(queued_insert)
+      assert {:ok, rows} = Data.list(repo, "Forum.Post", @v1)
+      assert length(rows) == 3
+    end
+
+    test "a writer waiting past busy_timeout is busy, and holds no connection", %{dir: dir} do
+      {:ok, repo} = Data.open("app", dir: dir, busy_timeout: 100)
+      :ok = Data.ensure(repo, "Forum.Post", @v1)
+      test = self()
+
+      long =
+        Task.async(fn ->
+          Data.transaction(repo, fn ->
+            send(test, :holding)
+            Process.sleep(600)
+          end)
+        end)
+
+      assert_receive :holding, 2_000
+
+      {result, _log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+        end)
+
+      assert {:error, %{code: "unavailable", reason: :busy}} = result
+      assert {:ok, []} = Data.list(repo, "Forum.Post", @v1)
+      assert {:ok, _} = Task.await(long)
+      assert {:ok, _} = Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+    end
+
+    test "a holder that dies releases the lock", %{dir: dir} do
+      repo = open!(dir)
+      :ok = Data.ensure(repo, "Forum.Post", @v1)
+      test = self()
+
+      holder =
+        spawn(fn ->
+          Data.transaction(repo, fn ->
+            send(test, :holding)
+            Process.sleep(:infinity)
+          end)
+        end)
+
+      assert_receive :holding, 2_000
+      Process.exit(holder, :kill)
+
+      {micros, result} =
+        :timer.tc(fn -> Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1)) end)
+
+      assert {:ok, _} = result
+      assert micros < 1_000_000
+    end
+
+    test "ensure of a table that already matches writes nothing", %{dir: dir} do
+      repo = open!(dir)
+      :ok = Data.ensure(repo, "Forum.Post", @v2)
+      :ok = Data.close("app", dir: dir)
+      {:ok, repo} = Data.open("app", dir: dir, busy_timeout: 50)
+
+      {:ok, conn} = Exqlite.Sqlite3.open(Path.join([dir, "data", "app.db"]))
+      :ok = Exqlite.Sqlite3.execute(conn, "BEGIN IMMEDIATE")
+
+      try do
+        # A new open: nothing cached. The file's write lock is held
+        # elsewhere, yet a matching table needs none.
+        assert :ok = Data.ensure(repo, "Forum.Post", @v2)
+        assert :ok = Data.ensure(repo, "Forum.Post", @v1)
+        assert {:ok, []} = Data.list(repo, "Forum.Post", @v2)
+      after
+        :ok = Exqlite.Sqlite3.execute(conn, "ROLLBACK")
+        Exqlite.Sqlite3.close(conn)
+      end
     end
   end
 
@@ -678,6 +1075,22 @@ defmodule Kinoko.DataTest do
       end
 
       assert sql!(repo, "SELECT COUNT(*) FROM _kinoko_tables") == [[0]]
+    end
+  end
+
+  describe "busy" do
+    test "is told by SQLite's busy and locked codes, not a word in a message", %{dir: dir} do
+      repo = open!(dir)
+      sig = [{"id", @uuid, :none}, {"locked", @str, :none}, {"busy", @str, :none}]
+      :ok = Data.ensure(repo, "A.Lk", sig)
+      sql!(repo, ~s[CREATE UNIQUE INDEX database_is_locked ON "a__lk" ("locked")])
+      sql!(repo, ~s[CREATE UNIQUE INDEX busy ON "a__lk" ("busy")])
+      row = {:rec, "A.Lk", %{"locked" => "x", "busy" => "y"}}
+      {:ok, _} = Data.insert(repo, "A.Lk", sig, row)
+
+      {result, log} = ExUnit.CaptureLog.with_log(fn -> Data.insert(repo, "A.Lk", sig, row) end)
+      assert {:error, %{code: "store", message: "the store rejected the operation"}} = result
+      assert log =~ "a__lk.locked" or log =~ "a__lk.busy"
     end
   end
 

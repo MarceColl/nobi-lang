@@ -28,7 +28,7 @@ defmodule Kinoko.UniverseHelpers do
 
     on_exit(fn ->
       for path <- Registry.select(Kinoko.Data.Registry, [{{:"$1", :_, :_}, [], [:"$1"]}]),
-          String.starts_with?(path, dir),
+          is_binary(path) and String.starts_with?(path, dir),
           do: Kinoko.Data.Opener.close(path)
 
       case previous do

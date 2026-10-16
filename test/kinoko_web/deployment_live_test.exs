@@ -88,6 +88,85 @@ defmodule KinokoWeb.DeploymentLiveTest do
   end
   """
 
+  # A stored model with a deftype field and a Result field, written by
+  # Cmd.store.insert and Cmd.store.tx and read back by Cmd.store.list.
+  @kinds """
+  deftype K.Kind do
+    A(Int) | B | C(Result<String, Int>)
+  end
+
+  defmodel K.Item do
+    id : Uuid
+    kind : K.Kind
+    res : Result<Int, String>
+  end
+
+  defmodel K.Model do
+    shown : String
+  end
+
+  deftype K.Msg do
+    Add | Added(Uuid) | Loaded(List<K.Item>) | Bump | Bumped(Result<(List<Uuid>, Int), String>)
+  end
+
+  def K.kind(k : K.Kind) : String do
+    case k do
+      K.Kind.A(n) -> String.concat("A", String.from_int(n))
+      K.Kind.B -> "B"
+      K.Kind.C(r) ->
+        case r do
+          Result.Ok(s) -> String.concat("C-ok-", s)
+          Result.Err(n) -> String.concat("C-err-", String.from_int(n))
+        end
+    end
+  end
+
+  def K.res(r : Result<Int, String>) : String do
+    case r do
+      Result.Ok(n) -> String.concat("ok", String.from_int(n))
+      Result.Err(e) -> String.concat("err-", e)
+    end
+  end
+
+  def K.show(i : K.Item) : String do
+    String.concat(K.kind(i.kind), String.concat("/", K.res(i.res)))
+  end
+
+  def K.init() : (K.Model, Cmd<K.Msg>) do
+    (%K.Model{shown: ""}, Cmd.store.list(K.Msg.Loaded))
+  end
+
+  def K.update(msg : K.Msg, model : K.Model) : (K.Model, Cmd<K.Msg>) do
+    case msg do
+      K.Msg.Add -> (model, Cmd.store.insert(%K.Item{kind: K.Kind.C(Result.Err(3)), res: Result.Ok(5)}, K.Msg.Added))
+      K.Msg.Added(id) -> (model, Cmd.store.list(K.Msg.Loaded))
+      K.Msg.Loaded(rows) -> (%K.Model{shown: String.join(List.map(rows, fn (i : K.Item) -> K.show(i) end), " ")}, Cmd.none())
+      K.Msg.Bump ->
+        (model,
+         Cmd.store.tx(
+           fn (s : Store) ->
+             ([Tx.insert(%K.Item{kind: K.Kind.A(List.length((Store.list(s) : List<K.Item>))), res: Result.Err("no")})], 0)
+           end,
+           K.Msg.Bumped))
+      K.Msg.Bumped(r) -> (model, Cmd.store.list(K.Msg.Loaded))
+    end
+  end
+
+  def K.view(model : K.Model) : Html<K.Msg> do
+    <main id="k">
+      <span id="shown">{model.shown}</span>
+      <button id="add" on-click={K.Msg.Add}>Add</button>
+      <button id="bump" on-click={K.Msg.Bump}>Bump</button>
+    </main>
+  end
+
+  defapp K
+
+  defroutes Main do
+    "/" -> K
+  end
+  """
+
   # ---------- helpers ----------
 
   # A fresh universe with `source` promoted, and a deployment of the same
@@ -442,6 +521,7 @@ defmodule KinokoWeb.DeploymentLiveTest do
       assert pinned == %{"From v2" => true, "From v1" => false}
     end
 
+    @tag :capture_log
     test "a row storage cannot read: the banner, or tx's Err", %{conn: conn, u: u} do
       {view, _html} = open(conn, u, "/")
       change(view, change_id(view, "#title"), "Soon broken")
@@ -455,6 +535,8 @@ defmodule KinokoWeb.DeploymentLiveTest do
       {broken, _html} = open(conn, u, "/")
       assert has_element?(broken, "#kinoko-error", "store")
       assert has_element?(broken, "#kinoko-error", "Forum.Topic")
+      # The stored value is never shown.
+      refute has_element?(broken, "#kinoko-error", "many")
       assert has_element?(broken, "#threads")
 
       # A transaction reports through its callback instead: no banner.
@@ -566,6 +648,25 @@ defmodule KinokoWeb.DeploymentLiveTest do
     end
   end
 
+  describe "deftype and Result fields" do
+    test "are stored by insert and tx and read back exactly", %{conn: conn} do
+      u = deploy(@kinds, "Main")
+      {view, _html} = open(conn, u, "/")
+      settled(view)
+
+      click(view, click_id(view, "#add"))
+      eventually(view, &(&1 =~ ~s(<span id="shown">C-err-3/ok5</span>)))
+
+      click(view, click_id(view, "#bump"))
+      eventually(view, &(&1 =~ ~s(<span id="shown">C-err-3/ok5 A1/err-no</span>)))
+      refute has_element?(view, "#kinoko-error")
+
+      # A fresh mount reads them from the store.
+      {view, _html} = open(conn, u, "/")
+      eventually(view, &(&1 =~ ~s(<span id="shown">C-err-3/ok5 A1/err-no</span>)))
+    end
+  end
+
   describe "events from the browser (Review Focus 2)" do
     setup do
       %{u: deploy(@lab, "Main")}
@@ -573,7 +674,8 @@ defmodule KinokoWeb.DeploymentLiveTest do
 
     test "a forged id is ignored", %{conn: conn, u: u} do
       {view, _html} = open(conn, u, "/")
-      before = render(view)
+      # Snapshot only once nothing is in flight (init's own effects).
+      before = settled(view)
       inc = click_id(view, "#inc")
       [_, n] = Regex.run(~r/\Ar(\d+)\./, inc)
 
@@ -602,7 +704,7 @@ defmodule KinokoWeb.DeploymentLiveTest do
 
       render_click(view, "other", %{"click" => inc})
       render_click(view, "yabu", %{"click" => inc})
-      assert render(view) == before
+      assert settled(view) == before
       assert text(view, "#count") == "0"
     end
 
@@ -643,10 +745,10 @@ defmodule KinokoWeb.DeploymentLiveTest do
 
     test "a step result that is not the one in flight is dropped", %{conn: conn, u: u} do
       {view, _html} = open(conn, u, "/")
-      before = render(view)
+      before = settled(view)
       send(view.pid, {:stepped, 999, {:ok, %{page: :not_found}}})
       send(view.pid, {:yabu_callback, -1, {:ok, {:var, "Lab.Msg", "Inc", []}}})
-      assert render(view) == before
+      assert settled(view) == before
     end
 
     test "an id resolves in the render it names, until that render is gone", %{
@@ -678,9 +780,9 @@ defmodule KinokoWeb.DeploymentLiveTest do
       # The on-change input's form submits through LiveView, never natively.
       assert has_element?(view, ~s(form[phx-submit="yabu:submit"] #name))
 
-      before = render(view)
+      before = settled(view)
       render_submit(view, "yabu:submit", %{"yabu" => %{change_id(view, "#name") => "x"}})
-      assert render(view) == before
+      assert settled(view) == before
     end
 
     test "on-click and on-blur on one element: each event dispatches its own msg", %{
