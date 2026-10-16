@@ -94,3 +94,95 @@ export const ConsoleKeys = {
     input.focus()
   },
 }
+
+// GraphCamera sits on the System graph's canvas (#graph-canvas) and ports the
+// prototype's camera (graphStage's fit / zoomBy / startPan / movePan / endPan /
+// onWheel). It owns only the world wrapper's transform and the zoom % label
+// (#graph-zoom, phx-update="ignore"); LiveView owns everything else inside, so
+// updated() puts the transform back after every patch.
+// - drag on empty canvas pans (4px threshold); a click without a drag pushes
+//   `graph:deselect`;
+// - wheel pans, ⌘/Ctrl-wheel zooms about the canvas centre;
+// - the zoom strip dispatches `graph:zoom` ({f}) and `graph:fit` here;
+// - fit frames the content extent (data-cw / data-ch) and keeps clear of the
+//   inspector (gutter 354 with a selection, 28 without); it reruns when the
+//   selection opens or closes, as the prototype's componentDidUpdate does.
+export const GraphCamera = {
+  mounted() {
+    this.cam = {x: 0, y: 0, z: 1}
+    this.selected = this.el.dataset.selected
+    this.pan = null
+
+    this.onDown = (e) => {
+      if (e.target !== this.el) return
+      this.pan = {sx: e.clientX, sy: e.clientY, ox: this.cam.x, oy: this.cam.y, moved: false}
+      this.el.setPointerCapture(e.pointerId)
+    }
+    this.onMove = (e) => {
+      const p = this.pan
+      if (!p) return
+      const dx = e.clientX - p.sx, dy = e.clientY - p.sy
+      if (!p.moved && Math.abs(dx) + Math.abs(dy) < 4) return
+      p.moved = true
+      this.set({...this.cam, x: p.ox + dx, y: p.oy + dy})
+    }
+    this.onUp = (e) => {
+      const p = this.pan
+      this.pan = null
+      if (this.el.hasPointerCapture?.(e.pointerId)) this.el.releasePointerCapture(e.pointerId)
+      if (p && !p.moved) this.pushEvent("graph:deselect", {})
+    }
+    this.onWheel = (e) => {
+      e.preventDefault()
+      if (e.ctrlKey || e.metaKey) this.zoomBy(Math.exp(-e.deltaY * 0.01))
+      else this.set({...this.cam, x: this.cam.x - e.deltaX, y: this.cam.y - e.deltaY})
+    }
+    this.onZoom = (e) => this.zoomBy(Number(e.detail && e.detail.f) || 1)
+    this.onFit = () => this.fit()
+
+    this.el.addEventListener("pointerdown", this.onDown)
+    this.el.addEventListener("pointermove", this.onMove)
+    this.el.addEventListener("pointerup", this.onUp)
+    this.el.addEventListener("wheel", this.onWheel, {passive: false})
+    this.el.addEventListener("graph:zoom", this.onZoom)
+    this.el.addEventListener("graph:fit", this.onFit)
+
+    this.apply()
+    setTimeout(() => this.fit(), 0)
+  },
+
+  updated() {
+    if (this.el.dataset.selected !== this.selected) {
+      this.selected = this.el.dataset.selected
+      setTimeout(() => this.fit(), 0)
+    }
+    this.apply()
+  },
+
+  fit() {
+    const w = this.el.clientWidth, hh = this.el.clientHeight
+    if (w === 0 || hh === 0) return
+    const gutter = this.el.dataset.selected === "true" ? 354 : 28
+    const cw = Number(this.el.dataset.cw) || 1, ch = Number(this.el.dataset.ch) || 1
+    const z = Math.max(.5, Math.min(1, (w - gutter) / cw, (hh - 28) / ch))
+    this.set({z, x: Math.max(8, (w - gutter - cw * z) / 2 + 8), y: 14})
+  },
+
+  zoomBy(f) {
+    const cx = this.el.clientWidth / 2, cy = this.el.clientHeight / 2
+    const z = Math.max(.3, Math.min(2, this.cam.z * f)), k = z / this.cam.z
+    this.set({z, x: cx - (cx - this.cam.x) * k, y: cy - (cy - this.cam.y) * k})
+  },
+
+  set(cam) {
+    this.cam = cam
+    this.apply()
+  },
+
+  apply() {
+    const world = this.el.querySelector("#graph-world")
+    if (world) world.style.transform = `translate(${this.cam.x}px, ${this.cam.y}px) scale(${this.cam.z})`
+    const label = document.getElementById("graph-zoom")
+    if (label) label.textContent = Math.round(this.cam.z * 100) + "%"
+  },
+}

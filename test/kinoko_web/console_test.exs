@@ -53,47 +53,31 @@ defmodule KinokoWeb.ConsoleTest do
   end
 
   describe "/_/u/:universe" do
-    test "shows apps, routes, symbols, history and health", %{conn: conn} do
+    test "shows the system graph", %{conn: conn} do
       u = forum_universe()
       :ok = Deployment.create(u, u, "Forum")
 
       {:ok, view, _} = live(conn, "/_/u/#{u}")
 
-      assert has_element?(view, "#universe-name")
-      assert has_element?(view, "#health[data-state=ok]")
-      assert has_element?(view, id("app", "Forum.Threads"))
-      # the app links to the deployment serving it
-      assert has_element?(view, ~s(#{id("app", "Forum.Threads")} a[href="/_/d/#{u}"]))
-      assert has_element?(view, id("route-table", "Forum"))
-      assert has_element?(view, ~s(#{id("route-table", "Forum")} [data-pattern="/post/:id"]))
-      assert has_element?(view, id("symbol", "Forum.Threads.init"))
-      assert has_element?(view, "#history [id^=history-]")
-    end
-
-    test "shows staged patches with their reasons", %{conn: conn} do
-      u = forum_universe()
-
-      assert {:staged, _} =
-               Universe.stage(u, "broken", """
-               def Forum.Broken.f() : Int do
-                 Forum.Missing.g()
-               end
-               """)
-
-      {:ok, view, _} = live(conn, "/_/u/#{u}")
-      assert has_element?(view, id("staged", "broken"))
-      assert has_element?(view, ~s(#{id("staged", "broken")} [data-reason]))
+      assert has_element?(view, "#node-Forum-Threads")
+      assert has_element?(view, "#node-Forum-Topic")
+      assert has_element?(view, ~s([data-edge="Forum.Threads->Forum.Topic:writes"]))
     end
 
     test "refreshes live after a commit", %{conn: conn} do
       u = forum_universe()
       {:ok, view, _} = live(conn, "/_/u/#{u}")
-      refute has_element?(view, id("symbol", "Forum.Extra.answer"))
+      refute has_element?(view, "#node-Forum-Extra")
 
       assert {:promoted, _} =
-               Universe.stage(u, "extra", "def Forum.Extra.answer() : Int do 42 end")
+               Universe.stage(u, "extra", """
+               defmodel Forum.Extra do
+                 id : Uuid
+                 n : Int
+               end
+               """)
 
-      eventually(view, id("symbol", "Forum.Extra.answer"))
+      eventually(view, "#node-Forum-Extra")
     end
 
     test "an unknown universe goes back to the index", %{conn: conn} do

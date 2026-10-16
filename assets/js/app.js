@@ -24,13 +24,13 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/kinoko"
 import topbar from "../vendor/topbar"
-import {ConsoleKeys, consoleParams} from "./console"
+import {ConsoleKeys, GraphCamera, consoleParams} from "./console"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: () => ({_csrf_token: csrfToken, ...consoleParams()}),
-  hooks: {...colocatedHooks, ConsoleKeys},
+  hooks: {...colocatedHooks, ConsoleKeys, GraphCamera},
 })
 
 // Show progress bar on live navigation and form submits
