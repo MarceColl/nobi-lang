@@ -24,12 +24,12 @@ defmodule Kinoko.Lang.StoreCodegenTest do
     tags : List<String> = ["a", "b"]
     hits : Int = -3
     mode : A.Mode = A.Mode.On(2)
-    note : Option<String> = Option.None
+    note : List<Option<String>> = [Option.None]
     meta : Map<String, Int> = %{"k" => 1}
     pair : (Int, Bool) = (1, true)
   end
   def A.post() : A.Post do
-    %A.Post{n: 1, tags: [], hits: 0, mode: A.Mode.Off, note: Option.None, meta: %{}, pair: (0, false)}
+    %A.Post{n: 1, tags: [], hits: 0, mode: A.Mode.Off, note: [], meta: %{}, pair: (0, false)}
   end
   def A.effects(id : Uuid) : List<Cmd<A.Msg>> do
     [
@@ -82,7 +82,7 @@ defmodule Kinoko.Lang.StoreCodegenTest do
        "tags" => [],
        "hits" => 0,
        "mode" => {:var, "A.Mode", "Off", []},
-       "note" => {:var, "Option", "None", []},
+       "note" => [],
        "meta" => %{},
        "pair" => {0, false}
      }}
@@ -236,7 +236,8 @@ defmodule Kinoko.Lang.StoreCodegenTest do
                {"tags", {:applied, "List", [{:named, "String"}]}, ["a", "b"]},
                {"hits", {:named, "Int"}, -3},
                {"mode", {:named, "A.Mode"}, {:var, "A.Mode", "On", [2]}},
-               {"note", {:applied, "Option", [{:named, "String"}]}, {:var, "Option", "None", []}},
+               {"note", {:applied, "List", [{:applied, "Option", [{:named, "String"}]}]},
+                [{:var, "Option", "None", []}]},
                {"meta", {:applied, "Map", [{:named, "String"}, {:named, "Int"}]}, %{"k" => 1}},
                {"pair", {:tuple, [{:named, "Int"}, {:named, "Bool"}]}, {1, true}}
              ]

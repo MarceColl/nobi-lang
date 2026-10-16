@@ -43,7 +43,9 @@ defmodule Kinoko.Lang.Types.Store do
   (`Option.Some(1)`). Anything else, a call or a reference to another
   symbol, is `"bad-default"`, and so is a constant not of the field's type.
   Defaults only fill rows written before their field existed; a
-  construction still lists every field.
+  construction still lists every field. An `Option<…>` field takes no
+  default (`"bad-default"`): it reads as `Option.None` when absent, since a
+  stored `NULL` cannot tell `None` from absent.
   """
 
   alias Kinoko.Lang.{Ast, Format}
@@ -94,6 +96,17 @@ defmodule Kinoko.Lang.Types.Store do
 
   @doc "A field's default (`:none` or a constant of the field's type `t`), checked."
   def check_default(ctx, _field, _t, :none), do: ctx
+
+  # A stored NULL cannot tell `None` from "written before the field
+  # existed", so an `Option` field always reads as `None` when absent.
+  def check_default(ctx, field, {:applied, "Option", [_]}, _default) do
+    Ctx.error(
+      ctx,
+      "bad-default",
+      "`#{field}`: an Option field reads as Option.None when absent; drop the default " <>
+        "or use a non-Option type with a default"
+    )
+  end
 
   def check_default(ctx, field, t, default) do
     if constant?(default) do

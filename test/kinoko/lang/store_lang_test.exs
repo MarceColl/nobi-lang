@@ -61,7 +61,7 @@ defmodule Kinoko.Lang.StoreLangTest do
                Kinoko.Lang.Ast.without_positions(d)
 
       compound =
-        "defmodel A.M do\n  id : Uuid\n  o : Option<Int> = Option.Some(-1)\n  " <>
+        "defmodel A.M do\n  id : Uuid\n  o : List<Option<Int>> = [Option.Some(-1)]\n  " <>
           "m : Map<String, Int> = %{\"a\" => 1}\n  t : (Int, String) = (1, \"x\")\nend"
 
       assert Format.decl(model!(compound)) == compound
@@ -129,8 +129,7 @@ defmodule Kinoko.Lang.StoreLangTest do
         l : List<Int> = [1, 2]
         m : Map<String, Int> = %{"a" => 1}
         t : (Int, Bool) = (1, true)
-        o : Option<Int> = Option.None
-        p : Option<Int> = Option.Some(2)
+        o : List<Option<Int>> = [Option.None, Option.Some(2)]
         e : A.S = A.S.Off
       end
       """
@@ -153,7 +152,9 @@ defmodule Kinoko.Lang.StoreLangTest do
             "n : Int = A.M2",
             "n : Int = A.S.Nope",
             "n : Int = A.Thing.Nope(1)",
-            "o : Option<Int> = Option.Some(\"x\")"
+            "o : List<Option<Int>> = [Option.Some(\"x\")]",
+            "o : Option<Int> = Option.None",
+            "o : Option<Int> = Option.Some(2)"
           ] do
         src = base <> "defmodel A.M do\n  #{field}\nend"
         assert codes_of(src, "A.M") == ["bad-default"], field
@@ -161,6 +162,9 @@ defmodule Kinoko.Lang.StoreLangTest do
 
       [m] = messages_of("defmodel A.M do\n  n : Int = A.zero()\nend", "A.M")
       assert m =~ "constant"
+
+      [m] = messages_of("defmodel A.M do\n  o : Option<Int> = Option.None\nend", "A.M")
+      assert m =~ "an Option field reads as Option.None when absent"
 
       [m] = messages_of(~s|defmodel A.M do\n  n : Int = "zero"\nend|, "A.M")
       assert m =~ "`n`"

@@ -33,7 +33,7 @@ defmodel Forum.Post do
 end
 ```
 
-- **Syntax:** `name : Type = <constant>`. A constant is a literal, a list or map of constants, a tuple of constants, a variant constructor applied to constants, or `Option.None` / `Option.Some(constant)`. Calls and references to other symbols are not allowed (`"bad-default"`).
+- **Syntax:** `name : Type = <constant>`. A constant is a literal, a list or map of constants, a tuple of constants, a variant constructor applied to constants, or `Option.None` / `Option.Some(constant)`. Calls and references to other symbols are not allowed (`"bad-default"`). An `Option<…>` field takes no default (`"bad-default"`): it reads as `Option.None` when absent, because a stored NULL cannot tell `None` from absent.
 - **Type:** the default is type-checked against the field's type.
 - **Signature:** the model signature becomes `{:model, [{field, type, default | :none}]}`. Format and CID include defaults.
 
@@ -87,7 +87,7 @@ Tx.delete(Model, id : Uuid) : Tx.Op       -- names the stored model (needs a tab
   - Before the first store operation on a model under a given image, `Data.ensure(deployment, model, signature)` creates the table, or runs `ALTER TABLE ADD COLUMN` (with `DEFAULT` for defaulted scalars) for any field the table lacks.
   - It is cached per `(deployment, model, signature hash)`.
   - It never drops or alters columns. Older code reading a table with extra columns ignores them.
-- **Decoding** is type-directed by the model signature of the image running the read. A column that is absent or NULL for a non-Option field takes the field's default (for rows written before the field existed). A value that can't be decoded is an error, never a silent wrong value.
+- **Decoding** is type-directed by the model signature of the image running the read. A column that is absent or NULL for a non-Option field takes the field's current default (for rows written before the field existed); for an Option field it is `None`. Defaults are read-time only: columns carry no SQL `DEFAULT`. A value that can't be decoded is an error, never a silent wrong value.
 - **`list`** is capped at 10,000 rows (`"too-many-rows"` error above that) and ordered by `_seq`.
 
 ### Transactions

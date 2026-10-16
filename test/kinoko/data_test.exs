@@ -22,7 +22,7 @@ defmodule Kinoko.DataTest do
           {"pinned", @bool, false},
           {"note", {:applied, "Option", [@str]}, :none},
           {"tags", {:applied, "List", [@str]}, ["x"]},
-          {"score", {:applied, "Option", [@int]}, {:var, "Option", "Some", [3]}},
+          {"score", {:applied, "Option", [@int]}, :none},
           {"label", @str, "it's"}
         ]
 
@@ -217,7 +217,6 @@ defmodule Kinoko.DataTest do
                  "pinned" => false,
                  "note" => @none,
                  "tags" => ["x"],
-                 # An Option's NULL is None, whatever its default.
                  "score" => @none,
                  "label" => "it's"
                })
