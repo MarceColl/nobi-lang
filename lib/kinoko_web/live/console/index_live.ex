@@ -86,7 +86,10 @@ defmodule KinokoWeb.Console.IndexLive do
         class="flex-1 min-w-0 overflow-y-auto py-[24px] px-[26px] bg-(--k-paper) flex flex-col gap-[22px]"
       >
         <div class="flex flex-col gap-[6px] max-w-[560px]">
-          <span class="font-(family-name:--k-display) text-[25px] font-medium tracking-normal">
+          <span
+            id="home-title"
+            class="font-(family-name:--k-display) text-[25px] font-medium tracking-normal"
+          >
             Workspace
           </span>
           <span class="text-[13px] leading-[1.6] text-(--k-dim) [text-wrap:pretty]">
