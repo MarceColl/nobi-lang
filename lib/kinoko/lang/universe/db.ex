@@ -28,12 +28,16 @@ defmodule Kinoko.Lang.Universe.Db do
     each of its names' signatures read through `{:sig, _}`, never through
     another `{:reaching, _}` (so a ring of deftypes is no cycle). Every check
     that consults the group reads this one memo, not every signature in it.
-  - `{:evolution, cid}`: the model evolution rule's errors
-    (`Kinoko.Lang.Types.Evolution`) for a `defmodel` against what is
-    committed under its name (`{:committed, name}`, then its `{:signature,
-    _}`). Committing the model itself leaves it `[]` as before, so the
-    check that reads it is kept (early cutoff). Only a model's check asks
-    it: the rule constrains nothing else.
+  - `{:evolution, cid}`: `%{errors, reached}`, the model evolution rule
+    (`Kinoko.Lang.Types.Evolution.check/5`) for a `defmodel` against what
+    is committed under its name (`{:committed, name}`, then its
+    `{:signature, _}`) and, when that is stored, for every model its fields
+    reach against theirs; `reached` the names the reach read (each through
+    `{:sig, _}`, and its committed version through `{:committed, _}`).
+    Committing the model leaves it as before, so the check that reads it is
+    kept (early cutoff). Only a model's check asks it, and adds `reached` to
+    its deps: a patch to a reached model checks the stored one again. A
+    failure of it is the check's `"internal"` error, never kept.
   - `{:check, cid}`: the declaration checked against the signatures it
     looks up, each read through `{:sig, _}`, and the groups whose key
     positions it consults, each through `{:reaching, _}`, and its
@@ -112,31 +116,76 @@ defmodule Kinoko.Lang.Universe.Db do
     end
   end
 
-  # Nothing committed under the name, or this very declaration: nothing to
-  # compare (and no signature read).
-  defp evolution(cid, decl, r) do
+  # The model against what is committed under its name, and, when that is
+  # stored, every model its fields reach against theirs: computed against
+  # the lookups unrecorded, then a read recorded of each image signature
+  # the reach consulted and of each committed one.
+  defp evolution(_cid, decl, r) do
     name = Kinoko.Lang.Ast.name(decl)
 
-    case Salsa.input(r, {:committed, name}) do
-      {committed, r} when committed in [nil, cid] ->
-        {{:ok, []}, r}
+    with {:ok, old, r} <- committed_signature(r, name) do
+      committed = fn n -> committed_peek(r, n) end
 
-      {committed, r} ->
-        case Salsa.ask(r, {:signature, committed}) do
-          {{:ok, old}, r} -> {{:ok, Evolution.errors(name, old, Extract.signature(decl))}, r}
-          {error, r} -> {error, r}
+      {errors, reached} =
+        Evolution.check(name, old, Extract.signature(decl), lookup(r), committed)
+
+      r = record_sigs(r, reached)
+
+      Enum.reduce_while(reached, {:ok, r}, fn n, {:ok, r} ->
+        case committed_signature(r, n) do
+          {:ok, _, r} -> {:cont, {:ok, r}}
+          error -> {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, r} -> {{:ok, %{errors: errors, reached: reached}}, r}
+        {:error, error, r} -> {error, r}
+      end
+    end
+    |> case do
+      {:error, error, r} -> {error, r}
+      done -> done
+    end
+  end
+
+  # `{:ok, signature | nil, r}` committed under `name`, read through the
+  # database; `{:error, error, r}` if that fails.
+  defp committed_signature(r, name) do
+    case Salsa.input(r, {:committed, name}) do
+      {nil, r} ->
+        {:ok, nil, r}
+
+      {cid, r} ->
+        case Salsa.ask(r, {:signature, cid}) do
+          {{:ok, sig}, r} -> {:ok, sig, r}
+          {error, r} -> {:error, error, r}
         end
     end
   end
 
-  defp evolution_errors(cid, {:defmodel, _, _}, r) do
-    case Salsa.ask(r, {:evolution, cid}) do
-      {{:ok, errors}, r} -> {Enum.map(errors, &Map.put(&1, :unbound, nil)), r}
-      {_, r} -> {[], r}
+  defp committed_peek(r, name) do
+    with cid when cid != nil <- Salsa.peek(r, {:committed, name}),
+         {_, decl} <- Salsa.peek(r, {:decl, cid}) do
+      Extract.signature(decl)
+    else
+      _ -> nil
     end
   end
 
-  defp evolution_errors(_cid, _decl, r), do: {[], r}
+  # A model's evolution errors and the names its reach read (`{[], []}` for
+  # anything else); a failure of the query is the check's own (`"internal"`).
+  defp evolution_errors(cid, {:defmodel, _, _}, r) do
+    case Salsa.ask(r, {:evolution, cid}) do
+      {{:ok, %{errors: errors, reached: reached}}, r} ->
+        {Enum.map(errors, &Map.put(&1, :unbound, nil)), reached, r}
+
+      {error, r} ->
+        message = "the model evolution rule could not be checked: #{inspect(error)}"
+        {[%{code: "internal", message: message, unbound: nil}], [], r}
+    end
+  end
+
+  defp evolution_errors(_cid, _decl, r), do: {[], [], r}
 
   defp check(cid, decl, r) do
     checked = Check.decl(decl, lookup(r))
@@ -159,7 +208,7 @@ defmodule Kinoko.Lang.Universe.Db do
               "read #{inspect(MapSet.to_list(read))}"
     end
 
-    {evolution, r} = evolution_errors(cid, decl, r)
+    {evolution, reached, r} = evolution_errors(cid, decl, r)
 
     {typed, internal, errors} =
       case {checked.result, evolution} do
@@ -167,14 +216,20 @@ defmodule Kinoko.Lang.Universe.Db do
           {typed, false, []}
 
         {{:ok, _}, evolution} ->
-          {nil, false, evolution}
+          {nil, Enum.any?(evolution, &(&1.code == "internal")), evolution}
 
         {{:error, errors}, evolution} ->
           errors = Enum.zip_with(errors, checked.unbound, &Map.put(&1, :unbound, &2))
-          {nil, Enum.any?(errors, &(&1.code == "internal")), errors ++ evolution}
+          errors = errors ++ evolution
+          {nil, Enum.any?(errors, &(&1.code == "internal")), errors}
       end
 
-    {{:ok, %{typed: typed, deps: deps(decl, checked), internal: internal, errors: errors}}, r}
+    # A stored model's check depends on every model its fields reach too:
+    # a patch to one of them must check it again (the evolution rule).
+    deps =
+      MapSet.union(deps(decl, checked), MapSet.reject(MapSet.new(reached), &Stdlib.provided?/1))
+
+    {{:ok, %{typed: typed, deps: deps, internal: internal, errors: errors}}, r}
   end
 
   # What a name's signature is in this context, unrecorded: the caller

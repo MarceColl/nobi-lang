@@ -466,12 +466,12 @@ defmodule Kinoko.Lang.RtTest do
       assert [
                Stdlib.tx_insert(row),
                Stdlib.tx_update(uuid(@id), row),
-               Stdlib.tx_delete(uuid(@id))
+               Stdlib.tx_delete("C.Row", uuid(@id))
              ] ==
                [
                  {:var, "Tx", "insert", [row]},
                  {:var, "Tx", "update", [uuid(@id), row]},
-                 {:var, "Tx", "delete", [uuid(@id)]}
+                 {:var, "Tx", "delete", ["C.Row", uuid(@id)]}
                ]
     end
 

@@ -329,6 +329,13 @@ defmodule Kinoko.Lang.Types.Check do
   defp synth_form(ctx, {:str, _, _} = e), do: {put_ann(e, named("String"), nil), ctx}
   defp synth_form(ctx, {:bool, _, _} = e), do: {put_ann(e, named("Bool"), nil), ctx}
 
+  # `Tx.delete` is a special form (`Store.synth_tx_delete/2`), never a value.
+  defp synth_form(ctx, {:name, _, ["Tx.delete"]} = e) do
+    ctx
+    |> Ctx.error("bad-tx-delete", "`Tx.delete` " <> Store.tx_delete_why())
+    |> unchecked(e)
+  end
+
   defp synth_form(ctx, {:name, _, [name]} = e) do
     case resolve_name(ctx, name, false) do
       {{t, res}, ctx} ->
@@ -494,6 +501,7 @@ defmodule Kinoko.Lang.Types.Check do
   # `name(args)`: the target must resolve to something callable with as
   # many arguments as are given, each checked against its parameter.
   defp synth_call(ctx, {:call, _, ["Cmd.navigate", _]} = e), do: Routes.synth_navigate(ctx, e)
+  defp synth_call(ctx, {:call, _, ["Tx.delete", _]} = e), do: Store.synth_tx_delete(ctx, e)
 
   defp synth_call(ctx, {:call, m, [name, args]} = e) do
     case resolve_name(ctx, name, true) do
@@ -535,10 +543,29 @@ defmodule Kinoko.Lang.Types.Check do
   end
 
   # `obj.field`: `obj` must be a row of a model that has `field`.
+  #
+  # A row whose type is not known yet (a `Store.get` result before the
+  # model is used anywhere) waits: the field's type is a fresh variable,
+  # settled once the row's type is (`settle_pending/1`).
   defp synth_field(ctx, {:field, m, [obj, field]} = e) do
     {o, ctx} = synth(ctx, obj)
     {resolved, ctx} = Ctx.resolve_deep(ctx, ty(o), fn -> Quote.expr(obj) end)
 
+    case resolved do
+      {:uvar, _} ->
+        {u, ctx} = Ctx.fresh(ctx)
+        waiting = %{at: e, obj: obj, ty: ty(o), field: field, result: u}
+        ctx = %{ctx | pending_fields: [waiting | ctx.pending_fields]}
+        {put_ann({:field, m, [o, field]}, u, nil), ctx}
+
+      _ ->
+        {t, ctx} = field_type(ctx, e, resolved, field)
+        {put_ann({:field, m, [o, field]}, t, nil), ctx}
+    end
+  end
+
+  # The type of `field` of a row of type `resolved` (`e` the access).
+  defp field_type(ctx, e, resolved, field) do
     {found, ctx} =
       case resolved do
         {:named, model} ->
@@ -564,13 +591,56 @@ defmodule Kinoko.Lang.Types.Check do
           {{:error, "not-a-model", message}, ctx}
       end
 
-    {t, ctx} =
-      case found do
-        {:ok, t} -> {t, ctx}
-        {:error, code, message} -> ctx |> Ctx.error(code, message) |> Ctx.fresh()
-      end
+    case found do
+      {:ok, t} -> {t, ctx}
+      {:error, code, message} -> ctx |> Ctx.error(code, message) |> Ctx.fresh()
+    end
+  end
 
-    {put_ann({:field, m, [o, field]}, t, nil), ctx}
+  @doc """
+  The patterns (`Kinoko.Lang.Types.Patterns.check_pending/1`) and field
+  accesses waiting for their type, checked until none settles any more;
+  then, in a declaration, each access still waiting is an error naming the
+  annotation that settles it.
+  """
+  def settle_pending(ctx) do
+    waiting = length(ctx.pending) + length(ctx.pending_fields)
+    ctx = ctx |> Patterns.check_pending() |> check_pending_fields()
+
+    cond do
+      length(ctx.pending) + length(ctx.pending_fields) < waiting -> settle_pending(ctx)
+      ctx.infer.lone_expression -> ctx
+      true -> unsettled_fields(ctx)
+    end
+  end
+
+  defp check_pending_fields(ctx) do
+    {unknown, known} =
+      ctx.pending_fields
+      |> Enum.reverse()
+      |> Enum.split_with(&match?({:uvar, _}, Ctx.shallow(ctx, &1.ty)))
+
+    ctx = %{ctx | pending_fields: Enum.reverse(unknown)}
+
+    Enum.reduce(known, ctx, fn %{at: e, obj: obj, ty: t, field: field, result: u}, ctx ->
+      {resolved, ctx} = Ctx.resolve_deep(ctx, t, fn -> Quote.expr(obj) end)
+      {declared, ctx} = field_type(ctx, e, resolved, field)
+      Ctx.unify!(ctx, u, declared, e)
+    end)
+  end
+
+  defp unsettled_fields(ctx) do
+    ctx.pending_fields
+    |> Enum.reverse()
+    |> Enum.reduce(%{ctx | pending_fields: []}, fn %{at: e, obj: obj, field: field}, ctx ->
+      Ctx.error(
+        ctx,
+        "not-a-model",
+        "field access `.#{field}` needs a model, and nothing settles which one `#{Quote.expr(obj)}` " <>
+          "is in `#{Quote.expr(e)}` — annotate where it comes from, as in " <>
+          "`(Store.get(s, id) : Option<App.Row>)` or `(JSON.parse(text) : Result<App.Row, String>)`"
+      )
+    end)
   end
 
   # Each field a construction or an update sets, checked against the type
@@ -731,7 +801,7 @@ defmodule Kinoko.Lang.Types.Check do
   # open is quoted whole.
   @doc false
   def finalize_body(ctx, {:block, m, [stmts, last]} = block, ty) do
-    ctx = ctx |> Patterns.check_pending() |> Exhaustive.check_tuple_cases()
+    ctx = ctx |> settle_pending() |> Exhaustive.check_tuple_cases()
     {resolved, ctx} = Ctx.resolve_deep(ctx, ty, fn -> Quote.expr(block) end)
 
     ctx =

@@ -14,7 +14,6 @@ defmodule Kinoko.Lang.Types.Check.Decl do
     Extract,
     Hints,
     Infer,
-    Patterns,
     Quote,
     Routes,
     Stdlib,
@@ -37,7 +36,7 @@ defmodule Kinoko.Lang.Types.Check.Decl do
     ctx = Ctx.new(sigs)
     ctx = %{ctx | infer: Infer.lone_expression(ctx.infer)}
     {synthed, ctx} = Check.synth(ctx, expr)
-    ctx = ctx |> Patterns.check_pending() |> Exhaustive.check_tuple_cases()
+    ctx = ctx |> Check.settle_pending() |> Exhaustive.check_tuple_cases()
     {typed, ctx} = Check.finalize_node(ctx, synthed)
     finish(ctx, typed)
   end

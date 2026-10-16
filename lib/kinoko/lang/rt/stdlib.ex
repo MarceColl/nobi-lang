@@ -406,7 +406,8 @@ defmodule Kinoko.Lang.Rt.Stdlib do
   @doc "`Tx.insert(row)`: the op as the call that builds it."
   def tx_insert(row), do: {:var, "Tx", "insert", [row]}
   def tx_update(id, row), do: {:var, "Tx", "update", [id, row]}
-  def tx_delete(id), do: {:var, "Tx", "delete", [id]}
+  @doc "`Tx.delete(Model, id)`: the model's name (a binary), then the id."
+  def tx_delete(model, id) when is_binary(model), do: {:var, "Tx", "delete", [model, id]}
 
   # ---------- Store (reads inside a transaction) ----------
 

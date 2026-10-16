@@ -78,9 +78,10 @@ defmodule Kinoko.Lang.NaiveUniverse do
         Enum.reduce_while(code, %{}, fn {name, {:live, _, _, decl}}, checks ->
           checked = Check.decl(decl, sigs)
 
-          case {checked.result, evolution(u.committed, name, decl)} do
-            {{:ok, typed}, []} ->
-              outcome = %{typed: typed, deps: Db.deps(decl, checked), internal: false}
+          case {checked.result, evolution(u.committed, sigs, name, decl)} do
+            {{:ok, typed}, {[], reached}} ->
+              deps = MapSet.union(Db.deps(decl, checked), reached)
+              outcome = %{typed: typed, deps: deps, internal: false}
               {:cont, Map.put(checks, name, outcome)}
 
             _ ->
@@ -118,7 +119,7 @@ defmodule Kinoko.Lang.NaiveUniverse do
             end
 
           Enum.map(
-            errors ++ evolution(committed, name, decl),
+            errors ++ elem(evolution(committed, sigs, name, decl), 0),
             &%{name: name, code: &1.code, message: &1.message}
           )
         end)
@@ -128,14 +129,17 @@ defmodule Kinoko.Lang.NaiveUniverse do
     end
   end
 
-  # The model evolution rule's errors for `decl` against what is committed
-  # under `name` (`[]` for anything but a model).
-  defp evolution(committed, name, {:defmodel, _, _} = decl) do
-    old = with %{decl: d} <- committed[name], do: Extract.signature(d)
-    Evolution.errors(name, old, Extract.signature(decl))
+  # The model evolution rule for `decl` against committed code, `sigs` the
+  # image's signatures: its errors and the names its reach read, as deps
+  # (`{[], []}` for anything but a model).
+  defp evolution(committed, sigs, name, {:defmodel, _, _} = decl) do
+    was = fn n -> with %{decl: d} <- committed[n], do: Extract.signature(d) end
+    lookup = fn n -> Map.get(sigs, n) end
+    {errors, reached} = Evolution.check(name, was.(name), Extract.signature(decl), lookup, was)
+    {errors, reached |> MapSet.new() |> MapSet.reject(&Stdlib.provided?/1)}
   end
 
-  defp evolution(_committed, _name, _decl), do: []
+  defp evolution(_committed, _sigs, _name, _decl), do: {[], MapSet.new()}
 
   # Committed code with `patch` applied over it, by name.
   defp patched(committed, patch) do

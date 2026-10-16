@@ -67,6 +67,20 @@ defmodule Kinoko.Lang.StoreLangTest do
       assert Format.decl(model!(compound)) == compound
     end
 
+    test "`>=` closing a type argument list is `>` then a default's `=`" do
+      {:defmodel, _, [_, fields]} =
+        model!("defmodel A.M do\n  l : List<Int>= [1]\n  m : Map<String, List<Int>>= %{}\nend")
+
+      assert [
+               {"l", {:applied, "List", [{:named, "Int"}]}, {:list, _, [{:int, _, [1]}]}},
+               {"m",
+                {:applied, "Map", [{:named, "String"}, {:applied, "List", [{:named, "Int"}]}]},
+                {:map, _, []}}
+             ] = fields
+
+      assert {:ok, _} = Parser.expr("a >= b")
+    end
+
     test "the CID covers defaults" do
       a = model!("defmodel A.M do\n  n : Int = 0\nend")
       b = model!("defmodel A.M do\n  n : Int = 1\nend")
@@ -125,7 +139,8 @@ defmodule Kinoko.Lang.StoreLangTest do
     end
 
     test "bad-default: a call, a symbol reference, a local, or a wrong type" do
-      base = "def A.zero() : Int do 0 end\n"
+      base =
+        "def A.zero() : Int do 0 end\ndeftype A.S do On end\ndefmodel A.M2 do\n  n : Int\nend\n"
 
       for field <- [
             "n : Int = A.zero()",
@@ -135,6 +150,9 @@ defmodule Kinoko.Lang.StoreLangTest do
             "n : Int = 1 + 1",
             "l : List<Int> = [A.zero()]",
             ~S|n : Int = "zero"|,
+            "n : Int = A.M2",
+            "n : Int = A.S.Nope",
+            "n : Int = A.Thing.Nope(1)",
             "o : Option<Int> = Option.Some(\"x\")"
           ] do
         src = base <> "defmodel A.M do\n  #{field}\nend"
@@ -300,12 +318,81 @@ defmodule Kinoko.Lang.StoreLangTest do
       assert m =~ "annotate"
     end
 
-    test "Tx.delete takes an id" do
-      ok = @models <> "def A.f(id : Uuid) : List<Tx.Op> do [Tx.delete(id)] end"
+    test "Tx.delete(Model, id) names its stored model" do
+      ok = @models <> "def A.f(id : Uuid) : List<Tx.Op> do [Tx.delete(A.Post, id)] end"
       assert codes_of(ok, "A.f") == []
 
-      bad = @models <> "def A.f() : List<Tx.Op> do [Tx.delete(%A.Post{n: 1})] end"
-      assert codes_of(bad, "A.f") == ["mismatch"]
+      {:def, _, [_, _, _, body]} = all_ok(ok)["A.f"]
+      assert [{"Tx.delete", "A.Post"}] = walk(body, [])
+
+      [d] = ok |> parse() |> Enum.filter(&(Kinoko.Lang.Ast.name(&1) == "A.f"))
+      assert MapSet.member?(Extract.deps(d), "A.Post")
+    end
+
+    test "Tx.delete: a non-stored model, a wrong id, the old form, and as a value" do
+      for {body, code} <- [
+            {"[Tx.delete(A.Note, id)]", "not-stored"},
+            {"[Tx.delete(A.Msg, id)]", "not-stored"},
+            {"[Tx.delete(A.Post, 1)]", "mismatch"},
+            {"[Tx.delete(id)]", "bad-tx-delete"},
+            {"[Tx.delete(x, id)]", "bad-tx-delete"},
+            {"List.map([id], fn (i : Uuid) -> Tx.delete(A.Post, i) end)", nil},
+            {"List.map([id], Tx.delete)", "bad-tx-delete"}
+          ] do
+        src = @models <> "def A.f(id : Uuid, x : Uuid) : List<Tx.Op> do\n  #{body}\nend"
+        assert codes_of(src, "A.f") == List.wrap(code), body
+      end
+    end
+
+    test "Tx.insert of an open or generic row is not-stored" do
+      src = @models <> "def A.f(x : a) : Tx.Op do Tx.insert(x) end"
+      assert "not-stored" in codes_of(src, "A.f")
+    end
+
+    test "a field read off a Store.get row waits for the model the body settles" do
+      src =
+        @models <>
+          """
+          def A.cap(id : Uuid) : Cmd<A.Msg> do
+            Cmd.store.tx(
+              fn (s : Store) ->
+                case Store.get(s, id) do
+                  Option.Some(p) ->
+                    if p.n > 9 do
+                      ([], p.n)
+                    else
+                      ([Tx.update(id, %A.Post{p | n: p.n + 1})], p.n + 1)
+                    end
+                  Option.None -> ([], 0)
+                end
+              end,
+              A.Msg.Done
+            )
+          end
+          """
+
+      assert codes_of(src, "A.cap") == []
+    end
+
+    test "a field read off a row nothing settles names the annotation that fixes it" do
+      src =
+        @models <>
+          """
+          def A.peek(id : Uuid) : Cmd<A.Msg> do
+            Cmd.store.tx(
+              fn (s : Store) ->
+                case Store.get(s, id) do
+                  Option.Some(p) -> ([], p.n)
+                  Option.None -> ([], 0)
+                end
+              end,
+              A.Msg.Done
+            )
+          end
+          """
+
+      assert [%{code: "not-a-model", message: m}] = errors_of(src, "A.peek")
+      assert m =~ "(Store.get(s, id) : Option<App.Row>)"
     end
 
     test "the typed tree names each store form's model (for codegen)" do
@@ -442,6 +529,87 @@ defmodule Kinoko.Lang.StoreLangTest do
         )
 
       assert Lang.staged(u) == %{}
+    end
+
+    test "a staged patch is judged again against the version that promotes after it" do
+      mandatory = "defmodel Forum.Post do\n  id : Uuid\n  title : String\n  replies : Int\nend"
+      {u, _} = refused!(v1(), "late", mandatory)
+
+      defaulted =
+        "defmodel Forum.Post do\n  id : Uuid\n  title : String\n  replies : Int = 0\nend"
+
+      {u, verdict} = Lang.stage(u, "first", defaulted)
+      # Over the defaulted version, `late` only drops a default: it promotes too.
+      assert verdict == {:promoted, ["first", "late"]}
+      assert Lang.read(u, "Forum.Post") == {:ok, mandatory}
+
+      # and the other way: a patch fine over v1 is refused once v2 retypes under it
+      {u, {:staged, _}} =
+        Lang.stage(v1(), "waits", @v1 <> "\ndef Forum.x() : Int do Forum.missing() end")
+
+      u =
+        promoted!(
+          u,
+          "v2",
+          "defmodel Forum.Post do\n  id : Uuid\n  title : String\n  n : Option<Int>\nend"
+        )
+
+      {_, {:staged, reasons}} = Lang.stage(u, "waits", @v1)
+
+      assert [
+               %{
+                 code: "model-evolution",
+                 message: "cannot remove Forum.Post.n; leave it in place"
+               }
+             ] = reasons
+    end
+
+    @nested """
+    defmodel Forum.Tag do
+      label : String
+    end
+    deftype Forum.Body do Text(String) | Tagged(List<Forum.Tag>) end
+    defmodel Forum.Post do
+      id : Uuid
+      tags : List<Option<Forum.Tag>>
+      body : Forum.Body
+    end
+    """
+
+    test "a model kept inside a stored model's rows evolves add-only too" do
+      u = promoted!(Lang.new(), "v1", @nested)
+
+      {u, [m]} = refused!(u, "retag", "defmodel Forum.Tag do\n  label : Int\nend")
+      assert m =~ "Forum.Tag.label was String, cannot become Int"
+      assert m =~ "Forum.Post"
+      assert %{"retag" => %{reasons: [%{name: "Forum.Post"}]}} = Lang.staged(u)
+
+      {_, [_]} = refused!(u, "drop", "defmodel Forum.Tag do\n  color : Option<String>\nend")
+      {_, [_]} = refused!(u, "add", "defmodel Forum.Tag do\n  label : String\n  n : Int\nend")
+
+      promoted!(u, "ok", "defmodel Forum.Tag do\n  label : String\n  n : Int = 0\nend")
+    end
+
+    test "reached through a deftype's variant, three deep" do
+      src =
+        "defmodel A.Leaf do\n  v : Int\nend\ndefmodel A.Mid do\n  leaf : A.Leaf\nend\n" <>
+          "deftype A.Box do Full(Map<String, (Int, A.Mid)>) | Empty end\n" <>
+          "defmodel A.Root do\n  id : Uuid\n  box : A.Box\nend"
+
+      u = promoted!(Lang.new(), "v1", src)
+      {_, [m]} = refused!(u, "leaf", "defmodel A.Leaf do\n  v : String\nend")
+      assert m =~ "A.Leaf.v was Int"
+    end
+
+    test "a model no stored model reaches evolves freely" do
+      u =
+        promoted!(
+          Lang.new(),
+          "v1",
+          "defmodel A.Tag do\n  label : String\nend\ndefmodel A.State do\n  tags : List<A.Tag>\nend"
+        )
+
+      promoted!(u, "v2", "defmodel A.Tag do\n  label : Int\nend")
     end
 
     test "the rule is incremental: checking again after promotion reads the memo" do

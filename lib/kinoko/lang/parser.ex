@@ -291,12 +291,20 @@ defmodule Kinoko.Lang.Parser do
   end
 
   defp tight_loop(p, close, item, acc) do
-    if at?(p, :comma) do
-      {v, p} = p |> advance() |> item.()
-      tight_loop(p, close, item, [v | acc])
-    else
-      {_, p} = expect(p, close)
-      {Enum.reverse(acc), p}
+    cond do
+      at?(p, :comma) ->
+        {v, p} = p |> advance() |> item.()
+        tight_loop(p, close, item, [v | acc])
+
+      # `List<Int>= []`: the lexer read `>=`, but a type's argument list
+      # closes on its `>`, and the `=` (a model field's default) follows.
+      close == {:op, ">"} and at?(p, {:op, ">="}) ->
+        {:op, ">=", line, col} = peek(p)
+        {Enum.reverse(acc), %{p | cur: {:eq, nil, line, col + 1}}}
+
+      true ->
+        {_, p} = expect(p, close)
+        {Enum.reverse(acc), p}
     end
   end
 

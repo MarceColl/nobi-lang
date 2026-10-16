@@ -26,8 +26,14 @@ defmodule Kinoko.Lang.Types.Store do
   (the model's name), for codegen. Applied as a value (`List.map(rows,
   Tx.insert)`) the reference node carries it the same way.
 
-  `Cmd.store.tx` and `Tx.delete` name no model: a transaction's ops each
-  name theirs, and `Tx.delete` takes an id alone.
+  `Cmd.store.tx` names no model: a transaction's ops each name theirs.
+
+  `Tx.delete(Model, id)` is a special form, like `Cmd.navigate`: its first
+  argument is the stored model's name, read as a signature (`Ctx.dget/2`),
+  never a value. The call's `res:` is `{:tx_delete, model}`, its model
+  argument's `{:model, model}`, and it carries `store:` too. Referenced as a
+  value it is refused (`"bad-tx-delete"`, in `Kinoko.Lang.Types.Check`'s
+  synthesis): its model is its call's.
 
   ## Defaults
 
@@ -40,11 +46,11 @@ defmodule Kinoko.Lang.Types.Store do
   construction still lists every field.
   """
 
-  alias Kinoko.Lang.Format
+  alias Kinoko.Lang.{Ast, Format}
   alias Kinoko.Lang.Types.{Check, Extract, Infer, Quote}
   alias Kinoko.Lang.Types.Check.Ctx
 
-  import Kinoko.Lang.Types.Check.Tree, only: [ty: 1, res: 1]
+  import Kinoko.Lang.Types.Check.Tree, only: [ty: 1, res: 1, put_ann: 3]
 
   # Where each form's model is in its (instantiated) type `{:arrow, params, ret}`.
   @forms %{
@@ -91,21 +97,9 @@ defmodule Kinoko.Lang.Types.Store do
 
   def check_default(ctx, field, t, default) do
     if constant?(default) do
-      {s, ctx} = Check.synth(ctx, default)
-      {written, ctx} = Ctx.written(ctx, t)
-
-      # Tried on a copy: a mismatch is this rule's error, not the generic one.
-      case Infer.unify(ctx.infer, ty(s), written, default) do
-        {:ok, infer} ->
-          %{ctx | infer: infer}
-
-        {:error, _, _} ->
-          Ctx.error(
-            ctx,
-            "bad-default",
-            "the default of `#{field}` is `#{Quote.expr(default)}`, which is not a " <>
-              "`#{Format.type(t)}` — a default has its field's type"
-          )
+      case not_variants(ctx, default) do
+        {[], ctx} -> typed_default(ctx, field, t, default)
+        {names, ctx} -> not_variant_default(ctx, field, names)
       end
     else
       Ctx.error(
@@ -114,6 +108,69 @@ defmodule Kinoko.Lang.Types.Store do
         "the default of `#{field}` must be a constant — a literal, or a list, map, tuple or variant " <>
           "of constants; `#{Quote.expr(default)}` is not (no calls, no references to other symbols)"
       )
+    end
+  end
+
+  # The variant names a constant uses that are no variant of their owner
+  # type (a model's name, a def's type's, …), each read as a signature.
+  defp not_variants(ctx, default) do
+    default
+    |> variant_names([])
+    |> Enum.reverse()
+    |> Enum.uniq()
+    |> Enum.flat_map_reduce(ctx, fn name, ctx ->
+      case Ctx.dget(ctx, Extract.owner_of(name)) do
+        {{:type, _, variants}, ctx} ->
+          if List.keymember?(variants, Extract.last_segment(name), 0),
+            do: {[], ctx},
+            else: {[name], ctx}
+
+        {_, ctx} ->
+          {[name], ctx}
+      end
+    end)
+  end
+
+  defp variant_names({:name, _, [name]}, acc), do: [name | acc]
+
+  defp variant_names({:call, _, [name, args]}, acc),
+    do: Enum.reduce(args, [name | acc], &variant_names/2)
+
+  defp variant_names({k, _, items}, acc) when k in [:list, :tuple],
+    do: Enum.reduce(items, acc, &variant_names/2)
+
+  defp variant_names({:map, _, entries}, acc),
+    do: Enum.reduce(entries, acc, fn {k, v}, acc -> variant_names(v, variant_names(k, acc)) end)
+
+  defp variant_names(_, acc), do: acc
+
+  defp not_variant_default(ctx, field, names) do
+    shown = Enum.map_join(names, ", ", &"`#{&1}`")
+
+    Ctx.error(
+      ctx,
+      "bad-default",
+      "the default of `#{field}` names #{shown}, which is no variant of a type — a default is a " <>
+        "constant: a literal, or a list, map, tuple or variant (as `Option.None`) of constants"
+    )
+  end
+
+  defp typed_default(ctx, field, t, default) do
+    {s, ctx} = Check.synth(ctx, default)
+    {written, ctx} = Ctx.written(ctx, t)
+
+    # Tried on a copy: a mismatch is this rule's error, not the generic one.
+    case Infer.unify(ctx.infer, ty(s), written, default) do
+      {:ok, infer} ->
+        %{ctx | infer: infer}
+
+      {:error, _, _} ->
+        Ctx.error(
+          ctx,
+          "bad-default",
+          "the default of `#{field}` is `#{Quote.expr(default)}`, which is not a " <>
+            "`#{Format.type(t)}` — a default has its field's type"
+        )
     end
   end
 
@@ -146,6 +203,48 @@ defmodule Kinoko.Lang.Types.Store do
   end
 
   def check_form(ctx, e, _t), do: {e, ctx}
+
+  # ---------- Tx.delete(Model, id) ----------
+
+  @tx_example "`Tx.delete(Forum.Post, id)`"
+
+  @doc false
+  def tx_delete_why,
+    do:
+      "names its stored model as its first argument, then the id, as in #{@tx_example}: call it, " <>
+        "rather than apply it as a value"
+
+  @doc """
+  `Tx.delete(Model, id)`, annotated `Tx.Op`: `Model` a stored model, `id` a
+  `Uuid`.
+  """
+  def synth_tx_delete(ctx, {:call, m, [name, [{:name, _, [model]} = a, id]]} = e) do
+    if Ast.capitalised?(Extract.last_segment(model)) do
+      {s, ctx} = Check.synth(ctx, id)
+      ctx = Ctx.unify!(ctx, ty(s), {:named, "Uuid"}, id)
+      a = put_ann(a, {:named, "Unit"}, {:model, model})
+
+      {m, ctx} =
+        case stored_model(ctx, e, {:named, model}) do
+          {:ok, model, ctx} -> {Keyword.put(m, :store, model), ctx}
+          {:error, ctx} -> {m, ctx}
+        end
+
+      {put_ann({:call, m, [name, [a, s]]}, {:named, "Tx.Op"}, {:tx_delete, model}), ctx}
+    else
+      tx_delete_failed(ctx, e)
+    end
+  end
+
+  def synth_tx_delete(ctx, e), do: tx_delete_failed(ctx, e)
+
+  defp tx_delete_failed(ctx, e) do
+    message =
+      "`#{Quote.expr(e)}`: `Tx.delete` names its stored model, then the id, as in #{@tx_example}"
+
+    {call, ctx} = ctx |> Ctx.error("bad-tx-delete", message) |> Check.unchecked(e)
+    {put_ann(call, {:named, "Tx.Op"}, nil), ctx}
+  end
 
   # The form's type, resolved: a call's is its arguments' to its own; a
   # reference's its own.

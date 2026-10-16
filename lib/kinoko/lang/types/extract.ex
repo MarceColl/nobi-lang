@@ -136,6 +136,9 @@ defmodule Kinoko.Lang.Types.Extract do
   defp expr({:call, _, ["Cmd.navigate", [{:name, _, [app]} | args]]}),
     do: [app, "#{app}.init" | exprs(args)]
 
+  defp expr({:call, _, ["Tx.delete", [{:name, _, [model]} | args]]}),
+    do: [model | exprs(args)]
+
   defp expr({:call, _, [n, args]}), do: name_deps(n) ++ exprs(args)
   defp expr({:field, _, [e, _]}), do: expr(e)
 

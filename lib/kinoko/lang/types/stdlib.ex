@@ -3,8 +3,8 @@ defmodule Kinoko.Lang.Types.Stdlib do
   Stdlib signatures (ported from `types/stdlib.rs`): the 59 rows the checker
   resolves calls against, in the Rust/TS declared order, then the `Map` rows
   this port adds, then `Store.get`/`Store.list` (70 in all). `Cmd.store.tx`
-  takes a closure and `Tx.delete` an id, where Rust's took a list of ops and
-  a row. Generic positions use
+  takes a closure and `Tx.delete` a model and an id (a special form), where
+  Rust's took a list of ops and a row. Generic positions use
   lowercase `{:var, "a"}` for defs and `{:var, "T"}` for the `Option`/`Result`
   deftypes. Only what feeds the checker lives here; the evaluator's metadata
   (codegen, effect idempotency) belongs to the interpreter.
@@ -113,7 +113,9 @@ defmodule Kinoko.Lang.Types.Stdlib do
             {"Tx.Op", {:type, [], []}},
             {"Tx.insert", def_.([a], op)},
             {"Tx.update", def_.([uuid, a], op)},
-            {"Tx.delete", def_.([uuid], op)},
+            # A special form, `Tx.delete(Model, id)` (`Kinoko.Lang.Types.Store`):
+            # its first argument names the stored model; never a value.
+            {"Tx.delete", def_.([a, uuid], op)},
             # Map (Elixir-only; after the Rust/TS rows so their order holds).
             # Keys and pairs come out in Yabu key order (`Rt.compare/2`).
             {"Map.get", def_.([map.(k, v), k], option.(v))},

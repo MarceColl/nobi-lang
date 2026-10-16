@@ -143,7 +143,7 @@ defmodule Kinoko.Exec.StdlibTest do
     ]
   end
   def C.batch() : Cmd<C.Msg> do Cmd.batch([Cmd.none(), Cmd.batch([Cmd.time.now(C.Msg.Got)])]) end
-  def C.ops(id : Uuid) : List<Tx.Op> do [Tx.insert(C.row()), Tx.update(id, C.row()), Tx.delete(id)] end
+  def C.ops(id : Uuid) : List<Tx.Op> do [Tx.insert(C.row()), Tx.update(id, C.row()), Tx.delete(C.Row, id)] end
   """
 
   describe "effects as data" do
@@ -212,7 +212,7 @@ defmodule Kinoko.Exec.StdlibTest do
       ops = [
         var("Tx", "insert", [row]),
         var("Tx", "update", [uuid(), row]),
-        var("Tx", "delete", [uuid()])
+        var("Tx", "delete", ["C.Row", uuid()])
       ]
 
       assert call(u, "C.ops", [uuid()]) == {:ok, ops}

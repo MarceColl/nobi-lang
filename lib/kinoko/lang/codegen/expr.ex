@@ -398,6 +398,11 @@ defmodule Kinoko.Lang.Codegen.Expr do
           &rt(:cmd_effect, [lit("Cmd.navigate"), lit(nil), list([lit(app) | &1])])
         )
 
+      # `Tx.delete(Model, id)`: the model by name, then the id
+      # (`Kinoko.Lang.Types.Store`).
+      {:tx_delete, model} ->
+        seq(tl(parts), ctx, fn [id] -> remote(Stdlib, :tx_delete, [lit(model), id]) end)
+
       res ->
         raise ArgumentError, "unresolved call of `#{name}`: #{inspect(res)}"
     end

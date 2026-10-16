@@ -11,7 +11,8 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
   also records the name in `looked_up` (`record/2`, for a group's names,
   touches `used` alone).
 
-  `scopes` is innermost first and never empty. `pending` and `tuple_cases`
+  `scopes` is innermost first and never empty. `pending`, `pending_fields`
+  (field accesses on a row whose type is not known yet) and `tuple_cases`
   are kept newest first; their takers reverse them.
 
   The map-key rule's memo (`keys`, `key_recorded`, `reported_non_data_maps`)
@@ -30,6 +31,7 @@ defmodule Kinoko.Lang.Types.Check.Ctx do
             used: MapSet.new(),
             looked_up: MapSet.new(),
             pending: [],
+            pending_fields: [],
             tuple_cases: [],
             open_names: %{},
             keys: nil,
