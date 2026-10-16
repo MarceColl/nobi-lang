@@ -214,7 +214,7 @@ defmodule YabuGolden do
     out =
       for {field, x} <- json, field != "$t", into: %{} do
         case List.keyfind(fields, field, 0) do
-          {_, ty} -> {field, value(x, ty, sigs)}
+          {_, ty, _} -> {field, value(x, ty, sigs)}
           nil -> fail("a `#{model}` has no field `#{field}`: #{inspect(json)}")
         end
       end

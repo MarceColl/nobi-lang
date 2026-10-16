@@ -73,13 +73,13 @@ defmodule Kinoko.Exec.StdlibTest do
 
     # `Map` is this port's own (kinoko-next has none): no oracle rows, its
     # cases are `Kinoko.Lang.MapStdlibTest`'s.
-    test "every row is a stdlib def, and every stdlib def but Cmd/JSON/Tx/Map has examples" do
+    test "every row is a stdlib def, and every stdlib def but Cmd/JSON/Tx/Map/Store has examples" do
       rows = Enum.map(YabuGolden.stdlib(), & &1["name"])
       sigs = Sigs.signatures()
 
       for name <- rows, do: assert(match?({:def, _, _, _}, sigs[name]), name)
 
-      exempt? = &String.starts_with?(&1, ["Cmd.", "JSON.", "Tx.", "Map."])
+      exempt? = &String.starts_with?(&1, ["Cmd.", "JSON.", "Tx.", "Map.", "Store."])
 
       for {name, {:def, _, _, _}} <- sigs,
           not exempt?.(name),
@@ -119,7 +119,7 @@ defmodule Kinoko.Exec.StdlibTest do
   end
 
   @effects ~S"""
-  deftype C.Msg do Got(Int) | Saved(Uuid) | Rows(List<C.Row>) | Row(Option<C.Row>) | Ids(List<Uuid>) | Text(String) | Maybe(Option<String>) | Keys(List<String>) end
+  deftype C.Msg do Got(Int) | Saved(Uuid) | Rows(List<C.Row>) | Row(Option<C.Row>) | Done(Result<(List<Uuid>, Int), String>) | Text(String) | Maybe(Option<String>) | Keys(List<String>) end
   defmodel C.Row do
     id : Uuid
     text : String
@@ -132,7 +132,7 @@ defmodule Kinoko.Exec.StdlibTest do
       Cmd.store.get(id, C.Msg.Row),
       Cmd.store.update(id, C.row(), C.Msg.Saved),
       Cmd.store.delete(id, C.Msg.Row),
-      Cmd.store.tx([Tx.insert(C.row())], C.Msg.Ids),
+      Cmd.store.tx(fn (s : Store) -> ([Tx.insert(C.row())], 1) end, C.Msg.Done),
       Cmd.time.now(C.Msg.Got),
       Cmd.random.int(1, 6, fn (n : Int) -> C.Msg.Got(n * 2) end),
       Cmd.blob.put("k", "v", C.Msg.Text),
@@ -143,7 +143,7 @@ defmodule Kinoko.Exec.StdlibTest do
     ]
   end
   def C.batch() : Cmd<C.Msg> do Cmd.batch([Cmd.none(), Cmd.batch([Cmd.time.now(C.Msg.Got)])]) end
-  def C.ops(id : Uuid) : List<Tx.Op> do [Tx.insert(C.row()), Tx.update(id, C.row()), Tx.delete(C.row())] end
+  def C.ops(id : Uuid) : List<Tx.Op> do [Tx.insert(C.row()), Tx.update(id, C.row()), Tx.delete(id)] end
   """
 
   describe "effects as data" do
@@ -159,7 +159,7 @@ defmodule Kinoko.Exec.StdlibTest do
         read("Cmd.store.get", "C.Row", [uuid(), msg.("Row")]),
         effect("Cmd.store.update", [uuid(), row, msg.("Saved")]),
         read("Cmd.store.delete", "C.Row", [uuid(), msg.("Row")]),
-        effect("Cmd.store.tx", [[var("Tx", "insert", [row])], msg.("Ids")]),
+        :tx,
         effect("Cmd.time.now", [msg.("Got")]),
         :random,
         effect("Cmd.blob.put", ["k", "v", msg.("Text")]),
@@ -184,6 +184,11 @@ defmodule Kinoko.Exec.StdlibTest do
             assert is_function(f, 1)
             assert f.(3) == var("C.Msg", "Got", [6])
 
+          :tx ->
+            assert {:cmd, {:effect, "Cmd.store.tx", nil, [body, cb]}} = cmd
+            assert body.(:a_store) == {[var("Tx", "insert", [row])], 1}
+            assert cb == msg.("Done")
+
           _ ->
             assert cmd == want
         end
@@ -207,7 +212,7 @@ defmodule Kinoko.Exec.StdlibTest do
       ops = [
         var("Tx", "insert", [row]),
         var("Tx", "update", [uuid(), row]),
-        var("Tx", "delete", [row])
+        var("Tx", "delete", [uuid()])
       ]
 
       assert call(u, "C.ops", [uuid()]) == {:ok, ops}

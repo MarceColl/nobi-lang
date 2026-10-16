@@ -35,7 +35,11 @@ defmodule Kinoko.Lang.Format do
   def decl({:defapp, _, [name]}), do: "defapp #{name}"
 
   def decl({:defmodel, _, [name, fields]}) do
-    lines = Enum.map_join(fields, "\n", fn {f, t} -> "#{@indent}#{f} : #{type(t)}" end)
+    lines =
+      Enum.map_join(fields, "\n", fn {f, t, d} ->
+        "#{@indent}#{f} : #{type(t)}#{default(d, @indent)}"
+      end)
+
     "defmodel #{name} do\n#{lines}\nend"
   end
 
@@ -68,6 +72,10 @@ defmodule Kinoko.Lang.Format do
     "deftest #{name} do\n#{block_lines(body, @indent)}\nend"
   end
 
+  # A model field's default, ` = <constant>`, or nothing.
+  defp default(:none, _ind), do: ""
+  defp default(d, ind), do: " = " <> fmt(d, 1, ind)
+
   @spec expr(Ast.node_()) :: String.t()
   def expr(e), do: fmt(e, 1, "")
 
@@ -82,7 +90,7 @@ defmodule Kinoko.Lang.Format do
   @doc """
   A signature (`Kinoko.Lang.Types.Extract.signature/1`) of the declaration
   `name`, as one line: a def as `Name(T1, T2) : Ret`; a model as
-  `model {f : T, ...}`; a type as `type Name<P> = V(T) | W`; a route table as
+  `model {f : T, g : U = <default>, ...}`; a type as `type Name<P> = V(T) | W`; a route table as
   `routes {"/" -> App, ...}`; apps and tests
   as `app` / `test`.
   """
@@ -90,7 +98,10 @@ defmodule Kinoko.Lang.Format do
   def signature(name, {:def, params, ret, _names}), do: "#{name}(#{types(params)}) : #{type(ret)}"
 
   def signature(_, {:model, fields}),
-    do: "model {" <> Enum.map_join(fields, ", ", fn {f, t} -> "#{f} : #{type(t)}" end) <> "}"
+    do:
+      "model {" <>
+        Enum.map_join(fields, ", ", fn {f, t, d} -> "#{f} : #{type(t)}#{default(d, "")}" end) <>
+        "}"
 
   def signature(name, {:type, params, variants}) do
     head = if params == [], do: name, else: "#{name}<#{Enum.join(params, ", ")}>"

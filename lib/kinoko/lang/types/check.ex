@@ -30,8 +30,9 @@ defmodule Kinoko.Lang.Types.Check do
   `Kinoko.Lang.Types.Patterns`; a tuple `case`'s exhaustiveness is
   `Kinoko.Lang.Types.Exhaustive`; name rules are `Check.Decl`. JSX and
   `defapp` are `Kinoko.Lang.Types.JsxApp`, the map-key rule is
-  `Kinoko.Lang.Types.Keys`, and what an unbound name says is
-  `Kinoko.Lang.Types.Hints`.
+  `Kinoko.Lang.Types.Keys`, what an unbound name says is
+  `Kinoko.Lang.Types.Hints`, and stored models, field defaults and the
+  model each store form works on are `Kinoko.Lang.Types.Store`.
   """
 
   alias Kinoko.Lang.Ast
@@ -45,7 +46,8 @@ defmodule Kinoko.Lang.Types.Check do
     Keys,
     Patterns,
     Quote,
-    Routes
+    Routes,
+    Store
   }
 
   alias Kinoko.Lang.Types.Check.{Ctx, Decl}
@@ -412,7 +414,7 @@ defmodule Kinoko.Lang.Types.Check do
     case Ctx.dget(ctx, model) do
       {{:model, declared}, ctx} ->
         ctx =
-          Enum.reduce(declared, ctx, fn {f, t}, ctx ->
+          Enum.reduce(declared, ctx, fn {f, t, _}, ctx ->
             if identity?(f, t) or List.keymember?(fields, f, 0),
               do: ctx,
               else: Ctx.error(ctx, "missing-field", "`%#{model}{…}` is missing field `#{f}`")
@@ -543,7 +545,7 @@ defmodule Kinoko.Lang.Types.Check do
           case Ctx.dget(ctx, model) do
             {{:model, fields}, ctx} ->
               case List.keyfind(fields, field, 0) do
-                {_, t} ->
+                {_, t, _} ->
                   {{:ok, t}, ctx}
 
                 nil ->
@@ -580,7 +582,7 @@ defmodule Kinoko.Lang.Types.Check do
 
         ctx =
           case List.keyfind(declared, name, 0) do
-            {_, t} -> Ctx.unify!(ctx, ty(s), t, value)
+            {_, t, _} -> Ctx.unify!(ctx, ty(s), t, value)
             nil -> Ctx.error(ctx, "extra-field", "model `#{model}` has no field `#{name}`")
           end
 
@@ -751,6 +753,9 @@ defmodule Kinoko.Lang.Types.Check do
   @doc false
   def finalize_node(ctx, e) do
     {t, ctx} = Ctx.resolve_deep(ctx, ty(e), fn -> Quote.expr(e) end)
+    # A store form names its stored model (before `cannot-infer`, which it
+    # words better for a read whose model nothing settles).
+    {e, ctx} = Store.check_form(ctx, e, t)
 
     {stripped, ctx} =
       if ctx.infer.lone_expression do

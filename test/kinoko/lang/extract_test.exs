@@ -19,7 +19,7 @@ defmodule Kinoko.Lang.ExtractTest do
 
     test "model and type signatures" do
       [m, t] = parse!("defmodel A.M do x : Int end\ndeftype A.T do L | R(String) end")
-      assert Extract.signature(m) == {:model, [{"x", {:named, "Int"}}]}
+      assert Extract.signature(m) == {:model, [{"x", {:named, "Int"}, :none}]}
       assert Extract.signature(t) == {:type, [], [{"L", []}, {"R", [{:named, "String"}]}]}
     end
 
@@ -115,12 +115,13 @@ defmodule Kinoko.Lang.ExtractTest do
   end
 
   describe "Stdlib" do
-    test "has the 59 Rust rows in declared order, then the 9 Map rows" do
-      assert map_size(Stdlib.signatures()) == 68
-      assert length(Stdlib.names()) == 68
+    test "has the 59 Rust rows in declared order, then the 9 Map rows, then the 2 Store rows" do
+      assert map_size(Stdlib.signatures()) == 70
+      assert length(Stdlib.names()) == 70
       assert Enum.take(Stdlib.names(), 2) == ["List.map", "List.filter"]
       assert Enum.at(Stdlib.names(), 58) == "Tx.delete"
-      assert Enum.drop(Stdlib.names(), 59) |> Enum.all?(&String.starts_with?(&1, "Map."))
+      assert Enum.slice(Stdlib.names(), 59..67) |> Enum.all?(&String.starts_with?(&1, "Map."))
+      assert Enum.drop(Stdlib.names(), 68) == ["Store.get", "Store.list"]
       assert Enum.all?(Stdlib.names(), &Map.has_key?(Stdlib.signatures(), &1))
     end
 

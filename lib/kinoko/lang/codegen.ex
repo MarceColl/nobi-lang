@@ -112,8 +112,14 @@ defmodule Kinoko.Lang.Codegen do
       names: names,
       tests: tests,
       image: hash,
+      # Each model's fields as `{field, type}`: defaults are the store's
+      # (`Kinoko.Lang.Types.Extract.signature/1` keeps them).
       models:
-        for({name, %{signature: {:model, fields}}} <- committed, into: %{}, do: {name, fields}),
+        for(
+          {name, %{signature: {:model, fields}}} <- committed,
+          into: %{},
+          do: {name, Enum.map(fields, fn {f, t, _} -> {f, t} end)}
+        ),
       types:
         for(
           {name, %{signature: {:type, params, variants}}} <- committed,

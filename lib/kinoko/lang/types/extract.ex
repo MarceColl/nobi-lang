@@ -9,13 +9,21 @@ defmodule Kinoko.Lang.Types.Extract do
 
   @type signature ::
           {:def, [Ast.type()], Ast.type(), [String.t()]}
-          | {:model, [{String.t(), Ast.type()}]}
+          | {:model, [{String.t(), Ast.type(), default()}]}
           | {:type, [String.t()], [{String.t(), [Ast.type()]}]}
           | {:routes, [Ast.route()]}
           | :app
           | :test
 
-  @builtin_named ~w(Int String Bool Uuid Unit)
+  @typedoc """
+  A model field's default: `:none`, or its constant expression as written
+  (`Kinoko.Lang.Types.Store.constant?/1`), without positions, so a
+  signature is the same wherever the model was parsed. Its value is
+  `Kinoko.Lang.Rt.constant/1` of it.
+  """
+  @type default :: :none | Ast.node_()
+
+  @builtin_named ~w(Int String Bool Uuid Unit Store)
   @builtin_applied %{"List" => 1, "Map" => 2, "Cmd" => 1, "Html" => 1}
 
   @doc "Names that are never dependencies in type position."
@@ -52,7 +60,10 @@ defmodule Kinoko.Lang.Types.Extract do
     do: {:def, Enum.map(params, &elem(&1, 1)), ret, Enum.map(params, &elem(&1, 0))}
 
   def signature({:defroutes, _, [_, routes]}), do: {:routes, routes}
-  def signature({:defmodel, _, [_, fields]}), do: {:model, fields}
+
+  def signature({:defmodel, _, [_, fields]}),
+    do: {:model, Enum.map(fields, fn {f, t, d} -> {f, t, Ast.without_positions(d)} end)}
+
   def signature({:deftype, _, [_, params, variants]}), do: {:type, params, variants}
   def signature({:defapp, _, _}), do: :app
   def signature({:deftest, _, _}), do: :test
@@ -65,8 +76,12 @@ defmodule Kinoko.Lang.Types.Extract do
     Enum.flat_map(params, &type_deps(elem(&1, 1), [])) ++ type_deps(ret, []) ++ expr(body)
   end
 
-  defp collect({:defmodel, _, [_, fields]}),
-    do: Enum.flat_map(fields, &type_deps(elem(&1, 1), []))
+  defp collect({:defmodel, _, [_, fields]}) do
+    Enum.flat_map(fields, fn
+      {_, t, :none} -> type_deps(t, [])
+      {_, t, d} -> type_deps(t, []) ++ expr(d)
+    end)
+  end
 
   defp collect({:deftype, _, [_, params, variants]}) do
     for {_, args} <- variants, a <- args, d <- type_deps(a, params), do: d

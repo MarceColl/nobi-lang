@@ -66,6 +66,32 @@ defmodule Kinoko.Lang.Rt do
 
   defguardp is_i64(n) when is_integer(n) and n >= @i64_min and n <= @i64_max
 
+  # ---------- constants ----------
+
+  @doc """
+  The value of a constant expression: a model field's default
+  (`Kinoko.Lang.Types.Store.constant?/1`), as its signature holds it. A
+  variant is named by its full name (`Option.Some(1)` is
+  `{:var, "Option", "Some", [1]}`). `:none` (no default) is itself.
+  """
+  @spec constant(term()) :: value()
+  def constant(:none), do: :none
+  def constant({k, _, [v]}) when k in [:int, :str, :bool], do: v
+  def constant({:neg, _, [{:int, _, [n]}]}), do: -n
+  def constant({:list, _, items}), do: Enum.map(items, &constant/1)
+  def constant({:tuple, _, items}), do: items |> Enum.map(&constant/1) |> List.to_tuple()
+
+  def constant({:map, _, entries}),
+    do: entries |> Enum.map(fn {k, v} -> {constant(k), constant(v)} end) |> map_from_list()
+
+  def constant({:name, _, [name]}), do: constant_variant(name, [])
+  def constant({:call, _, [name, args]}), do: constant_variant(name, Enum.map(args, &constant/1))
+
+  defp constant_variant(name, args) do
+    {owner, [variant]} = name |> String.split(".") |> Enum.split(-1)
+    {:var, Enum.join(owner, "."), variant, args}
+  end
+
   # ---------- errors ----------
 
   @doc "Stops evaluation with a Yabu runtime error."

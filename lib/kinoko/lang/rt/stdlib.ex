@@ -406,5 +406,15 @@ defmodule Kinoko.Lang.Rt.Stdlib do
   @doc "`Tx.insert(row)`: the op as the call that builds it."
   def tx_insert(row), do: {:var, "Tx", "insert", [row]}
   def tx_update(id, row), do: {:var, "Tx", "update", [id, row]}
-  def tx_delete(row), do: {:var, "Tx", "delete", [row]}
+  def tx_delete(id), do: {:var, "Tx", "delete", [id]}
+
+  # ---------- Store (reads inside a transaction) ----------
+
+  @store_why "reads inside a running `Cmd.store.tx`, which this runtime does not provide yet"
+
+  @doc "`Store.get`: a read inside a transaction; none runs here."
+  def store_get(_store, _id), do: error!("`Store.get` " <> @store_why)
+
+  @doc "`Store.list`: a read inside a transaction; none runs here."
+  def store_list(_store), do: error!("`Store.list` " <> @store_why)
 end

@@ -415,8 +415,8 @@ defmodule Kinoko.Lang.RtTest do
         {Stdlib.cmd_store_insert(row, saved), eff.("Cmd.store.insert", [row, saved])},
         {Stdlib.cmd_store_update(uuid(@id), row, saved),
          eff.("Cmd.store.update", [uuid(@id), row, saved])},
-        {Stdlib.cmd_store_tx([Stdlib.tx_insert(row)], saved),
-         eff.("Cmd.store.tx", [[{:var, "Tx", "insert", [row]}], saved])},
+        {Stdlib.cmd_store_tx(&Function.identity/1, saved),
+         eff.("Cmd.store.tx", [&Function.identity/1, saved])},
         {Stdlib.cmd_time_now(got), eff.("Cmd.time.now", [got])},
         {Stdlib.cmd_random_int(1, 6, got), eff.("Cmd.random.int", [1, 6, got])},
         {Stdlib.cmd_blob_put("k", "v", text), eff.("Cmd.blob.put", ["k", "v", text])},
@@ -463,11 +463,15 @@ defmodule Kinoko.Lang.RtTest do
     test "Tx ops are the calls that build them" do
       row = rec("C.Row", text: "t")
 
-      assert [Stdlib.tx_insert(row), Stdlib.tx_update(uuid(@id), row), Stdlib.tx_delete(row)] ==
+      assert [
+               Stdlib.tx_insert(row),
+               Stdlib.tx_update(uuid(@id), row),
+               Stdlib.tx_delete(uuid(@id))
+             ] ==
                [
                  {:var, "Tx", "insert", [row]},
                  {:var, "Tx", "update", [uuid(@id), row]},
-                 {:var, "Tx", "delete", [row]}
+                 {:var, "Tx", "delete", [uuid(@id)]}
                ]
     end
 

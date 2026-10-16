@@ -17,7 +17,8 @@ defmodule Kinoko.Lang.Types.Check.Decl do
     Patterns,
     Quote,
     Routes,
-    Stdlib
+    Stdlib,
+    Store
   }
 
   alias Kinoko.Lang.Types.Check.Ctx
@@ -103,8 +104,11 @@ defmodule Kinoko.Lang.Types.Check.Decl do
 
   defp check_kind(ctx, {:defmodel, _, [_, fields]} = d) do
     ctx =
-      Enum.reduce(fields, ctx, fn {f, t}, ctx ->
-        ctx |> Check.validate_annotation(t, MapSet.new()) |> forbid_in_model_field(t, f)
+      Enum.reduce(fields, ctx, fn {f, t, default}, ctx ->
+        ctx
+        |> Check.validate_annotation(t, MapSet.new())
+        |> forbid_in_model_field(t, f)
+        |> Store.check_default(f, t, default)
       end)
 
     {d, ctx}
@@ -136,11 +140,11 @@ defmodule Kinoko.Lang.Types.Check.Decl do
 
   @doc """
   Whether `t` is itself disallowed where data is required: a function type,
-  `Cmd`, or `Html`. The predicate `forbid_in_model_field/3` and the map-key
+  `Cmd`, `Html`, or a transaction's `Store`. The predicate `forbid_in_model_field/3` and the map-key
   rule (`Kinoko.Lang.Types.Keys`) are built on.
   """
   def non_data?({:arrow, _, _}), do: true
-  def non_data?({:named, n}), do: n == "Cmd"
+  def non_data?({:named, n}), do: n in ["Cmd", "Store"]
   def non_data?({:applied, n, _}), do: n in ["Cmd", "Html"]
   def non_data?(_), do: false
 

@@ -56,7 +56,14 @@ defmodule Kinoko.Lang.ParserTest do
     test "defmodel with fields" do
       assert decl!("defmodel Todo.Item do\n  id : Int\n  text : String\n  done : Bool\nend") ==
                {:defmodel,
-                ["Todo.Item", [{"id", t("Int")}, {"text", t("String")}, {"done", t("Bool")}]]}
+                [
+                  "Todo.Item",
+                  [
+                    {"id", t("Int"), :none},
+                    {"text", t("String"), :none},
+                    {"done", t("Bool"), :none}
+                  ]
+                ]}
     end
 
     test "deftype with variants" do

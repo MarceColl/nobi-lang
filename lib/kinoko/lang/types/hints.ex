@@ -232,7 +232,7 @@ defmodule Kinoko.Lang.Types.Hints do
   def misuse_hint(found, sig)
 
   def misuse_hint(found, {:model, fields}) do
-    data = for {name, t} <- fields, not (name == "id" and t == {:named, "Uuid"}), do: name
+    data = for {name, t, _} <- fields, not (name == "id" and t == {:named, "Uuid"}), do: name
     inits = Enum.map_join(data, ", ", &"#{&1}: …")
     one = List.first(data, "field")
 

@@ -89,7 +89,7 @@ defmodule Kinoko.Lang.HintsTest do
     |> Map.merge(defs)
     |> Map.merge(counted)
     |> Map.merge(%{
-      "Shop.Item" => {:model, [{"name", {:named, "String"}}]},
+      "Shop.Item" => {:model, [{"name", {:named, "String"}, :none}]},
       "Shop.Size" => {:type, [], [{"Small", []}, {"Large", []}]},
       "Shop.Empty" => {:type, [], []},
       "Shop" => :app,

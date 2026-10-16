@@ -998,7 +998,9 @@ defmodule Kinoko.Lang.CheckTest do
     [{:defmodel, _, [_, fields]}] = parse(src)
 
     fields
-    |> Enum.reduce(Ctx.new(%{}), fn {name, t}, ctx -> Decl.forbid_in_model_field(ctx, t, name) end)
+    |> Enum.reduce(Ctx.new(%{}), fn {name, t, _}, ctx ->
+      Decl.forbid_in_model_field(ctx, t, name)
+    end)
     |> Ctx.errors()
     |> Enum.map(& &1.code)
   end

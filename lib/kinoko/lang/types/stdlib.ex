@@ -2,7 +2,9 @@ defmodule Kinoko.Lang.Types.Stdlib do
   @moduledoc """
   Stdlib signatures (ported from `types/stdlib.rs`): the 59 rows the checker
   resolves calls against, in the Rust/TS declared order, then the `Map` rows
-  this port adds (68 in all). Generic positions use
+  this port adds, then `Store.get`/`Store.list` (70 in all). `Cmd.store.tx`
+  takes a closure and `Tx.delete` an id, where Rust's took a list of ops and
+  a row. Generic positions use
   lowercase `{:var, "a"}` for defs and `{:var, "T"}` for the `Option`/`Result`
   deftypes. Only what feeds the checker lives here; the evaluator's metadata
   (codegen, effect idempotency) belongs to the interpreter.
@@ -31,6 +33,9 @@ defmodule Kinoko.Lang.Types.Stdlib do
           bool = nm.("Bool")
           uuid = nm.("Uuid")
           op = nm.("Tx.Op")
+          store = nm.("Store")
+          r = tv.("r")
+          tuple = fn ts -> {:tuple, ts} end
 
           [
             # List
@@ -86,7 +91,17 @@ defmodule Kinoko.Lang.Types.Stdlib do
             {"Cmd.store.get", def_.([uuid, arrow.([option.(a)], b)], cmd.(b))},
             {"Cmd.store.update", def_.([uuid, a, arrow.([uuid], b)], cmd.(b))},
             {"Cmd.store.delete", def_.([uuid, arrow.([option.(a)], b)], cmd.(b))},
-            {"Cmd.store.tx", def_.([list.(op), arrow.([list.(uuid)], b)], cmd.(b))},
+            # The closure reads through its `Store` and returns the ops to
+            # apply and a value of its own; the callback gets the ids the
+            # inserts minted, in order, with that value, or why it failed.
+            {"Cmd.store.tx",
+             def_.(
+               [
+                 arrow.([store], tuple.([list.(op), r])),
+                 arrow.([ap.("Result", [tuple.([list.(uuid), r]), str])], b)
+               ],
+               cmd.(b)
+             )},
             {"Cmd.time.now", def_.([arrow.([int], a)], cmd.(a))},
             {"Cmd.random.int", def_.([int, int, arrow.([int], a)], cmd.(a))},
             {"Cmd.blob.put", def_.([str, str, arrow.([str], a)], cmd.(a))},
@@ -98,7 +113,7 @@ defmodule Kinoko.Lang.Types.Stdlib do
             {"Tx.Op", {:type, [], []}},
             {"Tx.insert", def_.([a], op)},
             {"Tx.update", def_.([uuid, a], op)},
-            {"Tx.delete", def_.([a], op)},
+            {"Tx.delete", def_.([uuid], op)},
             # Map (Elixir-only; after the Rust/TS rows so their order holds).
             # Keys and pairs come out in Yabu key order (`Rt.compare/2`).
             {"Map.get", def_.([map.(k, v), k], option.(v))},
@@ -109,7 +124,12 @@ defmodule Kinoko.Lang.Types.Stdlib do
             {"Map.keys", def_.([map.(k, v)], list.(k))},
             {"Map.values", def_.([map.(k, v)], list.(v))},
             {"Map.to_list", def_.([map.(k, v)], list.({:tuple, [k, v]}))},
-            {"Map.from_list", def_.([list.({:tuple, [k, v]})], map.(k, v))}
+            {"Map.from_list", def_.([list.({:tuple, [k, v]})], map.(k, v))},
+            # Reads inside a `Cmd.store.tx` closure (after the Map rows so
+            # every earlier row keeps its rank). `a` is the stored model,
+            # taken from the type the result is used at.
+            {"Store.get", def_.([store, uuid], option.(a))},
+            {"Store.list", def_.([store], list.(a))}
           ]
         )
 

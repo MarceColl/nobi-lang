@@ -25,6 +25,17 @@ defmodule Kinoko.Lang.Universe do
 
   A universe is a value; every operation returns the new one.
 
+  ## Stored models evolve add-only
+
+  A `defmodel` staged over a committed stored model (one with `id : Uuid`)
+  must keep every committed field with its type, and add only `Option` or
+  defaulted fields (`Kinoko.Lang.Types.Evolution`); otherwise its check
+  fails with `"model-evolution"` reasons and the patch stays staged. The
+  committed version is read through the database (`{:committed, name}`,
+  which only committed code's layer holds), so the rule is part of the
+  model's memoized check. `restore/3` checks committed code with nothing
+  committed before it, so a restore never trips the rule.
+
   ## Degraded
 
   `restore/3` rebuilds committed code from storage and checks it again. When
@@ -336,7 +347,7 @@ defmodule Kinoko.Lang.Universe do
       %{
         u
         | sigs: Map.put(u.sigs, name, sig),
-          salsa: Salsa.set(salsa, :committed, {:name, name}, cid),
+          salsa: commit(salsa, name, cid),
           committed:
             Map.put(u.committed, name, %{
               cid: cid,
@@ -527,7 +538,7 @@ defmodule Kinoko.Lang.Universe do
     u = %{
       u
       | sigs: Map.put(u.sigs, name, sig),
-        salsa: Salsa.set(salsa, :committed, {:name, name}, cid),
+        salsa: commit(salsa, name, cid),
         committed:
           Map.put(u.committed, name, %{
             cid: cid,
@@ -546,11 +557,24 @@ defmodule Kinoko.Lang.Universe do
     u = %{
       u
       | committed: Map.delete(u.committed, name),
-        salsa: Salsa.unset(u.salsa, :committed, {:name, name}),
+        salsa:
+          u.salsa
+          |> Salsa.unset(:committed, {:name, name})
+          |> Salsa.unset(:committed, {:committed, name}),
         sigs: Map.delete(u.sigs, name)
     }
 
     {u, checks}
+  end
+
+  # `name` committed as `cid` in the database: what every context reads
+  # under it unless a patch says otherwise (`{:name, _}`), and what the
+  # evolution rule compares a patch with (`{:committed, _}`, which no patch
+  # holds).
+  defp commit(salsa, name, cid) do
+    salsa
+    |> Salsa.set(:committed, {:name, name}, cid)
+    |> Salsa.set(:committed, {:committed, name}, cid)
   end
 
   defp typed!(%{typed: nil}), do: raise("a promoted declaration typechecks")
@@ -711,6 +735,7 @@ defmodule Kinoko.Lang.Universe do
         |> Salsa.retain(fn
           {:signature, cid} -> MapSet.member?(cids, cid)
           {:check, cid} -> MapSet.member?(cids, cid)
+          {:evolution, cid} -> MapSet.member?(cids, cid)
           {_, name} -> MapSet.member?(names, name) or Stdlib.signature(name) != nil
         end)
         |> Salsa.retain_reads(fn

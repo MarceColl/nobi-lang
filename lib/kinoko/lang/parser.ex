@@ -412,8 +412,19 @@ defmodule Kinoko.Lang.Parser do
     if at_terminator?(p, ["end"]) do
       {Enum.reverse(acc), p}
     else
-      {f, p} = typed_name(p)
-      model_fields(skip_nl(p), [f | acc])
+      {{name, t}, p} = typed_name(p)
+      {default, p} = field_default(p)
+      model_fields(skip_nl(p), [{name, t, default} | acc])
+    end
+  end
+
+  # A model field's `= <expression>`, or `:none`. The checker decides
+  # whether the expression is a constant (`"bad-default"`).
+  defp field_default(p) do
+    if at?(p, :eq) do
+      p |> advance() |> skip_nl() |> exp()
+    else
+      {:none, p}
     end
   end
 

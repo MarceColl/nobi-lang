@@ -427,7 +427,10 @@ defmodule Kinoko.LangTest do
     assert Format.signature("A.f", {:def, [{:named, "Int"}], {:named, "String"}, ["n"]}) ==
              "A.f(Int) : String"
 
-    assert Format.signature("A.M", {:model, [{"n", {:named, "Int"}}]}) == "model {n : Int}"
+    assert Format.signature("A.M", {:model, [{"n", {:named, "Int"}, :none}]}) == "model {n : Int}"
+
+    assert Format.signature("A.M", {:model, [{"n", {:named, "Int"}, {:int, [], [0]}}]}) ==
+             "model {n : Int = 0}"
 
     assert Format.signature("A.T", {:type, ["K"], [{"V", [{:var, "K"}]}, {"W", []}]}) ==
              "type A.T<K> = V(K) | W"

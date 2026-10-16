@@ -7,7 +7,7 @@ defmodule Kinoko.Lang.NaiveUniverse do
   committed; it never checks through it.
   """
 
-  alias Kinoko.Lang.Types.{Check, Extract, Stdlib}
+  alias Kinoko.Lang.Types.{Check, Evolution, Extract, Stdlib}
   alias Kinoko.Lang.Universe
   alias Kinoko.Lang.Universe.{Db, Search}
 
@@ -78,12 +78,12 @@ defmodule Kinoko.Lang.NaiveUniverse do
         Enum.reduce_while(code, %{}, fn {name, {:live, _, _, decl}}, checks ->
           checked = Check.decl(decl, sigs)
 
-          case checked.result do
-            {:ok, typed} ->
+          case {checked.result, evolution(u.committed, name, decl)} do
+            {{:ok, typed}, []} ->
               outcome = %{typed: typed, deps: Db.deps(decl, checked), internal: false}
               {:cont, Map.put(checks, name, outcome)}
 
-            {:error, _} ->
+            _ ->
               {:halt, nil}
           end
         end)
@@ -111,19 +111,31 @@ defmodule Kinoko.Lang.NaiveUniverse do
         code
         |> Enum.sort()
         |> Enum.flat_map(fn {name, {:live, _, _, decl}} ->
-          case Check.decl(decl, sigs).result do
-            {:ok, _} ->
-              []
+          errors =
+            case Check.decl(decl, sigs).result do
+              {:ok, _} -> []
+              {:error, errors} -> errors
+            end
 
-            {:error, errors} ->
-              Enum.map(errors, &%{name: name, code: &1.code, message: &1.message})
-          end
+          Enum.map(
+            errors ++ evolution(committed, name, decl),
+            &%{name: name, code: &1.code, message: &1.message}
+          )
         end)
 
       twice ->
         twice
     end
   end
+
+  # The model evolution rule's errors for `decl` against what is committed
+  # under `name` (`[]` for anything but a model).
+  defp evolution(committed, name, {:defmodel, _, _} = decl) do
+    old = with %{decl: d} <- committed[name], do: Extract.signature(d)
+    Evolution.errors(name, old, Extract.signature(decl))
+  end
+
+  defp evolution(_committed, _name, _decl), do: []
 
   # Committed code with `patch` applied over it, by name.
   defp patched(committed, patch) do

@@ -9,6 +9,9 @@ defmodule Kinoko.Lang.Universe.Db do
   - layer `:committed` and layer `{:patch, id}`: `{:name, name}` gives the
     CID of the declaration the layer holds under `name`, or `:tombstone`
     where a patch removes it.
+  - layer `:committed` alone: `{:committed, name}` gives the same CID as its
+    `{:name, name}`. No patch holds that key, so in every context it reads
+    what is committed under `name` (the evolution rule's previous version).
   - layer `:cas`: `{:decl, cid}` gives `{cid, decl}`, every staged and
     committed declaration by CID (positions dropped). It is the last layer
     of every context, and no other layer holds its keys.
@@ -25,10 +28,17 @@ defmodule Kinoko.Lang.Universe.Db do
     each of its names' signatures read through `{:sig, _}`, never through
     another `{:reaching, _}` (so a ring of deftypes is no cycle). Every check
     that consults the group reads this one memo, not every signature in it.
+  - `{:evolution, cid}`: the model evolution rule's errors
+    (`Kinoko.Lang.Types.Evolution`) for a `defmodel` against what is
+    committed under its name (`{:committed, name}`, then its `{:signature,
+    _}`). Committing the model itself leaves it `[]` as before, so the
+    check that reads it is kept (early cutoff). Only a model's check asks
+    it: the rule constrains nothing else.
   - `{:check, cid}`: the declaration checked against the signatures it
     looks up, each read through `{:sig, _}`, and the groups whose key
-    positions it consults, each through `{:reaching, _}`: so it is kept
-    wherever those are the same.
+    positions it consults, each through `{:reaching, _}`, and its
+    `{:evolution, cid}` errors after the checker's: so it is kept wherever
+    those are the same.
 
   `Kinoko.Lang.Types.Check` takes a lookup function, which cannot thread
   the reads: the check runs against `Salsa.peek/2` and then records a read
@@ -48,7 +58,7 @@ defmodule Kinoko.Lang.Universe.Db do
   @behaviour Kinoko.Lang.Salsa
 
   alias Kinoko.Lang.Salsa
-  alias Kinoko.Lang.Types.{Check, Extract, Keys, Stdlib}
+  alias Kinoko.Lang.Types.{Check, Evolution, Extract, Keys, Stdlib}
 
   @typedoc """
   A check as the database keeps it: its checked tree if it typechecks, the
@@ -88,14 +98,47 @@ defmodule Kinoko.Lang.Universe.Db do
     {{:ok, reach}, record_sigs(r, reach.names)}
   end
 
-  def compute({:check, cid}, r) do
+  def compute({:evolution, cid}, r) do
     case Salsa.input(r, {:decl, cid}) do
-      {{_, decl}, r} -> check(decl, r)
+      {{_, decl}, r} -> evolution(cid, decl, r)
       {nil, r} -> {{:error, {:missing, cid}}, r}
     end
   end
 
-  defp check(decl, r) do
+  def compute({:check, cid}, r) do
+    case Salsa.input(r, {:decl, cid}) do
+      {{_, decl}, r} -> check(cid, decl, r)
+      {nil, r} -> {{:error, {:missing, cid}}, r}
+    end
+  end
+
+  # Nothing committed under the name, or this very declaration: nothing to
+  # compare (and no signature read).
+  defp evolution(cid, decl, r) do
+    name = Kinoko.Lang.Ast.name(decl)
+
+    case Salsa.input(r, {:committed, name}) do
+      {committed, r} when committed in [nil, cid] ->
+        {{:ok, []}, r}
+
+      {committed, r} ->
+        case Salsa.ask(r, {:signature, committed}) do
+          {{:ok, old}, r} -> {{:ok, Evolution.errors(name, old, Extract.signature(decl))}, r}
+          {error, r} -> {error, r}
+        end
+    end
+  end
+
+  defp evolution_errors(cid, {:defmodel, _, _}, r) do
+    case Salsa.ask(r, {:evolution, cid}) do
+      {{:ok, errors}, r} -> {Enum.map(errors, &Map.put(&1, :unbound, nil)), r}
+      {_, r} -> {[], r}
+    end
+  end
+
+  defp evolution_errors(_cid, _decl, r), do: {[], r}
+
+  defp check(cid, decl, r) do
     checked = Check.decl(decl, lookup(r))
 
     {reached, r} =
@@ -116,14 +159,19 @@ defmodule Kinoko.Lang.Universe.Db do
               "read #{inspect(MapSet.to_list(read))}"
     end
 
+    {evolution, r} = evolution_errors(cid, decl, r)
+
     {typed, internal, errors} =
-      case checked.result do
-        {:ok, typed} ->
+      case {checked.result, evolution} do
+        {{:ok, typed}, []} ->
           {typed, false, []}
 
-        {:error, errors} ->
+        {{:ok, _}, evolution} ->
+          {nil, false, evolution}
+
+        {{:error, errors}, evolution} ->
           errors = Enum.zip_with(errors, checked.unbound, &Map.put(&1, :unbound, &2))
-          {nil, Enum.any?(errors, &(&1.code == "internal")), errors}
+          {nil, Enum.any?(errors, &(&1.code == "internal")), errors ++ evolution}
       end
 
     {{:ok, %{typed: typed, deps: deps(decl, checked), internal: internal, errors: errors}}, r}

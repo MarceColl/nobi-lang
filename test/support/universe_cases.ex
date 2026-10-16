@@ -144,7 +144,15 @@ defmodule Kinoko.Lang.UniverseCases do
       "deftype T.B<K> do B(T.A<K>) | N end",
       "deftype T.B<K> do B(K) end"
     ],
-    ["defmodel T.R do v : Int end", "defmodel T.R do v : String end"],
+    # A stored model: the evolution rule refuses a retype, a removal and a
+    # new mandatory field over a committed version, allows a defaulted one.
+    [
+      "defmodel T.R do\n  id : Uuid\n  v : Int\nend",
+      "defmodel T.R do\n  id : Uuid\n  v : String\nend",
+      "defmodel T.R do\n  id : Uuid\n  v : Int\n  w : Int = 0\nend",
+      "defmodel T.R do\n  v : Int\nend",
+      "defmodel T.R do\n  id : Uuid\n  v : Int\n  w : Int\nend"
+    ],
     [
       "def T.f(b : T.B<Int>) : Int do 1 end",
       "def T.f(b : T.B<(Int -> Int)>) : Int do 1 end",

@@ -161,7 +161,7 @@ defmodule Kinoko.Lang.OracleTest do
     {:ok, [_, d]} =
       Parser.program("defmodel A.M do\n  n : Int\nend\n\ndef A.f() : A.M do\n  A.M(1)\nend")
 
-    sigs = Map.merge(Stdlib.signatures(), %{"A.M" => {:model, [{"n", {:named, "Int"}}]}})
+    sigs = Map.merge(Stdlib.signatures(), %{"A.M" => {:model, [{"n", {:named, "Int"}, :none}]}})
     %{result: {:error, [e | _]}} = Check.decl(d, sigs)
     assert e.message =~ "%A.M{"
   end
