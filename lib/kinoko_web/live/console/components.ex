@@ -595,16 +595,16 @@ defmodule KinokoWeb.Console.Components do
     ~H"""
     <div class="flex flex-col gap-[8px]">
       <div class="p-[6px] rounded-[9px] bg-(--k-sand) border border-(--k-line) flex flex-col gap-px">
-        <.env_row name="main" tag="tracked branch" on />
-        <.env_row name="fix-rounding" tag="agent · 2 patches" />
-        <.env_row name="shares-v2" tag="you · 9d" />
+        <.env_row name="main" tag="base" on />
+        <.env_row name="fix-rounding" tag="fork of main" />
+        <.env_row name="shares-v2" tag="fork of main" />
       </div>
       <div class="flex gap-[7px]">
         <.chip class="text-(--k-violet) bg-(--k-violet-chip) border-(--k-violet-chip-border)">
-          own layer
+          own history
         </.chip>
         <.chip class="text-(--k-dim) bg-(--k-card) border-(--k-line)">
-          reads fall through to production
+          starts at its parent's commit
         </.chip>
       </div>
     </div>
