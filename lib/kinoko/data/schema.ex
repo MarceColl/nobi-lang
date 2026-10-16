@@ -21,16 +21,20 @@ defmodule Kinoko.Data.Schema do
   indexed), then one per field: `Int`/`Bool` → `INTEGER`, `String`/`Uuid` →
   `TEXT`, `Option` of one of those → that type, nullable; anything else →
   `TEXT` holding canonical JSON (`Kinoko.Data.Codec`). Every field column is
-  nullable.
+  nullable and has no SQL `DEFAULT`: defaults are read-time, from the
+  reader's signature (a `NULL` in a non-`Option` column is "absent").
 
   ## Sync
 
   `ensure/3` creates the table, and adds (`ALTER TABLE … ADD COLUMN`) each
-  field the table lacks, with a `DEFAULT` of the field's default when it has
-  one (so rows already there, and rows inserted by code that predates the
-  field, read it). It never drops or alters a column. It runs in one
-  `IMMEDIATE` transaction, so concurrent ensures of one file serialize. Its
-  layout is cached per `{repo, model, signature hash}` (`Kinoko.Data.Cache`).
+  field the table lacks (rows already there, and rows inserted by code that
+  predates the field, hold `NULL` there). It never drops or alters a
+  column. It runs in one `IMMEDIATE` transaction, so concurrent ensures of
+  one file serialize. Its layout is cached per `{repo, model, signature
+  hash}` (`Kinoko.Data.Cache`), but only when it ran outside any enclosing
+  transaction: inside one (`Kinoko.Data.transaction/2`) a rollback would
+  undo the table or columns the cache would claim, so it is not cached
+  there and the next call syncs again.
   """
 
   alias Kinoko.Data.{Cache, Codec, Repo}
@@ -105,10 +109,11 @@ defmodule Kinoko.Data.Schema do
   default}]`), the table synced first if this repo has not synced it for
   this signature. Runs in the caller, whose dynamic repo is set; raises
   `Exqlite.Error` as a query does, and returns `{:error, message}` for a
-  default that cannot be stored or a name that cannot be given.
+  name that cannot be given. Inside an enclosing transaction, that error
+  also marks the enclosing one for rollback.
   """
-  @spec layout(pid(), String.t(), list(), map()) :: {:ok, layout()} | {:error, String.t()}
-  def layout(repo, model, fields, models) do
+  @spec layout(pid(), String.t(), list()) :: {:ok, layout()} | {:error, String.t()}
+  def layout(repo, model, fields) do
     key = {repo, model, :erlang.phash2(fields, 4_294_967_296)}
 
     case Cache.get(key) do
@@ -116,19 +121,23 @@ defmodule Kinoko.Data.Schema do
         {:ok, layout}
 
       _ ->
-        with {:ok, layout} <- sync(model, fields, models) do
-          Cache.put(key, {fields, layout})
+        # Checked before `sync/3` opens its own transaction: only an
+        # enclosing one can roll the sync back after it returns.
+        enclosed? = Repo.in_transaction?()
+
+        with {:ok, layout} <- sync(model, fields) do
+          unless enclosed?, do: Cache.put(key, {fields, layout})
           {:ok, layout}
         end
     end
   end
 
-  defp sync(model, fields, models) do
+  defp sync(model, fields) do
     tx =
       Repo.transaction(fn ->
         with {:ok, table} <- table_for(model),
              :ok <- create_table(table),
-             {:ok, columns} <- columns_for(table, fields, models) do
+             {:ok, columns} <- columns_for(table, fields) do
           %{table: table, columns: columns}
         else
           {:error, why} -> Repo.rollback(why)
@@ -138,6 +147,7 @@ defmodule Kinoko.Data.Schema do
     case tx do
       {:ok, layout} -> {:ok, layout}
       {:error, why} when is_binary(why) -> {:error, "#{model}: #{why}"}
+      {:error, why} -> {:error, "#{model}: #{inspect(why)}"}
     end
   end
 
@@ -177,7 +187,7 @@ defmodule Kinoko.Data.Schema do
     :ok
   end
 
-  defp columns_for(table, fields, models) do
+  defp columns_for(table, fields) do
     mapped =
       Map.new(
         Repo.query!("SELECT field, col FROM _kinoko_columns WHERE tbl = ?", [table]).rows,
@@ -193,7 +203,7 @@ defmodule Kinoko.Data.Schema do
     |> Enum.reject(fn {field, _, _} -> field == "id" end)
     |> Enum.reduce_while({:ok, [], mapped}, fn {field, type, default}, {:ok, acc, mapped} ->
       with {:ok, col, mapped} <- column_for(table, field, mapped),
-           :ok <- add_column(table, col, present, field, type, default, models) do
+           :ok <- add_column(table, col, present, type) do
         {:cont, {:ok, [{field, type, default, col} | acc], mapped}}
       else
         {:error, _} = error -> {:halt, error}
@@ -230,33 +240,18 @@ defmodule Kinoko.Data.Schema do
     end
   end
 
-  defp add_column(table, col, present, field, type, default, models) do
-    if MapSet.member?(present, col) do
-      :ok
-    else
-      with {:ok, default_sql} <- default_clause(field, type, default, models) do
-        Repo.query!(
-          "ALTER TABLE #{quote_name(table)} ADD COLUMN #{quote_name(col)} " <>
-            column_type(type) <> default_sql
-        )
-
-        :ok
-      end
+  # No SQL `DEFAULT`: a NULL (or absent) cell means "absent", and reads as
+  # the field's default in the reader's signature (`Kinoko.Data.Codec`), so
+  # a changed default applies to every row written before the field.
+  defp add_column(table, col, present, type) do
+    unless MapSet.member?(present, col) do
+      Repo.query!(
+        "ALTER TABLE #{quote_name(table)} ADD COLUMN #{quote_name(col)} " <> column_type(type)
+      )
     end
+
+    :ok
   end
-
-  defp default_clause(_field, _type, :none, _models), do: {:ok, ""}
-
-  defp default_clause(field, type, default, models) do
-    case Codec.encode(type, default, models) do
-      {:ok, nil} -> {:ok, ""}
-      {:ok, n} when is_integer(n) -> {:ok, " DEFAULT " <> Integer.to_string(n)}
-      {:ok, s} when is_binary(s) -> {:ok, " DEFAULT " <> quote_literal(s)}
-      {:error, why} -> {:error, "the default of `#{field}` cannot be stored: #{why}"}
-    end
-  end
-
-  defp quote_literal(s), do: "'" <> String.replace(s, "'", "''") <> "'"
 
   @doc "The SQLite column type of a field of `type` (see \"Columns\")."
   @spec column_type(term()) :: String.t()

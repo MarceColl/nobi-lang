@@ -107,7 +107,7 @@ defmodule Kinoko.DataTest do
   end
 
   describe "ensure" do
-    test "creates the table, then adds columns with defaults", %{dir: dir} do
+    test "creates the table, then adds columns, with no SQL defaults", %{dir: dir} do
       repo = open!(dir)
       assert :ok = Data.ensure(repo, "Forum.Post", @v1)
 
@@ -120,11 +120,12 @@ defmodule Kinoko.DataTest do
 
       assert :ok = Data.ensure(repo, "Forum.Post", @v2)
       cols = columns(repo, "forum__post")
-      assert cols["pinned"] == {"INTEGER", "0"}
+      # Defaults are read-time (from the reader's signature), never SQL's.
+      assert cols["pinned"] == {"INTEGER", nil}
       assert cols["note"] == {"TEXT", nil}
-      assert cols["tags"] == {"TEXT", ~s('["x"]')}
-      assert cols["score"] == {"INTEGER", "3"}
-      assert cols["label"] == {"TEXT", "'it''s'"}
+      assert cols["tags"] == {"TEXT", nil}
+      assert cols["score"] == {"INTEGER", nil}
+      assert cols["label"] == {"TEXT", nil}
 
       # Idempotent, and never drops: back to v1 keeps every column.
       assert :ok = Data.ensure(repo, "Forum.Post", @v2)
@@ -216,9 +217,28 @@ defmodule Kinoko.DataTest do
                  "pinned" => false,
                  "note" => @none,
                  "tags" => ["x"],
-                 "score" => some(3),
+                 # An Option's NULL is None, whatever its default.
+                 "score" => @none,
                  "label" => "it's"
                })
+    end
+
+    test "a changed default applies to rows written before the field", %{dir: dir} do
+      repo = open!(dir)
+      {:ok, id} = Data.insert(repo, "Forum.Post", @v1, v1_post("old", 7))
+      {:ok, {:rec, _, fields}} = Data.get(repo, "Forum.Post", @v2, id)
+      assert {fields["pinned"], fields["label"], fields["tags"]} == {false, "it's", ["x"]}
+
+      v3 =
+        Enum.map(@v2, fn
+          {"pinned", t, _} -> {"pinned", t, true}
+          {"label", t, _} -> {"label", t, "new"}
+          {"tags", t, _} -> {"tags", t, []}
+          other -> other
+        end)
+
+      {:ok, {:rec, _, fields}} = Data.get(repo, "Forum.Post", v3, id)
+      assert {fields["pinned"], fields["label"], fields["tags"]} == {true, "new", []}
     end
 
     test "extra columns are ignored by older code, which keeps them on update", %{dir: dir} do
@@ -246,13 +266,13 @@ defmodule Kinoko.DataTest do
       assert fields["note"] == some("n")
     end
 
-    test "older code inserting fills newer columns with their defaults", %{dir: dir} do
+    test "rows older code inserts read newer fields as their defaults", %{dir: dir} do
       repo = open!(dir)
       :ok = Data.ensure(repo, "Forum.Post", @v2)
       {:ok, id} = Data.insert(repo, "Forum.Post", @v1, v1_post("old", 1))
       {:ok, {:rec, _, fields}} = Data.get(repo, "Forum.Post", @v2, id)
       assert fields["pinned"] == false
-      assert fields["score"] == some(3)
+      assert fields["score"] == @none
       assert fields["tags"] == ["x"]
     end
   end
@@ -509,6 +529,52 @@ defmodule Kinoko.DataTest do
     end
   end
 
+  describe "transactions" do
+    test "a first insert in a rolled-back transaction leaves no stale schema", %{dir: dir} do
+      repo = open!(dir)
+
+      assert {:error, :undo} =
+               Data.transaction(repo, fn ->
+                 {:ok, _} = Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+                 Data.rollback(:undo)
+               end)
+
+      assert [] == sql!(repo, "SELECT name FROM sqlite_master WHERE name = 'forum__post'")
+      assert {:ok, _} = Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+      assert {:ok, [_]} = Data.list(repo, "Forum.Post", @v1)
+    end
+
+    test "an evolution in a rolled-back transaction leaves no stale schema", %{dir: dir} do
+      repo = open!(dir)
+      {:ok, id} = Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+
+      assert {:error, :undo} =
+               Data.transaction(repo, fn ->
+                 :ok = Data.ensure(repo, "Forum.Post", @v2)
+                 Data.rollback(:undo)
+               end)
+
+      refute Map.has_key?(columns(repo, "forum__post"), "pinned")
+
+      assert {:ok, [{:rec, _, %{"id" => ^id, "pinned" => false}}]} =
+               Data.list(repo, "Forum.Post", @v2)
+
+      assert Map.has_key?(columns(repo, "forum__post"), "pinned")
+    end
+
+    test "a committed transaction keeps its writes", %{dir: dir} do
+      repo = open!(dir)
+
+      assert {:ok, {:uuid, _} = id} =
+               Data.transaction(repo, fn ->
+                 {:ok, id} = Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+                 id
+               end)
+
+      assert {:ok, {:rec, _, %{"id" => ^id}}} = Data.get(repo, "Forum.Post", @v1, id)
+    end
+  end
+
   describe "errors" do
     test "a closed deployment's repo is unavailable", %{dir: dir} do
       repo = open!(dir)
@@ -535,6 +601,27 @@ defmodule Kinoko.DataTest do
       end
 
       assert {:ok, _} = Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+    end
+
+    test "a busy file is waited for, then written", %{dir: dir} do
+      repo = open!(dir)
+      :ok = Data.ensure(repo, "Forum.Post", @v1)
+
+      {:ok, conn} = Exqlite.Sqlite3.open(Path.join([dir, "data", "app.db"]))
+      :ok = Exqlite.Sqlite3.execute(conn, "BEGIN IMMEDIATE")
+
+      holder =
+        Task.async(fn ->
+          Process.sleep(500)
+          :ok = Exqlite.Sqlite3.execute(conn, "ROLLBACK")
+          Exqlite.Sqlite3.close(conn)
+        end)
+
+      started = System.monotonic_time(:millisecond)
+      assert {:ok, _} = Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+      assert System.monotonic_time(:millisecond) - started >= 300
+      Task.await(holder)
+      assert {:ok, [_]} = Data.list(repo, "Forum.Post", @v1)
     end
 
     test "a row of the wrong shape is a store error", %{dir: dir} do

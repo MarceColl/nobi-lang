@@ -274,6 +274,15 @@ defmodule Kinoko.Data do
   calling process: `{:ok, value}`, or `{:error, reason}` when `fun` calls
   `rollback/1` or raises (an error raised by SQLite is classified as the
   other calls classify it). The calls `fun` makes on `repo` join it.
+
+  A joined call that fails *inside its own nested transaction* marks this
+  one for rollback, even though it returns an ordinary `{:error, _}` to
+  `fun`: a schema sync that fails (a name that cannot be given), and a
+  `delete/4` of a row that cannot be read. `fun` may carry on, but nothing
+  it writes is kept: the transaction answers `{:error, :rollback}`.
+
+  A schema sync done inside the transaction is not cached (a rollback
+  would undo it), so the next call outside syncs again.
   """
   @spec transaction(repo(), (-> term())) :: {:ok, term()} | {:error, term()}
   def transaction(repo, fun), do: run(repo, fn -> transaction(fun) end)
@@ -339,7 +348,7 @@ defmodule Kinoko.Data do
 
     case Map.fetch(models, model) do
       {:ok, fields} when is_list(fields) ->
-        case Schema.layout(repo, model, fields, models) do
+        case Schema.layout(repo, model, fields) do
           {:ok, layout} -> {:ok, layout, models}
           {:error, why} -> store_error(why)
         end

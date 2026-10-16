@@ -9,8 +9,10 @@ defmodule Kinoko.Data.Opener do
   migration lock is a no-op, so this is what keeps two processes from
   creating the meta tables at once.
 
-  The registry entry's value is the repo pid once the file is ready, so an
-  open of a ready file is one registry lookup.
+  The file is opened in `handle_continue/2`, not `init/1`, so a slow open
+  does not hold up the supervisor; callers wait on `GenServer.call`. The
+  registry entry's value is the repo pid once the file is ready, so an open
+  of a ready file is one registry lookup.
 
   The repo is linked: if it dies, the opener stops, and the next `open/2`
   starts a fresh one (`restart: :temporary`). Stopping drops the repo's
@@ -74,18 +76,25 @@ defmodule Kinoko.Data.Opener do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
-    path = Keyword.fetch!(opts, :path)
-    File.mkdir_p!(Path.dirname(path))
+    {:ok, %{repo: nil, path: Keyword.fetch!(opts, :path)}, {:continue, {:open, opts}}}
+  end
 
+  # Opening runs after `init/1`, so a slow first open does not hold up the
+  # DynamicSupervisor (which starts children one at a time). Callers wait
+  # in `GenServer.call(opener, :repo)`, which is answered only after this.
+  @impl true
+  def handle_continue({:open, opts}, %{path: path} = state) do
     repo_opts = [name: nil, database: path] ++ Keyword.take(opts, [:busy_timeout])
 
-    with :ok <- create_wal(path),
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- create_wal(path),
          {:ok, repo} <- Repo.start_link(repo_opts),
+         state = %{state | repo: repo},
          :ok <- Schema.create_meta(repo) do
       {_, _} = Registry.update_value(@registry, path, fn _ -> repo end)
-      {:ok, %{repo: repo, path: path}}
+      {:noreply, state}
     else
-      {:error, reason} -> {:stop, reason}
+      {:error, reason} -> {:stop, {:shutdown, {:open_failed, reason}}, state}
     end
   end
 
@@ -116,6 +125,8 @@ defmodule Kinoko.Data.Opener do
   def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
 
   @impl true
+  def terminate(_reason, %{repo: nil}), do: :ok
+
   def terminate(_reason, %{repo: repo}) do
     Cache.drop(repo)
 
