@@ -249,7 +249,7 @@ defmodule KinokoWeb.Console.DeploymentLive do
                 id={dom_id}
                 data-current={v.current? || nil}
                 class={[
-                  "flex items-center border-t border-(--k-row-line-2) [&:nth-child(2)]:border-t-0",
+                  "dep-row flex items-center border-(--k-row-line-2) [.dep-row+&]:border-t",
                   if(v.current?, do: "bg-[#FAFAF7]", else: "bg-(--k-card)")
                 ]}
               >
@@ -302,7 +302,7 @@ defmodule KinokoWeb.Console.DeploymentLive do
                 :for={{dom_id, r} <- @streams.routes}
                 id={dom_id}
                 data-pattern={r.pattern}
-                class="flex items-center border-t border-(--k-row-line-2) [&:nth-child(2)]:border-t-0"
+                class="dep-row flex items-center border-(--k-row-line-2) [.dep-row+&]:border-t"
               >
                 <span class={[cell(), "flex-[3] font-(family-name:--k-mono) text-[12px] font-medium"]}>
                   {r.pattern}
@@ -313,7 +313,7 @@ defmodule KinokoWeb.Console.DeploymentLive do
                 ]}>
                   {r.app}
                 </span>
-                <span class={[cell(), "flex-1 text-right"]}>
+                <span class={[cell(), "flex-1 text-right text-[12.5px]"]}>
                   <a
                     :if={r.path}
                     href={@url <> r.path}
@@ -338,12 +338,12 @@ defmodule KinokoWeb.Console.DeploymentLive do
                 :for={{dom_id, h} <- @streams.hosts}
                 id={dom_id}
                 data-host={h.host}
-                class="flex items-center border-t border-(--k-row-line-2) [&:nth-child(1)]:border-t-0"
+                class="dep-row flex items-center border-(--k-row-line-2) [.dep-row+&]:border-t"
               >
                 <span class={[cell(), "flex-[5] font-(family-name:--k-mono) text-[12px] font-medium"]}>
                   {h.host}
                 </span>
-                <span class={[cell(), "flex-1 text-right"]}>
+                <span class={[cell(), "flex-1 text-right text-[12.5px]"]}>
                   <a
                     href={h.url <> "/"}
                     target="_blank"
@@ -371,7 +371,7 @@ defmodule KinokoWeb.Console.DeploymentLive do
                 :for={{dom_id, m} <- @streams.models}
                 id={dom_id}
                 data-model={m.model}
-                class="flex items-center border-t border-(--k-row-line-2) [&:nth-child(2)]:border-t-0"
+                class="dep-row flex items-center border-(--k-row-line-2) [.dep-row+&]:border-t"
               >
                 <span class={[cell(), "flex-[3] font-(family-name:--k-mono) text-[12px] font-medium"]}>
                   {m.model}
@@ -397,8 +397,9 @@ defmodule KinokoWeb.Console.DeploymentLive do
     """
   end
 
-  # The prototype's `table()` cell: 9px 12px, 12.5px, one line, ellipsis.
-  defp cell, do: "min-w-0 px-[12px] py-[9px] text-[12.5px] text-(--k-ink) truncate"
+  # The prototype's `table()` cell: 9px 12px, one line, ellipsis. Size and
+  # colour are per column (12.5px ink by default), never stacked on this.
+  defp cell, do: "min-w-0 px-[12px] py-[9px] truncate"
 
   # The prototype's `table()` head: uppercase 11px, .05em, on the tint.
   attr :cols, :list, required: true
