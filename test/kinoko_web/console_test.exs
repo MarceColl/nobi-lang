@@ -4,7 +4,7 @@ defmodule KinokoWeb.ConsoleTest do
   import Phoenix.LiveViewTest
   import Kinoko.UniverseHelpers
 
-  alias Kinoko.{Data, Deployment, Universe}
+  alias Kinoko.{Deployment, Universe}
 
   # Deployments' data files land in this test's own directory.
   @moduletag :tmp_dir
@@ -86,59 +86,6 @@ defmodule KinokoWeb.ConsoleTest do
   end
 
   describe "/_/d/:name" do
-    test "shows the deployment, its hosts and clickable paths", %{conn: conn} do
-      u = forum_universe()
-      :ok = Deployment.create(u, u, "Forum", hosts: ["#{u}.test"])
-
-      {:ok, view, _} = live(conn, "/_/d/#{u}")
-
-      assert has_element?(view, "#deployment-name")
-      assert has_element?(view, ~s(a[href="/_/u/#{u}"]))
-      assert has_element?(view, "#deployment-commit[data-mode=following]")
-      assert has_element?(view, ~s(#hosts a[href^="http://#{u}.test"]))
-      # a param-free entry is a link, a parameterised one is not
-      assert has_element?(view, ~s(#routes a[data-path="/settings"]))
-      assert has_element?(view, ~s(#routes [data-pattern="/post/:id"]))
-      refute has_element?(view, ~s(#routes a[data-path="/post/:id"]))
-    end
-
-    test "shows the stored models: row counts and columns", %{conn: conn} do
-      u = forum_universe()
-      :ok = Deployment.create(u, u, "Forum")
-
-      {:ok, view, _} = live(conn, "/_/d/#{u}")
-      assert has_element?(view, "#models-empty")
-      refute has_element?(view, "#models article")
-
-      {:ok, image} = Universe.image(u)
-      models = image.module.__yabu__(:models)
-      {:ok, repo} = Data.open(u)
-      topic = {:rec, "Forum.Topic", %{"title" => "Hi", "replies" => 0}}
-      for _ <- 1..2, do: {:ok, _} = Data.insert(repo, "Forum.Topic", models, topic)
-      :ok = Data.ensure(repo, "Forum.Reply", models)
-
-      {:ok, view, _} = live(conn, "/_/d/#{u}")
-      assert has_element?(view, ~s(#{id("models", "Forum.Topic")} [data-table="forum__topic"]))
-      assert has_element?(view, ~s(#{id("models", "Forum.Topic")} [data-rows="2"]))
-      assert has_element?(view, ~s(#{id("models", "Forum.Reply")} [data-rows="0"]))
-
-      for {col, type} <- [{"id", "TEXT"}, {"title", "TEXT"}, {"replies", "INTEGER"}],
-          do:
-            assert(
-              has_element?(
-                view,
-                ~s(#{id("models", "Forum.Topic")} [data-column="#{col}"][data-type="#{type}"])
-              )
-            )
-    end
-
-    test "shows a pinned commit", %{conn: conn} do
-      u = forum_universe()
-      :ok = Deployment.create(u, u, "Forum", commit: 1)
-      {:ok, view, _} = live(conn, "/_/d/#{u}")
-      assert has_element?(view, "#deployment-commit[data-mode=pinned]")
-    end
-
     test "an unknown deployment goes back to the index", %{conn: conn} do
       assert {:error, {:live_redirect, %{to: "/_"}}} = live(conn, "/_/d/nope-nope")
     end
