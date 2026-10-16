@@ -1,10 +1,12 @@
+> Storage moved to SQLite on 2026-10-16; see docs/superpowers/specs/2026-10-16-sqlite-design.md.
+
 # PersistentElmGenServer — design (piece 2)
 
 Piece 2 of 7. It builds on the Elm foundation (`Kinoko.ElmGenServer`, `Kinoko.Elm.Runtime`). Piece 3, the code DB server, becomes a `PersistentElmGenServer` that holds a universe.
 
 ## Goal
 
-An `ElmGenServer` whose state survives restarts and crashes. Every state change is written to SQLite, append-only, **before** the effects of that step run. A server started again under the same key resumes from its last written state.
+An `ElmGenServer` whose state survives restarts and crashes. Every state change is written to Postgres, append-only, **before** the effects of that step run. A server started again under the same key resumes from its last written state.
 
 ## Out of scope
 

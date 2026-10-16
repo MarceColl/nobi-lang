@@ -7,7 +7,7 @@ defmodule Kinoko.Application do
 
   @impl true
   def start(_type, _args) do
-    ensure_data_dir()
+    Kinoko.Release.ensure_data_dir(Kinoko.Repo)
 
     children =
       [
@@ -60,14 +60,6 @@ defmodule Kinoko.Application do
       ]
     else
       []
-    end
-  end
-
-  # SQLite creates the database file but not its directory.
-  defp ensure_data_dir do
-    case Application.get_env(:kinoko, Kinoko.Repo, [])[:database] do
-      path when is_binary(path) -> File.mkdir_p!(Path.dirname(path))
-      _ -> :ok
     end
   end
 

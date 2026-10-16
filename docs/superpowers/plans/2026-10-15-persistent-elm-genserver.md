@@ -1,15 +1,17 @@
+> Storage moved to SQLite on 2026-10-16; see docs/superpowers/specs/2026-10-16-sqlite-design.md.
+
 # PersistentElmGenServer Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** An `ElmGenServer` whose state survives restarts. It writes append-only to SQLite before each step's effects, resumes by key, and supports version migration.
+**Goal:** An `ElmGenServer` whose state survives restarts. It writes append-only to Postgres before each step's effects, resumes by key, and supports version migration.
 
 **Architecture:**
 - `Runtime` gets an `on_step` hook that runs before effects are performed.
 - `Kinoko.Elm.Store` reads and writes the `elm_states` table through `Kinoko.Repo`.
 - `Kinoko.PersistentElmGenServer` wires the hook to `Store`. It handles boot (`latest` → decode → migrate → resume, or `init`) and registers each process by key in a `Registry`.
 
-**Tech Stack:** Elixir, Ecto SQL with SQLite, a `Registry`, ExUnit with the SQL sandbox.
+**Tech Stack:** Elixir, Ecto SQL with Postgres, a `Registry`, ExUnit with the SQL sandbox.
 
 **Spec:** `docs/superpowers/specs/2026-10-15-persistent-elm-genserver-design.md`
 

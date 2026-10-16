@@ -1,3 +1,5 @@
+> Storage moved to SQLite on 2026-10-16; see docs/superpowers/specs/2026-10-16-sqlite-design.md.
+
 # Universe, CodeDb, CAS and MCP Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -14,7 +16,7 @@
 - **Processes:** `Kinoko.CodeDb`, a `PersistentElmGenServer` keyed `"universe:<name>"` that serializes only check, promote and persist.
 - **Routing:** `Kinoko.Universe`, stateless. Writes do parse and `Cas.put` in the caller, then call CodeDb. Reads call CodeDb. `eval`, `call` and `test` take a snapshot and run through `Kinoko.Exec` in the caller.
 
-**Tech Stack:** Elixir/Phoenix 1.8, Ecto/SQLite, `PersistentElmGenServer` (piece 2), `Kinoko.Exec` (piece 4), ExUnit with the SQL sandbox, Phoenix.ConnTest.
+**Tech Stack:** Elixir/Phoenix 1.8, Ecto/Postgres, `PersistentElmGenServer` (piece 2), `Kinoko.Exec` (piece 4), ExUnit with the SQL sandbox, Phoenix.ConnTest.
 
 **Spec:** `docs/superpowers/specs/2026-10-15-codedb-mcp-design.md`. Glossary: `docs/GLOSSARY.md`.
 

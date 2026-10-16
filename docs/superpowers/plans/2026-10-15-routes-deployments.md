@@ -1,3 +1,5 @@
+> Storage moved to SQLite on 2026-10-16; see docs/superpowers/specs/2026-10-16-sqlite-design.md.
+
 # Routes, Deployments and Serving Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -11,7 +13,7 @@
 - **Deployments:** a process-free table behind `Kinoko.Deployment`.
 - **Serving:** one generic `ElmLiveView`, `DeploymentLive`, renders Yabu `Html` through a safe component.
 
-**Tech Stack:** Elixir/Phoenix 1.8 LiveView, Ecto/SQLite, Phoenix.PubSub, plus the existing Kinoko.Lang, Exec, Universe and CodeDb.
+**Tech Stack:** Elixir/Phoenix 1.8 LiveView, Ecto/Postgres, Phoenix.PubSub, plus the existing Kinoko.Lang, Exec, Universe and CodeDb.
 
 **Spec:** `docs/superpowers/specs/2026-10-15-apps-liveview-design.md`. Glossary: `docs/GLOSSARY.md`.
 

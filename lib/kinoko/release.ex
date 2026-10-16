@@ -16,14 +16,20 @@ defmodule Kinoko.Release do
     Application.load(@app)
 
     for repo <- Application.fetch_env!(@app, :ecto_repos) do
-      case Keyword.fetch(Application.get_env(@app, repo, []), :database) do
-        {:ok, path} when is_binary(path) -> File.mkdir_p!(Path.dirname(path))
-        _ -> :ok
-      end
+      ensure_data_dir(repo)
 
       {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
     end
 
     :ok
+  end
+
+  @doc "Creates the directory of `repo`'s SQLite file (SQLite makes the file, not the directory)."
+  @spec ensure_data_dir(module()) :: :ok
+  def ensure_data_dir(repo) do
+    case Application.get_env(@app, repo, [])[:database] do
+      path when is_binary(path) -> File.mkdir_p!(Path.dirname(path))
+      _ -> :ok
+    end
   end
 end
