@@ -35,3 +35,6 @@ kinoko-*.tar
 npm-debug.log
 /assets/node_modules/
 
+
+# Local SQLite data (dev and test databases).
+/.kinoko/

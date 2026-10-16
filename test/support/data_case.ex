@@ -8,10 +8,9 @@ defmodule Kinoko.DataCase do
 
   Finally, if the test case interacts with the database,
   we enable the SQL sandbox, so changes done to the database
-  are reverted at the end of every test. If you are using
-  PostgreSQL, you can even run database tests asynchronously
-  by setting `use Kinoko.DataCase, async: true`, although
-  this option is not recommended for other databases.
+  are reverted at the end of every test. The database is SQLite, which
+  has a single writer and the sandbox holds each test's transaction open,
+  so tests that write must not be `async: true`.
   """
 
   use ExUnit.CaseTemplate
@@ -45,6 +44,13 @@ defmodule Kinoko.DataCase do
   def setup_sandbox(tags) do
     pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Kinoko.Repo, shared: not tags[:async])
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
+
+    # SQLite has one writer. The previous test's sandbox transaction is rolled
+    # back asynchronously after it stops, so it may still hold the write lock.
+    # A transaction that has read cannot wait for that lock (SQLite answers
+    # "Database busy" at once), so take it now, as the first statement, where
+    # busy_timeout makes it wait. The test then holds it until it ends.
+    Ecto.Adapters.SQL.query!(Kinoko.Repo, "DELETE FROM universes WHERE 0")
   end
 
   @doc """

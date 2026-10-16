@@ -56,37 +56,64 @@ defmodule Kinoko.Deployment do
         check_commit(universe, commit)
 
       true ->
-        now = DateTime.utc_now()
+        insert(
+          name,
+          universe,
+          routes,
+          commit,
+          hosts |> Enum.map(&normalize_host/1) |> Enum.uniq()
+        )
+    end
+  end
 
-        row = %{
-          name: name,
-          universe: universe,
-          routes: routes,
-          commit: commit,
-          hosts: Enum.map(hosts, &normalize_host/1),
-          inserted_at: now,
-          updated_at: now
-        }
+  # The deployment row and its hosts are written in one transaction, so a
+  # deployment is never seen without its hosts.
+  defp insert(name, universe, routes, commit, hosts) do
+    now = DateTime.utc_now()
 
-        case Repo.insert_all("deployments", [row], on_conflict: :nothing, conflict_target: :name) do
-          {1, _} -> :ok
-          {0, _} -> {:error, :exists}
-        end
+    row = %{
+      name: name,
+      universe: universe,
+      routes: routes,
+      commit: commit,
+      inserted_at: now,
+      updated_at: now
+    }
+
+    Repo.transaction(fn ->
+      case Repo.insert_all("deployments", [row], on_conflict: :nothing, conflict_target: :name) do
+        {1, _} ->
+          # 3 bound parameters per row; chunks stay under SQLite's limit (32_766).
+          hosts
+          |> Enum.with_index()
+          |> Enum.map(fn {host, i} -> %{deployment: name, host: host, position: i} end)
+          |> Enum.chunk_every(10_000)
+          |> Enum.each(&Repo.insert_all("deployment_hosts", &1))
+
+          :ok
+
+        {0, _} ->
+          Repo.rollback(:exists)
+      end
+    end)
+    |> case do
+      {:ok, :ok} -> :ok
+      {:error, :exists} -> {:error, :exists}
     end
   end
 
   @spec get(String.t()) :: {:ok, t} | :error
   def get(name) when is_binary(name) do
-    case Repo.one(select_fields(from(d in "deployments", where: d.name == ^name))) do
-      nil -> :error
-      d -> {:ok, d}
+    case fetch_all(from(d in "deployments", where: d.name == ^name)) do
+      [] -> :error
+      [d] -> {:ok, d}
     end
   end
 
   def get(_), do: :error
 
   @spec list() :: [t]
-  def list, do: Repo.all(select_fields(from(d in "deployments", order_by: d.name)))
+  def list, do: fetch_all(from(d in "deployments", order_by: d.name))
 
   @doc """
   Pins the deployment to `commit`, a 1-based position in its universe's
@@ -124,13 +151,18 @@ defmodule Kinoko.Deployment do
   def resolve(host) when is_binary(host) do
     host = normalize_host(host)
 
-    case Repo.one(
-           select_fields(
-             from(d in "deployments", where: ^host in d.hosts, order_by: d.name, limit: 1)
-           )
-         ) do
-      nil -> by_localhost(host)
-      d -> {:ok, d}
+    # An indexed lookup on deployment_hosts.host.
+    query =
+      from d in "deployments",
+        join: h in "deployment_hosts",
+        on: h.deployment == d.name,
+        where: h.host == ^host,
+        order_by: d.name,
+        limit: 1
+
+    case fetch_all(query) do
+      [] -> by_localhost(host)
+      [d] -> {:ok, d}
     end
   end
 
@@ -236,14 +268,33 @@ defmodule Kinoko.Deployment do
     host |> String.downcase() |> String.replace(~r/:\d+$/, "") |> String.trim_trailing(".")
   end
 
-  defp select_fields(query) do
-    from d in query,
-      select: %{
-        name: d.name,
-        universe: d.universe,
-        routes: d.routes,
-        commit: d.commit,
-        hosts: d.hosts
-      }
+  # The deployments `query` selects, each with its hosts in their given order.
+  defp fetch_all(query) do
+    deployments =
+      Repo.all(
+        from d in query,
+          select: %{name: d.name, universe: d.universe, routes: d.routes, commit: d.commit}
+      )
+
+    hosts = hosts_of(Enum.map(deployments, & &1.name))
+    Enum.map(deployments, &Map.put(&1, :hosts, Map.get(hosts, &1.name, [])))
+  end
+
+  # `%{deployment => [host]}`. Names are chunked to stay well under
+  # SQLite's bound-parameter limit.
+  defp hosts_of([]), do: %{}
+
+  defp hosts_of(names) do
+    names
+    |> Enum.chunk_every(10_000)
+    |> Enum.flat_map(fn chunk ->
+      Repo.all(
+        from h in "deployment_hosts",
+          where: h.deployment in ^chunk,
+          order_by: [h.deployment, h.position],
+          select: {h.deployment, h.host}
+      )
+    end)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
   end
 end

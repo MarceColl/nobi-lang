@@ -1,5 +1,7 @@
 defmodule Kinoko.Elm.StoreTest do
-  use Kinoko.DataCase, async: true
+  # SQLite has one writer, and each test holds its sandbox transaction open:
+  # concurrent writing tests fail with "Database busy", so this one is sync.
+  use Kinoko.DataCase, async: false
 
   alias Kinoko.Elm.Store
 
@@ -25,7 +27,7 @@ defmodule Kinoko.Elm.StoreTest do
 
   test "duplicate (key, seq) raises" do
     Store.append("a", 0, "M", 1, <<1>>)
-    assert_raise Postgrex.Error, fn -> Store.append("a", 0, "M", 1, <<2>>) end
+    assert_raise Exqlite.Error, fn -> Store.append("a", 0, "M", 1, <<2>>) end
   end
 
   test "keys are independent" do

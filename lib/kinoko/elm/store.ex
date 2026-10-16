@@ -15,6 +15,10 @@ defmodule Kinoko.Elm.Store do
   @doc "Appends a snapshot. Raises on failure, including a duplicate `(key, seq)`."
   @spec append(String.t(), non_neg_integer(), String.t(), pos_integer(), binary()) :: :ok
   def append(key, seq, module, version, state) when is_binary(module) and is_binary(state) do
+    # A schemaless insert does not know `state` is binary; dumping it through
+    # the adapter stores it as a BLOB (SQLite would otherwise bind it as TEXT).
+    {:ok, state} = Ecto.Type.adapter_dump(Repo.__adapter__(), :binary, state)
+
     Repo.insert_all("elm_states", [
       %{
         key: key,
@@ -59,7 +63,7 @@ defmodule Kinoko.Elm.Store do
           module: s.module,
           version: s.version,
           state: s.state,
-          inserted_at: s.inserted_at
+          inserted_at: type(s.inserted_at, :utc_datetime_usec)
         }
     )
   end

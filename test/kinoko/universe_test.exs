@@ -437,7 +437,7 @@ defmodule Kinoko.UniverseTest do
       stop(u)
 
       # Inside the test's transaction, so rolled back with it: the boot read
-      # fails with a Postgrex.Error, as it would against a broken database.
+      # fails with an Exqlite.Error, as it would against a broken database.
       Repo.query!("ALTER TABLE elm_states RENAME TO elm_states_away")
 
       capture_log(fn ->

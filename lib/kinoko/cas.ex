@@ -11,7 +11,7 @@ defmodule Kinoko.Cas do
 
   alias Kinoko.Repo
 
-  # Postgres allows 65_535 bind parameters; each row uses 3 (cid, text, inserted_at).
+  # SQLite allows 32_766 bound parameters; each row uses 3 (cid, text, inserted_at).
   @chunk 10_000
 
   @spec put([{String.t(), String.t()}]) :: :ok

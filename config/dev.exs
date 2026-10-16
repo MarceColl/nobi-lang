@@ -2,11 +2,7 @@ import Config
 
 # Configure your database
 config :kinoko, Kinoko.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  port: 5433,
-  database: "kinoko_dev",
+  database: Path.expand("../.kinoko/kinoko.db", __DIR__),
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10

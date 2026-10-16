@@ -7,12 +7,14 @@ defmodule Kinoko.Application do
 
   @impl true
   def start(_type, _args) do
+    ensure_data_dir()
+
     children =
       [
         KinokoWeb.Telemetry,
         Kinoko.Repo,
         {Registry, keys: :unique, name: Kinoko.Elm.Registry},
-        # Home of PersistentElmGenServer.start/3. Those servers read Postgres on
+        # Home of PersistentElmGenServer.start/3. Those servers read the database on
         # boot, so during a DB outage they crash and fail to restart in a loop.
         # The tolerant intensity keeps that loop inside this supervisor instead
         # of exhausting it (and then Kinoko.Supervisor, 3 restarts in 5 s) and
@@ -58,6 +60,14 @@ defmodule Kinoko.Application do
       ]
     else
       []
+    end
+  end
+
+  # SQLite creates the database file but not its directory.
+  defp ensure_data_dir do
+    case Application.get_env(:kinoko, Kinoko.Repo, [])[:database] do
+      path when is_binary(path) -> File.mkdir_p!(Path.dirname(path))
+      _ -> :ok
     end
   end
 

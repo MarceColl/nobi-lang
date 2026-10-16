@@ -1,5 +1,7 @@
 defmodule Kinoko.CasTest do
-  use Kinoko.DataCase, async: true
+  # SQLite has one writer, and each test holds its sandbox transaction open:
+  # concurrent writing tests fail with "Database busy", so this one is sync.
+  use Kinoko.DataCase, async: false
 
   alias Kinoko.Cas
 

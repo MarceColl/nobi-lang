@@ -57,7 +57,7 @@ defmodule Kinoko.Universe.Registry do
           name: u.name,
           parent: u.parent,
           forked_at_commit: u.forked_at_commit,
-          created_at: u.created_at
+          created_at: type(u.created_at, :utc_datetime_usec)
         }
     )
   end

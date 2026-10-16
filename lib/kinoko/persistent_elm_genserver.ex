@@ -2,7 +2,7 @@ defmodule Kinoko.PersistentElmGenServer do
   @moduledoc """
   A `Kinoko.ElmGenServer` whose state survives restarts and crashes.
 
-  Every changed state is appended to Postgres (`Kinoko.Elm.Store`, table
+  Every changed state is appended to the database (`Kinoko.Elm.Store`, table
   `elm_states`) under the server's key *before* that step's effects run. A
   server started again under the same key resumes from its last written state.
   `init/1` and `update/2` are the same as in `Kinoko.ElmGenServer`; so are
@@ -42,7 +42,7 @@ defmodule Kinoko.PersistentElmGenServer do
   `DynamicSupervisor` in the application tree. **Run persistent servers there,
   or under a supervisor of your own that is isolated the same way**, not
   directly under a supervisor whose other children matter. A server reads
-  Postgres when it boots and writes it on every changed step, so while the
+  the database when it boots and writes it on every changed step, so while the
   DB is down it crashes, and its restarts fail, in a loop. Under a supervisor
   with the default intensity (3 restarts in 5 s) that loop takes the
   supervisor down, then its parent, up to the application.
@@ -404,7 +404,7 @@ defmodule Kinoko.PersistentElmGenServer do
       rescue
         # The database failing under `decode/1` is no fault of the row: it
         # is raised as it is, so a caller can tell an outage from bad data.
-        e in [DBConnection.ConnectionError, DBConnection.OwnershipError, Postgrex.Error] ->
+        e in [DBConnection.ConnectionError, DBConnection.OwnershipError, Exqlite.Error] ->
           reraise e, __STACKTRACE__
 
         e ->

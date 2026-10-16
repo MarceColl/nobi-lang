@@ -9,10 +9,9 @@ defmodule KinokoWeb.ConnCase do
 
   Finally, if the test case interacts with the database,
   we enable the SQL sandbox, so changes done to the database
-  are reverted at the end of every test. If you are using
-  PostgreSQL, you can even run database tests asynchronously
-  by setting `use KinokoWeb.ConnCase, async: true`, although
-  this option is not recommended for other databases.
+  are reverted at the end of every test. The database is SQLite, which
+  has a single writer and the sandbox holds each test's transaction open,
+  so tests that write must not be `async: true`.
   """
 
   use ExUnit.CaseTemplate

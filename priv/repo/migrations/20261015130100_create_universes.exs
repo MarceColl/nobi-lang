@@ -3,10 +3,10 @@ defmodule Kinoko.Repo.Migrations.CreateUniverses do
 
   def change do
     create table(:universes, primary_key: false) do
-      add :name, :text, primary_key: true
+      add :name, :text, primary_key: true, null: false
       add :parent, :text
       add :forked_at_commit, :integer
-      add :created_at, :timestamptz, null: false, default: fragment("now()")
+      add :created_at, :utc_datetime_usec, null: false
     end
   end
 end

@@ -11,6 +11,17 @@ config :kinoko,
   ecto_repos: [Kinoko.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# One SQLite file per node; the path is set per environment (prod: runtime.exs).
+# WAL lets readers run beside the single writer; busy_timeout makes a
+# contended writer wait instead of failing with "database is locked".
+# Transactions begin IMMEDIATE, taking the write lock up front: a deferred
+# transaction that reads and then writes cannot wait for the lock.
+config :kinoko, Kinoko.Repo,
+  journal_mode: :wal,
+  busy_timeout: 5000,
+  foreign_keys: :on,
+  default_transaction_mode: :immediate
+
 # Configures the endpoint
 config :kinoko, KinokoWeb.Endpoint,
   url: [host: "localhost"],

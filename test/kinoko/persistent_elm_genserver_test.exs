@@ -154,13 +154,8 @@ defmodule Kinoko.PersistentElmGenServerTest do
 
   test "a failed prune logs a warning and the step's effects still run" do
     Kinoko.Repo.query!("""
-    CREATE FUNCTION elm_states_refuse_delete() RETURNS trigger AS $$
-    BEGIN RAISE EXCEPTION 'prune refused'; END $$ LANGUAGE plpgsql
-    """)
-
-    Kinoko.Repo.query!("""
     CREATE TRIGGER elm_states_refuse_delete BEFORE DELETE ON elm_states
-    FOR EACH ROW WHEN (OLD.key = 'pf') EXECUTE FUNCTION elm_states_refuse_delete()
+    FOR EACH ROW WHEN OLD.key = 'pf' BEGIN SELECT RAISE(ABORT, 'prune refused'); END
     """)
 
     pid = start("pf", keep: 2)

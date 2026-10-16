@@ -618,7 +618,7 @@ defmodule Kinoko.Universe do
       else: internal("universe #{name} failed to boot: " <> describe(reason))
   end
 
-  @db_errors [DBConnection.ConnectionError, DBConnection.OwnershipError, Postgrex.Error]
+  @db_errors [DBConnection.ConnectionError, DBConnection.OwnershipError, Exqlite.Error]
 
   defp db_outage?({%{__struct__: module}, stack}) when is_list(stack), do: module in @db_errors
   defp db_outage?(%{__struct__: module}), do: module in @db_errors

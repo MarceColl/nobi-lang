@@ -7,7 +7,7 @@ defmodule Kinoko.Repo.Migrations.CreateElmStates do
       add :seq, :bigint, null: false, primary_key: true
       add :version, :integer, null: false
       add :state, :binary, null: false
-      add :inserted_at, :timestamptz, null: false, default: fragment("now()")
+      add :inserted_at, :utc_datetime_usec, null: false
     end
   end
 end
