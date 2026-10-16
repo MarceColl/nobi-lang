@@ -58,7 +58,12 @@ defmodule KinokoWeb.Console.DeploymentLive do
   defp load(socket) do
     case Deployment.get(socket.assigns.name) do
       {:ok, d} ->
-        rounds = if is_list(r = Universe.history(d.universe)), do: r, else: []
+        rounds =
+          case Universe.history(d.universe) do
+            list when is_list(list) -> list
+            _ -> []
+          end
+
         head = length(rounds)
         current = d.commit || head
 
@@ -76,6 +81,11 @@ defmodule KinokoWeb.Console.DeploymentLive do
           for {e, i} <- Enum.with_index(entries) do
             %{id: "dep-route-#{i}", pattern: pattern(e), app: e.app, path: static_path(e)}
           end
+
+        hosts =
+          ["#{d.name}.localhost" | d.hosts]
+          |> Enum.uniq()
+          |> Enum.map(&%{id: "dep-host-" <> &1, host: &1, url: host_url(&1)})
 
         models =
           for stat <- Data.stats(d.name) do
@@ -110,12 +120,12 @@ defmodule KinokoWeb.Console.DeploymentLive do
         |> assign(
           deployment: d,
           url: host_url(url_host),
-          link_base: host_url(url_host),
           current: current,
           ahead: ahead
         )
         |> stream(:versions, versions, reset: true, dom_id: & &1.id)
         |> stream(:routes, routes, reset: true, dom_id: & &1.id)
+        |> stream(:hosts, hosts, reset: true, dom_id: & &1.id)
         |> stream(:models, models, reset: true, dom_id: & &1.id)
 
       :error ->
@@ -201,7 +211,7 @@ defmodule KinokoWeb.Console.DeploymentLive do
               id="dep-promote-btn"
               type="button"
               phx-click="follow"
-              class="h-[30px] px-[12px] rounded-[6px] text-[12.5px] font-medium flex items-center gap-[6px] border border-(--k-violet-btn-border) bg-(--k-violet-chip) text-(--k-violet) cursor-pointer transition-colors hover:bg-[#EAE5F7]"
+              class="h-[30px] px-[12px] rounded-[6px] text-[12.5px] font-medium flex items-center gap-[6px] border border-(--k-violet-btn-border) bg-(--k-violet-chip) text-(--k-violet) cursor-pointer"
             >
               <.icon name="ph-arrow-fat-line-up" class="text-[13px]" /> Promote {@deployment.universe}
             </button>
@@ -306,8 +316,36 @@ defmodule KinokoWeb.Console.DeploymentLive do
                 <span class={[cell(), "flex-1 text-right"]}>
                   <a
                     :if={r.path}
-                    href={@link_base <> r.path}
+                    href={@url <> r.path}
                     data-path={r.path}
+                    target="_blank"
+                    rel="noopener"
+                    class="text-[11.5px] text-(--k-violet) hover:text-(--k-violet-hover)"
+                  >
+                    open
+                  </a>
+                </span>
+              </div>
+            </div>
+          </div>
+        </.section>
+
+        <.section title="Hosts" id="dep-hosts-section">
+          <div class={table_class()}>
+            <.thead cols={[{"host", 5, nil}, {"", 1, "right"}]} />
+            <div id="dep-hosts" phx-update="stream">
+              <div
+                :for={{dom_id, h} <- @streams.hosts}
+                id={dom_id}
+                data-host={h.host}
+                class="flex items-center border-t border-(--k-row-line-2) [&:nth-child(1)]:border-t-0"
+              >
+                <span class={[cell(), "flex-[5] font-(family-name:--k-mono) text-[12px] font-medium"]}>
+                  {h.host}
+                </span>
+                <span class={[cell(), "flex-1 text-right"]}>
+                  <a
+                    href={h.url <> "/"}
                     target="_blank"
                     rel="noopener"
                     class="text-[11.5px] text-(--k-violet) hover:text-(--k-violet-hover)"

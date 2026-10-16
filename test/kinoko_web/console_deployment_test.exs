@@ -186,6 +186,29 @@ defmodule KinokoWeb.ConsoleDeploymentTest do
     end
   end
 
+  describe "hosts" do
+    test "lists the implicit localhost host and every extra host, once", %{conn: conn} do
+      u = universe(1)
+      :ok = Deployment.create(u, u, "Forum", hosts: ["#{u}.test", "#{u}.localhost"])
+      {:ok, view, _} = live(conn, "/_/d/#{u}")
+
+      assert has_element?(view, "#dep-hosts")
+
+      assert has_element?(
+               view,
+               ~s(#dep-hosts [data-host="#{u}.test"] a[href^="http://#{u}.test"])
+             )
+
+      assert has_element?(view, ~s(#dep-hosts [data-host="#{u}.localhost"]))
+
+      assert view
+             |> render()
+             |> LazyHTML.from_fragment()
+             |> LazyHTML.query("#dep-hosts [data-host]")
+             |> Enum.count() == 2
+    end
+  end
+
   describe "stored models" do
     test "empty, then rows and columns", %{conn: conn} do
       u = universe(1)
