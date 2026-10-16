@@ -38,6 +38,12 @@ defmodule Kinoko.Lang.Rt.Json do
 
   @depth_limit 100_000
 
+  # The stdlib's deftypes a stored value may hold (`Option` is read as
+  # `null`/its value before this is consulted).
+  @builtin_types %{
+    "Result" => {["T", "E"], [{"Ok", [{:named, "T"}]}, {"Err", [{:named, "E"}]}]}
+  }
+
   # ---------- JSON.parse ----------
 
   @doc """
@@ -69,20 +75,29 @@ defmodule Kinoko.Lang.Rt.Json do
 
   @doc """
   A store cell's JSON `text` as a value of `type`: `{:ok, value}` or
-  `{:error, why}`. As `parse/3` reads, except that a record's missing
-  field takes its default (an `Option` without one, `None`): the store's
-  rule for rows written before the field existed. Defaults are the
-  store's, never `JSON.parse`'s.
+  `{:error, why}`. As `parse/3` reads, except that:
+
+  - a record's missing field takes its default (an `Option` without one,
+    `None`): the store's rule for rows written before the field existed.
+    Defaults are the store's, never `JSON.parse`'s;
+  - a deftype's value, written as `{"$variant": "M.T.V", "values":
+    [...]}`, reads back type-directed: `types` is the image's deftype
+    table (`__yabu__(:types)`, `%{deftype => {params, [{variant,
+    [type]}]}}`), the stdlib's `Result` (and `Option`) built in. The tag
+    must name a variant of the field's deftype, and each payload is read
+    as its declared type, the deftype's parameters replaced by the
+    type's arguments;
+  - `Unit` reads from `[]`, as it is written.
   """
-  @spec decode_stored(String.t(), term(), map()) :: {:ok, term()} | {:error, String.t()}
-  def decode_stored(text, type, models) when is_binary(text) do
+  @spec decode_stored(String.t(), term(), map(), map()) :: {:ok, term()} | {:error, String.t()}
+  def decode_stored(text, type, models, types \\ %{}) when is_binary(text) do
     case document(text) do
       {:error, why} ->
         {:error, "invalid JSON: " <> reason(why)}
 
       {:ok, json} ->
         try do
-          {:ok, coerce(json, type, [:root], {:stored, models})}
+          {:ok, coerce(json, type, [:root], {:stored, models, types})}
         catch
           {:refused, why} -> {:error, why}
         end
@@ -347,10 +362,19 @@ defmodule Kinoko.Lang.Rt.Json do
       {:named, "Bool"} ->
         if is_boolean(json), do: json, else: expected!("Bool", at)
 
+      {:named, "Unit"} when is_tuple(models) ->
+        if json == [], do: {}, else: expected!("Unit", at)
+
       {:named, name} ->
         case model_fields(models, name) do
-          nil -> refuse!("cannot decode '#{name}' from JSON at #{path(at)}")
-          fields -> record(json, name, fields, at, models)
+          nil ->
+            case deftype(models, name, []) do
+              nil -> refuse!("cannot decode '#{name}' from JSON at #{path(at)}")
+              variants -> variant(json, name, variants, at, models)
+            end
+
+          fields ->
+            record(json, name, fields, at, models)
         end
 
       {:applied, "List", [item]} ->
@@ -376,8 +400,11 @@ defmodule Kinoko.Lang.Rt.Json do
       {:applied, "Map", [key, value]} ->
         map(json, key, value, at, models)
 
-      {:applied, name, _} ->
-        refuse!("cannot decode '#{name}' from JSON at #{path(at)}")
+      {:applied, name, args} ->
+        case deftype(models, name, args) do
+          nil -> refuse!("cannot decode '#{name}' from JSON at #{path(at)}")
+          variants -> variant(json, name, variants, at, models)
+        end
 
       {:tuple, types} ->
         case json do
@@ -417,14 +444,67 @@ defmodule Kinoko.Lang.Rt.Json do
 
   defp record(_, model, _, at, _), do: refuse!("expected object at #{path(at)} for #{model}")
 
-  # `models` is the models table, or `{:stored, table}` when decoding a
-  # store cell (`decode_stored/3`), where a missing field takes its default.
-  defp model_fields({:stored, models}, name), do: Map.get(models, name)
+  # `models` is the models table, or `{:stored, table, types}` when
+  # decoding a store cell (`decode_stored/4`), where a missing field takes
+  # its default and a deftype's values are read.
+  defp model_fields({:stored, models, _types}, name), do: Map.get(models, name)
   defp model_fields(models, name), do: Map.get(models, name)
 
-  defp missing_field({:stored, _}, _field, _ty, default, _at) when default != :none, do: default
+  # The variants of the deftype `name` applied to `args`, payload types
+  # with the parameters replaced, or `nil`: only when decoding a store
+  # cell (`JSON.parse` keeps TS's behaviour, which reads no variant).
+  defp deftype({:stored, _models, types}, name, args) do
+    case Map.get(@builtin_types, name) || Map.get(types, name) do
+      {params, variants} when length(params) == length(args) ->
+        binding = Map.new(Enum.zip(params, args))
+        for {v, payload} <- variants, do: {v, Enum.map(payload, &subst(&1, binding))}
 
-  defp missing_field({:stored, _}, _field, {:applied, "Option", [_]}, :none, _at),
+      _ ->
+        nil
+    end
+  end
+
+  defp deftype(_models, _name, _args), do: nil
+
+  defp subst({:named, n} = t, binding), do: Map.get(binding, n, t)
+  defp subst({:applied, n, args}, b), do: {:applied, n, Enum.map(args, &subst(&1, b))}
+  defp subst({:tuple, items}, b), do: {:tuple, Enum.map(items, &subst(&1, b))}
+  defp subst({:arrow, ps, r}, b), do: {:arrow, Enum.map(ps, &subst(&1, b)), subst(r, b)}
+  defp subst(t, _b), do: t
+
+  # `{"$variant": "Owner.V", "values": [...]}`, its tag one of `owner`'s
+  # variants and its values that variant's payloads.
+  defp variant({:obj, entries}, owner, variants, at, models) when map_size(entries) == 2 do
+    with {:ok, {:str, tag}} <- Map.fetch(entries, "$variant"),
+         {:ok, values} when is_list(values) <- Map.fetch(entries, "values"),
+         prefix = owner <> ".",
+         true <- String.starts_with?(tag, prefix),
+         name = binary_part(tag, byte_size(prefix), byte_size(tag) - byte_size(prefix)),
+         {^name, payload} <- List.keyfind(variants, name, 0) do
+      if length(values) != length(payload),
+        do: refuse!("#{owner}.#{name} takes #{length(payload)} values at #{path(at)}")
+
+      vat = [{:field, "values"} | at]
+
+      args =
+        values
+        |> Enum.zip(payload)
+        |> Enum.with_index()
+        |> Enum.map(fn {{x, t}, i} -> coerce(x, t, [{:index, i} | vat], models) end)
+
+      {:var, owner, name, args}
+    else
+      _ -> refuse!("expected a variant of #{owner} at #{path(at)}")
+    end
+  end
+
+  defp variant(_json, owner, _variants, at, _models),
+    do: refuse!("expected a variant of #{owner} at #{path(at)}")
+
+  defp missing_field({:stored, _, _}, _field, _ty, default, _at) when default != :none,
+    do: default
+
+  defp missing_field({:stored, _, _}, _field, {:applied, "Option", [_]}, :none, _at),
     do: {:var, "Option", "None", []}
 
   defp missing_field(_models, field, _ty, _default, at),
