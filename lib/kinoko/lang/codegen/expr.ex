@@ -31,6 +31,12 @@ defmodule Kinoko.Lang.Codegen.Expr do
   expression evaluated against an image (no declaration) it evaluates `e`
   and is `{}`. `Src` is `Kinoko.Lang.Format.expr/1` of `e`, the site's source
   as Rust's `Site` words it. A `case` ends in `_ -> Rt:no_arm!()`.
+
+  A store form (`Kinoko.Lang.Types.Store.forms/0`, and `Tx.delete`) is
+  built with the model its node's `store:` meta names, called or applied
+  as a value (a closure): a `Cmd.store.*` effect, a `{:tx, op, model, …}`
+  op, or a call of `'Elixir.Kinoko.Data.Hooks':store_get(S, Model, Id)` /
+  `store_list(S, Model)`, the reads a running transaction answers.
   """
 
   alias Kinoko.Lang.Format
@@ -40,9 +46,17 @@ defmodule Kinoko.Lang.Codegen.Expr do
   @rt Kinoko.Lang.Rt
   @json Kinoko.Lang.Rt.Json
   @hooks Kinoko.Exec.Hooks
+  @data_hooks Kinoko.Data.Hooks
   @i64_min -9_223_372_036_854_775_808
   @i64_max 9_223_372_036_854_775_807
   @max_vars 10_000
+
+  # The forms that work on one stored model (`Kinoko.Lang.Types.Store`), by
+  # arity: compiled with the model the checker settled (`store_form/3`).
+  @store_forms for {name, {:def, params, _, _}} <- Kinoko.Lang.Types.Stdlib.signatures(),
+                   name in Kinoko.Lang.Types.Store.forms(),
+                   into: %{},
+                   do: {name, length(params)}
 
   @typedoc """
   `n` is the next variable's number, `env` each local's variable, `names`
@@ -138,7 +152,13 @@ defmodule Kinoko.Lang.Codegen.Expr do
   def expr({:int, _, [n]}, ctx), do: {rt(:checked, [lit(n)]), ctx}
   def expr({:str, _, [s]}, ctx), do: {lit(s), ctx}
   def expr({:bool, _, [b]}, ctx), do: {lit(b), ctx}
-  def expr({:name, m, [name]}, ctx), do: name(m[:res], name, ctx)
+
+  def expr({:name, m, [name]}, ctx) do
+    case m[:res] do
+      {:def, def} when is_map_key(@store_forms, def) -> store_value(def, m[:store], ctx)
+      res -> name(res, name, ctx)
+    end
+  end
 
   def expr({:list, _, items}, ctx) do
     seq(Enum.map(items, &{:e, &1}), ctx, fn fs ->
@@ -401,7 +421,7 @@ defmodule Kinoko.Lang.Codegen.Expr do
       # `Tx.delete(Model, id)`: the model by name, then the id
       # (`Kinoko.Lang.Types.Store`).
       {:tx_delete, model} ->
-        seq(tl(parts), ctx, fn [id] -> remote(Stdlib, :tx_delete, [lit(model), id]) end)
+        seq(tl(parts), ctx, fn [id] -> store_form("Tx.delete", model, [id]) end)
 
       res ->
         raise ArgumentError, "unresolved call of `#{name}`: #{inspect(res)}"
@@ -409,7 +429,7 @@ defmodule Kinoko.Lang.Codegen.Expr do
   end
 
   # The image's def, else the stdlib's: JSON gets its call's types and the
-  # image's models, a store read the model its callback's type names.
+  # image's models, a store form the model the checker settled.
   defp call_def(def, m, args, parts, ctx) do
     case ctx.names do
       %{^def => {fun, _}} when ctx.local? ->
@@ -417,6 +437,9 @@ defmodule Kinoko.Lang.Codegen.Expr do
 
       %{^def => {fun, _}} ->
         seq(parts, ctx, &remote(ctx.module, fun, &1))
+
+      _ when is_map_key(@store_forms, def) ->
+        seq(parts, ctx, &store_form(def, m[:store], &1))
 
       _ ->
         stdlib_call(def, m, args, parts, ctx)
@@ -438,14 +461,36 @@ defmodule Kinoko.Lang.Codegen.Expr do
     seq(parts, ctx, fn [v] -> remote(@json, :stringify, [v, lit(type), models(ctx)]) end)
   end
 
-  defp stdlib_call(def, _m, args, parts, ctx) do
-    if Stdlib.store_read?(def) do
-      model = Stdlib.read_model(def, Enum.map(args, &elem(&1, 1)[:type]))
-      seq(parts, ctx, &rt(:cmd_effect, [lit(def), lit(model), list(&1)]))
-    else
-      {mod, fun, _} = stdlib!(def)
-      seq(parts, ctx, &remote(mod, fun, &1))
-    end
+  defp stdlib_call(def, _m, _args, parts, ctx) do
+    {mod, fun, _} = stdlib!(def)
+    seq(parts, ctx, &remote(mod, fun, &1))
+  end
+
+  # ---------- store forms ----------
+
+  # A store form's value, its model (`meta[:store]`, from the checker;
+  # `nil` only where it never settled: a lone expression) built in.
+  # Their shapes are `Kinoko.Lang.Rt`'s ("Store effects", Tx.Op).
+  defp store_form("Cmd.store." <> _ = def, model, args),
+    do: rt(:cmd_effect, [lit(def), lit(model), list(args)])
+
+  defp store_form("Tx.insert", model, [row]), do: tx(:insert, model, [row])
+  defp store_form("Tx.update", model, [id, row]), do: tx(:update, model, [id, row])
+  defp store_form("Tx.delete", model, [id]), do: tx(:delete, model, [id])
+
+  defp store_form("Store.get", model, [s, id]),
+    do: remote(@data_hooks, :store_get, [s, lit(model), id])
+
+  defp store_form("Store.list", model, [s]), do: remote(@data_hooks, :store_list, [s, lit(model)])
+
+  defp tx(op, model, args), do: {:tuple, @a, [lit(:tx), lit(op), lit(model) | args]}
+
+  # A store form applied as a value: a closure building it with the model.
+  defp store_value(def, model, ctx) do
+    {vars, ctx} =
+      Enum.map_reduce(1..Map.fetch!(@store_forms, def), ctx, fn _, ctx -> fresh(ctx) end)
+
+    {{:fun, @a, {:clauses, [{:clause, @a, vars, [], [store_form(def, model, vars)]}]}}, ctx}
   end
 
   defp stdlib!(def) do

@@ -33,8 +33,8 @@ defmodule YabuGolden do
   `{name, value}` tuple (`{"on-click", msg}` for an event; a plain attribute is
   a binary, integer or boolean); children are Html values, with nested child
   lists spliced flat and a raw child written as text (a string as itself, an
-  Int as its digits, a Bool as `"true"`/`"false"`). An effect's `model` is the
-  model name only for a store read (`store.list`), else `nil`.
+  Int as its digits, a Bool as `"true"`/`"false"`). A store effect's `model` is
+  the stored model's name (TS's `model`), as `Kinoko.Lang.Rt` carries it.
 
   ## Functions in decoded values
 
@@ -54,8 +54,8 @@ defmodule YabuGolden do
   @lambda_name "<lambda>"
 
   @effects %{
-    "store.insert" => {["value", "cb"], false},
-    "store.list" => {["cb"], true}
+    "store.insert" => ["value", "cb"],
+    "store.list" => ["cb"]
   }
 
   # --- loaders -------------------------------------------------------------
@@ -292,10 +292,10 @@ defmodule YabuGolden do
   defp cmd(json, _), do: not_a("a Cmd", json)
 
   # TS writes an effect's arguments as named payload fields, and beside them
-  # the model the store reads or writes. Rust's (and our) effect is the call
-  # with its arguments; the model is kept only for a store read.
+  # the model the store reads or writes. Our effect is the call with its
+  # arguments and that model (`Kinoko.Lang.Rt`, "Store effects").
   defp effect(tag, json, sigs) do
-    {fields, read?} =
+    fields =
       Map.get(@effects, tag) || fail("no decoding for the effect `#{tag}`: #{inspect(json)}")
 
     name = "Cmd." <> tag
@@ -321,7 +321,7 @@ defmodule YabuGolden do
         value(x, substitute(ty, ["a"], [{:named, model}]), sigs)
       end)
 
-    {:effect, name, if(read?, do: model), args}
+    {:effect, name, model, args}
   end
 
   defp html(%{"$h" => tag, "at" => attrs, "ch" => children} = json, sigs)

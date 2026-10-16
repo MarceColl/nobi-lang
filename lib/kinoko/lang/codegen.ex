@@ -16,7 +16,9 @@ defmodule Kinoko.Lang.Codegen do
     `always` and each `sometimes` that held.
   - `__yabu__/1` answers `names` (`%{def => {fun, arity}}`), `tests`
     (`%{test => fun}`), `image` (the hash), `models`
-    (`%{model => [{field, type}]}`, declaration order: what JSON needs) and
+    (`%{model => [{field, type, default}]}`, declaration order: what JSON
+    and the store need; `default` is the field default's value,
+    `Kinoko.Lang.Rt.constant/1`, or `:none` without one) and
     `types` (`%{deftype => {params, [{variant, [type]}]}}`) and `routes`
     (`%{routes_name => [%{segments, app, params}]}`, declaration order, the
     first match wins): `segments` are `{:lit, s} | {:param, name}`, `params`
@@ -39,6 +41,7 @@ defmodule Kinoko.Lang.Codegen do
 
   alias Kinoko.Lang.Codegen.Expr
   alias Kinoko.Lang.Format
+  alias Kinoko.Lang.Rt
 
   @a 1
   @max_functions 20_000
@@ -112,13 +115,13 @@ defmodule Kinoko.Lang.Codegen do
       names: names,
       tests: tests,
       image: hash,
-      # Each model's fields as `{field, type}`: defaults are the store's
-      # (`Kinoko.Lang.Types.Extract.signature/1` keeps them).
+      # Each model's fields as `{field, type, default}`, the default as
+      # its value (`Kinoko.Lang.Rt.constant/1`; `:none` without one).
       models:
         for(
           {name, %{signature: {:model, fields}}} <- committed,
           into: %{},
-          do: {name, Enum.map(fields, fn {f, t, _} -> {f, t} end)}
+          do: {name, Enum.map(fields, fn {f, t, d} -> {f, t, Rt.constant(d)} end)}
         ),
       types:
         for(

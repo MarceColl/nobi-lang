@@ -28,10 +28,13 @@ defmodule Kinoko.Lang.Rt.Stdlib do
     gives it. Likewise a call of `JSON.stringify` compiles to
     `Rt.Json.stringify(v, type, models)` (the models give a record's field
     order); `json_stringify/1` writes a record's fields in name order.
-  - A store read (`Cmd.store.list`, `get`, `delete`) reads the model its
-    callback's type names: a call compiles to
-    `Kinoko.Lang.Rt.cmd_effect(name, read_model(name, arg_types), args)`.
-    Applied as a value, a store read is Rust's error.
+  - A store form (`Cmd.store.insert/list/get/update/delete`, `Tx.*`,
+    `Store.get/list`) works on the stored model the checker settled for it
+    (`Kinoko.Lang.Types.Store`), which its node carries: codegen builds it
+    with that model, called or applied as a value (see
+    `Kinoko.Lang.Rt`, "Store effects"), and never calls this module's
+    function for it. Those functions are the forms without a model: `nil`
+    for it, and `Store.get`/`Store.list` an error.
 
   A string is a sequence of code points: lengths, slices, splits and
   reversals count code points, never bytes or graphemes.
@@ -361,61 +364,29 @@ defmodule Kinoko.Lang.Rt.Stdlib do
                name not in ["Cmd.none", "Cmd.batch"],
                do: {name, length(params)}
 
-  # The store reads: each one's callback, by argument index, and the type
-  # its parameter wraps the model in.
-  @reads %{
-    "Cmd.store.list" => {0, "List"},
-    "Cmd.store.get" => {1, "Option"},
-    "Cmd.store.delete" => {1, "Option"}
-  }
-
-  @read_why "reads the model its callback's type names: call it, rather than apply it as a value"
-
   for {name, arity} <- @effects do
     fun = name |> String.replace(".", "_") |> String.downcase() |> String.to_atom()
     args = Macro.generate_arguments(arity, __MODULE__)
 
-    if Map.has_key?(@reads, name) do
-      @doc "`#{name}` applied as a value: Rust's error (its model is its call's)."
-      def unquote(fun)(unquote_splicing(args)), do: error!("`#{unquote(name)}` " <> @read_why)
-    else
-      @doc "`#{name}`: the effect, its arguments in order."
-      def unquote(fun)(unquote_splicing(args)),
-        do: Rt.cmd_effect(unquote(name), nil, unquote(args))
-    end
+    @doc "`#{name}`: the effect, its arguments in order (a store effect's model `nil`)."
+    def unquote(fun)(unquote_splicing(args)),
+      do: Rt.cmd_effect(unquote(name), nil, unquote(args))
   end
 
-  @doc "Whether `name` is a store read, whose model its call's callback type names."
-  def store_read?(name), do: Map.has_key?(@reads, name)
-
-  @doc """
-  The model the effect `name` reads, from its call's argument types (TS's
-  `modelFromCallback`): `M` where a store read's callback parameter is
-  `List<M>` (`store.list`) or `Option<M>` (`store.get`, `store.delete`);
-  `nil` when it names no model, and for every other effect.
-  """
-  def read_model(name, arg_types) when is_list(arg_types) do
-    with {index, wrapper} <- Map.get(@reads, name),
-         {:arrow, [{:applied, ^wrapper, [{:named, model}]} | _], _} <- Enum.at(arg_types, index) do
-      model
-    else
-      _ -> nil
-    end
-  end
-
-  @doc "`Tx.insert(row)`: the op as the call that builds it."
-  def tx_insert(row), do: {:var, "Tx", "insert", [row]}
-  def tx_update(id, row), do: {:var, "Tx", "update", [id, row]}
+  @doc "`Tx.insert(row)` without its model (`Kinoko.Lang.Rt`'s Tx.Op)."
+  def tx_insert(row), do: {:tx, :insert, nil, row}
+  @doc "`Tx.update(id, row)` without its model."
+  def tx_update(id, row), do: {:tx, :update, nil, id, row}
   @doc "`Tx.delete(Model, id)`: the model's name (a binary), then the id."
-  def tx_delete(model, id) when is_binary(model), do: {:var, "Tx", "delete", [model, id]}
+  def tx_delete(model, id) when is_binary(model), do: {:tx, :delete, model, id}
 
   # ---------- Store (reads inside a transaction) ----------
 
-  @store_why "reads inside a running `Cmd.store.tx`, which this runtime does not provide yet"
+  @store_why "reads the model its result is used at; it is compiled with it (`Kinoko.Data.Hooks`)"
 
-  @doc "`Store.get`: a read inside a transaction; none runs here."
+  @doc "`Store.get` without its model: an error."
   def store_get(_store, _id), do: error!("`Store.get` " <> @store_why)
 
-  @doc "`Store.list`: a read inside a transaction; none runs here."
+  @doc "`Store.list` without its model: an error."
   def store_list(_store), do: error!("`Store.list` " <> @store_why)
 end

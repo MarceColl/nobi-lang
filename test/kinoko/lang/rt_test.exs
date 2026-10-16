@@ -432,35 +432,15 @@ defmodule Kinoko.Lang.RtTest do
       assert Stdlib.cmd_batch([Stdlib.cmd_none()]) == {:cmd, {:batch, [:none]}}
     end
 
-    test "a store read builds its effect with the model its callback's type names" do
-      cb = fn t -> {:arrow, [t], {:named, "C.Msg"}} end
-      list = {:applied, "List", [{:named, "Item.Row"}]}
-      opt = {:applied, "Option", [{:named, "Item.Row"}]}
-      assert Stdlib.read_model("Cmd.store.list", [cb.(list)]) == "Item.Row"
-      assert Stdlib.read_model("Cmd.store.get", [{:named, "Uuid"}, cb.(opt)]) == "Item.Row"
-      assert Stdlib.read_model("Cmd.store.delete", [{:named, "Uuid"}, cb.(opt)]) == "Item.Row"
-      assert Stdlib.read_model("Cmd.store.get", [{:named, "Uuid"}, cb.(list)]) == nil
-      assert Stdlib.read_model("Cmd.store.insert", [{:named, "Item.Row"}, cb.(opt)]) == nil
-      assert Stdlib.read_model("Cmd.time.now", [cb.({:named, "Int"})]) == nil
-      assert Stdlib.store_read?("Cmd.store.list")
-      refute Stdlib.store_read?("Cmd.store.insert")
-    end
-
-    test "a store read applied as a value is an error" do
-      why = "reads the model its callback's type names: call it, rather than apply it as a value"
+    test "a store form without its model: nil, and Store reads an error" do
       cb = Rt.ctor("R.Msg", "Loaded", 1)
+      assert Stdlib.cmd_store_list(cb) == {:cmd, {:effect, "Cmd.store.list", nil, [cb]}}
 
-      assert error(fn -> Stdlib.cmd_store_list(cb) end) ==
-               {:yabu_error, "`Cmd.store.list` #{why}"}
-
-      assert error(fn -> Stdlib.cmd_store_get(uuid(@id), cb) end) ==
-               {:yabu_error, "`Cmd.store.get` #{why}"}
-
-      assert error(fn -> Stdlib.cmd_store_delete(uuid(@id), cb) end) ==
-               {:yabu_error, "`Cmd.store.delete` #{why}"}
+      assert {:yabu_error, "`Store.get` " <> _} = error(fn -> Stdlib.store_get(:s, uuid(@id)) end)
+      assert {:yabu_error, "`Store.list` " <> _} = error(fn -> Stdlib.store_list(:s) end)
     end
 
-    test "Tx ops are the calls that build them" do
+    test "Tx ops are tagged tuples; insert and update without their model here" do
       row = rec("C.Row", text: "t")
 
       assert [
@@ -469,10 +449,23 @@ defmodule Kinoko.Lang.RtTest do
                Stdlib.tx_delete("C.Row", uuid(@id))
              ] ==
                [
-                 {:var, "Tx", "insert", [row]},
-                 {:var, "Tx", "update", [uuid(@id), row]},
-                 {:var, "Tx", "delete", ["C.Row", uuid(@id)]}
+                 {:tx, :insert, nil, row},
+                 {:tx, :update, nil, uuid(@id), row},
+                 {:tx, :delete, "C.Row", uuid(@id)}
                ]
+    end
+
+    test "a Tx op compares as the variant its call reads as" do
+      row = rec("C.Row", text: "t")
+      ins = {:tx, :insert, "C.Row", row}
+      del = {:tx, :delete, "C.Row", uuid(@id)}
+      assert Rt.tx_variant(ins) == {:var, "Tx", "insert", [row]}
+      assert Rt.tx_variant(del) == {:var, "Tx", "delete", ["C.Row", uuid(@id)]}
+      assert Rt.compare(ins, ins) == :eq
+      assert Rt.compare(del, ins) == Rt.compare(Rt.tx_variant(del), Rt.tx_variant(ins))
+      assert Rt.compare(del, ins) == :lt
+      assert Rt.kind_name(ins) == "a variant"
+      assert Rt.eq(ins, {:tx, :insert, "C.Row", row})
     end
 
     test "JSON applied as a value" do

@@ -10,6 +10,28 @@ defmodule Kinoko.Lang.CodegenTest do
   @counter File.read!("test/fixtures/yabu/counter.yabu")
   @split File.read!("test/fixtures/yabu/split.yabu")
 
+  # Every store form: their values hold fixed atoms only (`:tx`, the op).
+  @store ~S"""
+  deftype S.Msg do Saved(Uuid) | Rows(List<S.Row>) | Done(Result<(List<Uuid>, Int), String>) end
+  defmodel S.Row do
+    id : Uuid
+    n : Int = 0
+  end
+  def S.save(r : S.Row) : Cmd<S.Msg> do Cmd.store.insert(r, S.Msg.Saved) end
+  def S.rows() : Cmd<S.Msg> do Cmd.store.list(S.Msg.Rows) end
+  def S.bump(id : Uuid) : Cmd<S.Msg> do
+    Cmd.store.tx(
+      fn (s : Store) ->
+        case Store.get(s, id) do
+          Option.Some(r) -> ([Tx.update(id, %S.Row{r | n: r.n + 1}), Tx.delete(S.Row, id)], 1)
+          Option.None -> (List.map((Store.list(s) : List<S.Row>), Tx.insert), 0)
+        end
+      end,
+      S.Msg.Done
+    )
+  end
+  """
+
   defp universe(source) do
     {u, r} = Lang.stage(Lang.new(), "p", source)
     assert {:promoted, _} = r
@@ -48,7 +70,7 @@ defmodule Kinoko.Lang.CodegenTest do
       |> Enum.with_index()
       |> Enum.map(fn {p, i} -> {"generated[#{i}]", p["source"]} end)
 
-    corpus ++ generated
+    corpus ++ generated ++ [{"store", @store}]
   end
 
   describe "compiling" do
@@ -96,13 +118,21 @@ defmodule Kinoko.Lang.CodegenTest do
                 string bin bin_element default utf8 integer tuple cons nil map
                 map_field_assoc match case fun clauses block op andalso orelse not
                 eof true false rec uuid cmd none batch effect names image models types routes tests segments app params lit param
-                _ - =:= =/= < > =< >= named applied arrow maps from_list)a
+                _ - =:= =/= < > =< >= named applied arrow maps from_list
+                tx insert update delete)a
 
     test "no atom in the forms comes from user text" do
       for {label, source} <- sources() do
         committed = source |> universe() |> Lang.committed()
         {mod, forms, _names, _tests} = Codegen.forms(committed)
-        modules = [Kinoko.Lang.Rt, Kinoko.Lang.Rt.Stdlib, Kinoko.Lang.Rt.Json, Kinoko.Exec.Hooks]
+
+        modules = [
+          Kinoko.Lang.Rt,
+          Kinoko.Lang.Rt.Stdlib,
+          Kinoko.Lang.Rt.Json,
+          Kinoko.Exec.Hooks,
+          Kinoko.Data.Hooks
+        ]
 
         stdlib_funs =
           for name <- Kinoko.Lang.Types.Stdlib.names(),
@@ -203,8 +233,8 @@ defmodule Kinoko.Lang.CodegenTest do
                ]
 
       assert mod.__yabu__(:models)["Split.Share"] == [
-               {"who", {:named, "String"}},
-               {"owes", {:named, "Int"}}
+               {"who", {:named, "String"}, :none},
+               {"owes", {:named, "Int"}, :none}
              ]
 
       assert {[], [{"SetPayer", _} | _]} = mod.__yabu__(:types)["Split.Msg"]

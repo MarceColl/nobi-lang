@@ -13,6 +13,15 @@ defmodule Kinoko.Lang.RtJsonTest do
   @min -9_223_372_036_854_775_808
 
   defp n(name), do: {:named, name}
+
+  # The image's model table (`__yabu__(:models)`) from `{field, type}`
+  # lists: no field here has a default.
+  defp table(models) do
+    Map.new(models, fn {model, fields} ->
+      {model, Enum.map(fields, fn {f, t} -> {f, t, :none} end)}
+    end)
+  end
+
   defp l(t), do: {:applied, "List", [t]}
   defp o(t), do: {:applied, "Option", [t]}
   defp m(k, v), do: {:applied, "Map", [k, v]}
@@ -37,14 +46,14 @@ defmodule Kinoko.Lang.RtJsonTest do
 
   # `Ok`'s value, or `Err`'s reason.
   defp decode(text, ty, models \\ @models) do
-    case Json.parse(text, ty, models) do
+    case Json.parse(text, ty, table(models)) do
       {:var, "Result", "Ok", [v]} -> {:ok, v}
       {:var, "Result", "Err", [why]} when is_binary(why) -> {:error, why}
     end
   end
 
   defp stringify(v, models \\ @models) do
-    case Json.stringify(v, nil, models) do
+    case Json.stringify(v, nil, table(models)) do
       {:var, "Result", "Ok", [s]} when is_binary(s) -> {:ok, s}
       {:var, "Result", "Err", [why]} when is_binary(why) -> {:error, why}
     end
@@ -478,19 +487,21 @@ defmodule Kinoko.Lang.RtJsonTest do
     assert stringify(%{2 => "a", 10 => "b"}) == {:ok, ~s({"2":"a","10":"b"})}
   end
 
-  test "stringify writes a Tx op as the variant it is" do
+  test "stringify writes a Tx op as the variant it is, and refuses a Store" do
     models = %{"T.Row" => [{"id", n("Uuid")}, {"text", n("String")}]}
     row = rec("T.Row", [{"text", "t"}])
-    stored = rec("T.Row", [{"id", uuid(@id)}, {"text", "t"}])
 
-    assert stringify({:var, "Tx", "insert", [row]}, models) ==
+    assert stringify({:tx, :insert, "T.Row", row}, models) ==
              {:ok, ~s({"$variant":"Tx.insert","values":[{"text":"t"}]})}
 
-    assert stringify({:var, "Tx", "update", [uuid(@id), row]}, models) ==
+    assert stringify({:tx, :update, "T.Row", uuid(@id), row}, models) ==
              {:ok, ~s({"$variant":"Tx.update","values":["#{@id}",{"text":"t"}]})}
 
-    assert stringify({:var, "Tx", "delete", [stored]}, models) ==
-             {:ok, ~s({"$variant":"Tx.delete","values":[{"id":"#{@id}","text":"t"}]})}
+    assert stringify({:tx, :delete, "T.Row", uuid(@id)}, models) ==
+             {:ok, ~s({"$variant":"Tx.delete","values":["T.Row","#{@id}"]})}
+
+    assert stringify([{:store, self(), make_ref()}], models) ==
+             {:error, "cannot encode a Store as JSON at $[0]"}
   end
 
   test "Unit is written as the empty tuple" do
@@ -581,8 +592,10 @@ defmodule Kinoko.Lang.RtJsonTest do
 
     for {ty, gen} <- gens, _ <- 1..60 do
       v = gen.()
-      {:var, "Result", "Ok", [text]} = Json.stringify(v, ty, models)
-      assert Json.parse(text, ty, models) == {:var, "Result", "Ok", [v]}, inspect({ty, v, text})
+      {:var, "Result", "Ok", [text]} = Json.stringify(v, ty, table(models))
+
+      assert Json.parse(text, ty, table(models)) == {:var, "Result", "Ok", [v]},
+             inspect({ty, v, text})
     end
   end
 

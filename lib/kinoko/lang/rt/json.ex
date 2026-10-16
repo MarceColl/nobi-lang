@@ -21,8 +21,14 @@ defmodule Kinoko.Lang.Rt.Json do
   a lone surrogate escape is not JSON. Text or a value nested deeper than
   100,000 levels is refused (text as an `Err`, a value as a runtime error).
 
-  `models` is `%{model => [{field, type}]}`: what decoding a record needs,
-  and its field order for writing one.
+  `models` is `%{model => [{field, type, default}]}` (the image's
+  `__yabu__(:models)`): what decoding a record needs, and its field order
+  for writing one. A record's every field is read; defaults are the
+  store's, never JSON's.
+
+  A Tx op is written as the variant its call reads as
+  (`Kinoko.Lang.Rt.tx_variant/1`); a `Store` handle is refused, as a
+  function is.
   """
 
   import Kinoko.Lang.Rt, only: [error!: 1]
@@ -376,7 +382,7 @@ defmodule Kinoko.Lang.Rt.Json do
   # model lacks are dropped.
   defp record({:obj, entries}, model, fields, at, models) do
     out =
-      for {field, ty} <- fields, into: %{} do
+      for {field, ty, _default} <- fields, into: %{} do
         case Map.fetch(entries, field) do
           {:ok, v} -> {field, coerce(v, ty, [{:field, field} | at], models)}
           :error -> refuse!("missing field '#{field}' at #{path(at)}")
@@ -573,6 +579,15 @@ defmodule Kinoko.Lang.Rt.Json do
 
       {:cmd, _} ->
         refuse!("cannot encode a Cmd as JSON at #{path(at)}")
+
+      {:tx, _, _, _} ->
+        write(Rt.tx_variant(v), at, depth, models)
+
+      {:tx, _, _, _, _} ->
+        write(Rt.tx_variant(v), at, depth, models)
+
+      {:store, _, _} ->
+        refuse!("cannot encode a Store as JSON at #{path(at)}")
 
       f when is_function(f) ->
         refuse!("cannot encode a function as JSON at #{path(at)}")

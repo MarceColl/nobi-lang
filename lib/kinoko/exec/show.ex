@@ -13,7 +13,9 @@ defmodule Kinoko.Exec.Show do
   | variant | `M.Msg.Add(1)`, `Option.None` |
   | Html element | JSX: `<p class="x" on-click={M.Msg.Go} n={1}>hi</p>`; a text child that would not read back as itself (padded, holding `<` or `{`, or following another text child) is `{"…"}` |
   | Html text alone | `Html.Text("hi")` |
-  | Cmd | `Cmd.none()`, `Cmd.batch([...])`, an effect as its call: `Cmd.store.list(<fn M.Msg.Rows>)` (a store read's model is its callback's type's, as in source) |
+  | Cmd | `Cmd.none()`, `Cmd.batch([...])`, an effect as its call: `Cmd.store.list(<fn M.Msg.Rows>)` (a store effect's model is its types', as in source) |
+  | Tx.Op | its call: `Tx.insert(%M.Row{…})`, `Tx.update(<uuid …>, %M.Row{…})`, `Tx.delete(M.Row, <uuid …>)` |
+  | Store | `<store>` |
   | Uuid | `<uuid 0b9e2c4a-…>` (source has no Uuid literal) |
   | function | `<fn M.f>` for a def (the image's or the stdlib's), `<fn M.Msg.Add>` for a constructor, `<fn>` for a closure |
 
@@ -119,6 +121,16 @@ defmodule Kinoko.Exec.Show do
   end
 
   defp kind({:cmd, cmd}, left, below), do: cmd(cmd, left, below)
+
+  # `Tx.delete(M.Row, id)`: its model by name, as in source.
+  defp kind({:tx, :delete, model, id}, left, below) do
+    {es, left} = all([id], left, below)
+    {node(:call, ["Tx.delete", [name(model) | es]]), left}
+  end
+
+  defp kind({:tx, _, _, _} = op, left, below), do: kind(Rt.tx_variant(op), left, below)
+  defp kind({:tx, _, _, _, _} = op, left, below), do: kind(Rt.tx_variant(op), left, below)
+  defp kind({:store, _, _}, left, _), do: {name("<store>"), left}
   defp kind(f, left, _) when is_function(f), do: {name(fun_name(f)), left}
 
   defp kind(t, left, below) when is_tuple(t) do

@@ -154,10 +154,10 @@ defmodule Kinoko.Exec.StdlibTest do
       msg = &ctor("C.Msg", &1)
 
       expected = [
-        effect("Cmd.store.insert", [row, msg.("Saved")]),
+        read("Cmd.store.insert", "C.Row", [row, msg.("Saved")]),
         read("Cmd.store.list", "C.Row", [msg.("Rows")]),
         read("Cmd.store.get", "C.Row", [uuid(), msg.("Row")]),
-        effect("Cmd.store.update", [uuid(), row, msg.("Saved")]),
+        read("Cmd.store.update", "C.Row", [uuid(), row, msg.("Saved")]),
         read("Cmd.store.delete", "C.Row", [uuid(), msg.("Row")]),
         :tx,
         effect("Cmd.time.now", [msg.("Got")]),
@@ -186,7 +186,7 @@ defmodule Kinoko.Exec.StdlibTest do
 
           :tx ->
             assert {:cmd, {:effect, "Cmd.store.tx", nil, [body, cb]}} = cmd
-            assert body.(:a_store) == {[var("Tx", "insert", [row])], 1}
+            assert body.(:a_store) == {[{:tx, :insert, "C.Row", row}], 1}
             assert cb == msg.("Done")
 
           _ ->
@@ -205,18 +205,19 @@ defmodule Kinoko.Exec.StdlibTest do
       assert value_in(@effects, "List.length([Cmd.none(), C.batch()])") == 2
     end
 
-    test "Tx ops are the calls that build them" do
+    test "Tx ops carry their model, and show as the calls that build them" do
       u = universe(@effects)
       row = rec("C.Row", [{"text", "t"}])
 
       ops = [
-        var("Tx", "insert", [row]),
-        var("Tx", "update", [uuid(), row]),
-        var("Tx", "delete", ["C.Row", uuid()])
+        {:tx, :insert, "C.Row", row},
+        {:tx, :update, "C.Row", uuid(), row},
+        {:tx, :delete, "C.Row", uuid()}
       ]
 
       assert call(u, "C.ops", [uuid()]) == {:ok, ops}
       assert Exec.show(hd(ops), {:named, "Tx.Op"}) == ~S|Tx.insert(%C.Row{text: "t"})|
+      assert Exec.show(List.last(ops), {:named, "Tx.Op"}) == "Tx.delete(C.Row, <uuid #{@id}>)"
     end
   end
 
@@ -278,7 +279,7 @@ defmodule Kinoko.Exec.StdlibTest do
       u = universe(@crud)
       row = &rec("Item.Row", [{"id", uuid()}, {"value", &1}])
       {name, model, [id, value, cb]} = crud_effect(u, var("R.Msg", "Rename", [row.("old")]))
-      assert {name, model} == {"Cmd.store.update", nil}
+      assert {name, model} == {"Cmd.store.update", "Item.Row"}
       assert {id, value} == {uuid(), row.("renamed")}
       assert call(u, "R.id", [cb, uuid()]) == {:ok, var("R.Msg", "Saved", [uuid()])}
     end
@@ -291,7 +292,7 @@ defmodule Kinoko.Exec.StdlibTest do
       assert call(u, "R.row", [cb, none]) == {:ok, var("R.Msg", "Removed", [none])}
     end
 
-    test "a store read applied as a value is an error" do
+    test "a store read applied as a value names the model its use settles" do
       src =
         @crud <>
           ~S"""
@@ -305,14 +306,13 @@ defmodule Kinoko.Exec.StdlibTest do
           """
 
       u = universe(src)
-      why = "reads the model its callback's type names: call it, rather than apply it as a value"
 
       for {def, args, read} <- [
             {"R.list_read", [], "Cmd.store.list"},
             {"R.get_read", [uuid()], "Cmd.store.get"},
             {"R.delete_read", [uuid()], "Cmd.store.delete"}
           ] do
-        assert call(u, def, args) == {:error, "`#{read}` #{why}"}, def
+        assert {:ok, {:cmd, {:effect, ^read, "Item.Row", _}}} = call(u, def, args), def
       end
     end
   end

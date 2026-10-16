@@ -62,7 +62,12 @@ defmodule Kinoko.Exec.ShowTest do
       # A store read's model is its callback's type's, as in source.
       {{:cmd, {:effect, "Cmd.store.list", "M.Row", [Rt.ctor("M.Msg", "Rows", 1)]}},
        "Cmd.store.list(<fn M.Msg.Rows>)"},
-      {var("Tx", "insert", [{:rec, "C.Row", %{"text" => "t"}}]), ~S|Tx.insert(%C.Row{text: "t"})|}
+      {{:tx, :insert, "C.Row", {:rec, "C.Row", %{"text" => "t"}}},
+       ~S|Tx.insert(%C.Row{text: "t"})|},
+      {{:tx, :update, "C.Row", {:uuid, "u"}, {:rec, "C.Row", %{"text" => "t"}}},
+       ~S|Tx.update(<uuid u>, %C.Row{text: "t"})|},
+      {{:tx, :delete, "C.Row", {:uuid, "u"}}, "Tx.delete(C.Row, <uuid u>)"},
+      {{:store, self(), make_ref()}, "<store>"}
     ]
 
     for {value, want} <- cases do

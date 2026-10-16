@@ -14,9 +14,37 @@ defmodule Kinoko.Lang.Rt do
   | Uuid | `{:uuid, binary}` |
   | List / Map | list / Erlang map |
   | record | `{:rec, "Model.Name", %{"field" => v}}` |
-  | variant | `{:var, "Owner", "Variant", [args]}` (`Option`, `Result`, `Html`, `Tx` too) |
+  | variant | `{:var, "Owner", "Variant", [args]}` (`Option`, `Result`, `Html` too) |
   | function | Erlang fun |
   | Cmd | `{:cmd, :none}`, `{:cmd, {:batch, [bare]}}`, `{:cmd, {:effect, name, model \\| nil, [args]}}` |
+  | Tx.Op | `{:tx, :insert, model, row}`, `{:tx, :update, model, id, row}`, `{:tx, :delete, model, id}` |
+  | Store | `{:store, coordinator_pid, ref}`: opaque, only a running `Cmd.store.tx` makes one |
+
+  ## Store effects
+
+  Each store effect names the stored model it works on (a binary, the
+  checker's `store:` meta, `Kinoko.Lang.Types.Store`), its arguments in
+  order, callbacks as the funs they are:
+
+  - `{:cmd, {:effect, "Cmd.store.insert", model, [row, cb]}}`
+  - `{:cmd, {:effect, "Cmd.store.list", model, [cb]}}`
+  - `{:cmd, {:effect, "Cmd.store.get", model, [id, cb]}}`
+  - `{:cmd, {:effect, "Cmd.store.update", model, [id, row, cb]}}`
+  - `{:cmd, {:effect, "Cmd.store.delete", model, [id, cb]}}`
+  - `{:cmd, {:effect, "Cmd.store.tx", nil, [body, cb]}}`: no model, each
+    op the body returns names its own. `body` takes the `Store` handle.
+
+  A form whose model never settled (only in a lone expression, `eval`,
+  where an open model is not reported) has `nil` for its model.
+
+  `Store.get(s, id)` and `Store.list(s)` compile to
+  `Kinoko.Data.Hooks.store_get(s, model, id)` and
+  `Kinoko.Data.Hooks.store_list(s, model)`: the reads a running
+  transaction answers, outside this pure runtime.
+
+  A Tx op compares, shows and is written as JSON as the variant its call
+  reads as (`tx_variant/1`): `Tx.insert(row)`, `Tx.update(id, row)`,
+  `Tx.delete(model, id)`.
 
   `Cmd.navigate(App, args…)` is `{:cmd, {:effect, "Cmd.navigate", nil,
   [app | args]}}`: the target app's name (a binary) followed by `init`'s
@@ -387,6 +415,8 @@ defmodule Kinoko.Lang.Rt do
   defp kind(v) when is_map(v), do: 5
   defp kind({:rec, _, _}), do: 7
   defp kind({:var, _, _, _}), do: 8
+  defp kind({:tx, _, _, _} = op), do: kind(tx_variant(op))
+  defp kind({:tx, _, _, _, _} = op), do: kind(tx_variant(op))
   defp kind({:cmd, _}), do: 10
   defp kind(v) when is_tuple(v), do: 6
   defp kind(v) when is_function(v), do: 9
@@ -403,6 +433,11 @@ defmodule Kinoko.Lang.Rt do
       lexicographic(Enum.sort(Map.to_list(f)), Enum.sort(Map.to_list(g)), &entry/2)
     end)
   end
+
+  defp same_kind(8, {:tx, _, _, _} = a, b), do: same_kind(8, tx_variant(a), b)
+  defp same_kind(8, {:tx, _, _, _, _} = a, b), do: same_kind(8, tx_variant(a), b)
+  defp same_kind(8, a, {:tx, _, _, _} = b), do: same_kind(8, a, tx_variant(b))
+  defp same_kind(8, a, {:tx, _, _, _, _} = b), do: same_kind(8, a, tx_variant(b))
 
   defp same_kind(8, {:var, o, v, xs}, {:var, p, w, ys}) do
     ord_then(order(o, p), fn ->
@@ -506,6 +541,18 @@ defmodule Kinoko.Lang.Rt do
   def ctor(owner, variant, 8),
     do: fn a, b, c, d, e, f, g, h -> {:var, owner, variant, [a, b, c, d, e, f, g, h]} end
 
+  # ---------- Tx ----------
+
+  @doc """
+  A Tx op as the variant its call reads as: `{:var, "Tx", "insert", [row]}`,
+  `{:var, "Tx", "update", [id, row]}` and `{:var, "Tx", "delete", [model, id]}`
+  (the model's name a binary). What `compare/2`, `Kinoko.Exec.Show` and
+  JSON see.
+  """
+  def tx_variant({:tx, :insert, _model, row}), do: {:var, "Tx", "insert", [row]}
+  def tx_variant({:tx, :update, _model, id, row}), do: {:var, "Tx", "update", [id, row]}
+  def tx_variant({:tx, :delete, model, id}), do: {:var, "Tx", "delete", [model, id]}
+
   # ---------- Cmd ----------
 
   @doc "`Cmd.none()`."
@@ -520,9 +567,9 @@ defmodule Kinoko.Lang.Rt do
   defp bare(_), do: error!("`Cmd.batch` applied to arguments of the wrong kinds")
 
   @doc """
-  An effect: its stdlib name (`"Cmd.store.insert"`), the model a store read
-  reads (else `nil`) and its arguments in order, callbacks as the funs they
-  are.
+  An effect: its stdlib name (`"Cmd.store.insert"`), the model a store
+  effect works on (else `nil`, see "Store effects") and its arguments in
+  order, callbacks as the funs they are.
   """
   def cmd_effect(name, model, args) when is_binary(name) and is_list(args),
     do: {:cmd, {:effect, name, model, args}}
