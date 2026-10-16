@@ -178,7 +178,8 @@ defmodule Kinoko.Universe do
   @doc """
   The staged patches, in the order they were last staged:
   `[%{id, source, defines, removes, reasons}]`, `source` the canonical text
-  of the declarations the patch defines, `defines` their names and
+  of the declarations the patch defines, `defines` each one's
+  `%{name, text}` (its canonical text) and
   `reasons` why it cannot promote now.
   """
   @spec staged(name) :: [map()] | error

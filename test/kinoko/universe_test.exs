@@ -76,7 +76,7 @@ defmodule Kinoko.UniverseTest do
                %{
                  id: "p1",
                  source: "def A.f" <> _,
-                 defines: ["A.f"],
+                 defines: [%{name: "A.f", text: "def A.f" <> _}],
                  removes: [],
                  reasons: [%{code: "unbound"}]
                }

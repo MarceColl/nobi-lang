@@ -253,13 +253,13 @@ defmodule Kinoko.Lang do
   @doc """
   What is staged, by id: `%{source:, defines:, removes:, reasons:}`.
   `source` is the canonical text of the declarations the patch defines
-  (`""` for none), `defines` their names in order, `removes` the names it
+  (`""` for none), `defines` each one's name and canonical text, in order, `removes` the names it
   removes, in the order staged, and `reasons` why it cannot promote now (`reasons/2`, worked out afresh for each patch).
   """
   @spec staged(Universe.t()) :: %{
           String.t() => %{
             source: String.t(),
-            defines: [String.t()],
+            defines: [%{name: String.t(), text: String.t()}],
             removes: [String.t()],
             reasons: [reason]
           }
@@ -269,7 +269,8 @@ defmodule Kinoko.Lang do
       {id,
        %{
          source: Format.program(for {:live, decl} <- entries, do: decl),
-         defines: for({:live, decl} <- entries, do: Ast.name(decl)),
+         defines:
+           for({:live, decl} <- entries, do: %{name: Ast.name(decl), text: Format.decl(decl)}),
          removes: for({:gone, name} <- entries, do: name),
          reasons: Universe.reasons(u, id)
        }}

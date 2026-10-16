@@ -187,8 +187,9 @@ defmodule KinokoWeb.Console.UniverseLive do
       current = Enum.find(entries, hd(entries), &(&1.symbol == sym))
 
       text =
-        case Universe.read(u, current.symbol) do
-          {:ok, text} -> text
+        case {current.staged_text, Universe.read(u, current.symbol)} do
+          {staged, _} when is_binary(staged) -> staged
+          {nil, {:ok, text}} -> text
           _ -> ""
         end
 
@@ -206,10 +207,10 @@ defmodule KinokoWeb.Console.UniverseLive do
         panel: nil,
         code: %{
           symbol: current.symbol,
-          count: socket.assigns.symbol_count,
+          count: length(entries),
           patch: current.patch,
           failing: failing(u, current),
-          cid: current.cid,
+          cid: if(current.patch, do: nil, else: current.cid),
           graph_path: graph_path(u, graph, current.symbol)
         }
       )
@@ -218,29 +219,41 @@ defmodule KinokoWeb.Console.UniverseLive do
     end
   end
 
-  # Committed symbols, and those only a staged patch defines, by name; each
-  # with the first patch (in `read/2`'s id order) that defines it.
+  # Committed symbols, and those only a staged patch defines, by name
+  # (ignoring case); each with the first patch (in `read/2`'s id order)
+  # that defines it, and that patch's text of it.
   defp code_entries(u) do
     staged = listed(Universe.staged(u)) |> Enum.sort_by(& &1.id)
 
     patches =
-      for p <- staged, s <- Map.get(p, :defines, []), reduce: %{} do
-        acc -> Map.put_new(acc, s, p)
+      for p <- staged, %{name: name, text: text} <- Map.get(p, :defines, []), reduce: %{} do
+        acc -> Map.put_new(acc, name, {p, text})
       end
 
-    committed =
-      for s <- listed(Universe.symbols(u)),
-          do: %{symbol: s.symbol, cid: s.cid, signature: s.signature, patch: patches[s.symbol]}
+    entry = fn symbol, cid, signature ->
+      {patch, text} = Map.get(patches, symbol, {nil, nil})
+      %{symbol: symbol, cid: cid, signature: signature, patch: patch, staged_text: text}
+    end
 
+    committed = for s <- listed(Universe.symbols(u)), do: entry.(s.symbol, s.cid, s.signature)
     names = MapSet.new(committed, & &1.symbol)
 
     only_staged =
-      for {s, p} <- patches,
-          not MapSet.member?(names, s),
-          do: %{symbol: s, cid: nil, signature: nil, patch: p}
+      for {s, {_p, text}} <- patches, not MapSet.member?(names, s) do
+        entry.(s, nil, staged_signature(text))
+      end
 
-    Enum.sort_by(committed ++ only_staged, &{group(&1.symbol), &1.symbol})
+    Enum.sort_by(
+      committed ++ only_staged,
+      &{String.downcase(group(&1.symbol)), String.downcase(&1.symbol), &1.symbol}
+    )
   end
+
+  # The icon kind of a staged-only declaration, from its leading keyword.
+  defp staged_signature("defmodel" <> _), do: "model"
+  defp staged_signature("deftype" <> _), do: "type "
+  defp staged_signature("defapp" <> _), do: "app"
+  defp staged_signature(_), do: nil
 
   defp group(symbol), do: symbol |> String.split(".", parts: 2) |> hd()
 
@@ -280,8 +293,9 @@ defmodule KinokoWeb.Console.UniverseLive do
     end
   end
 
-  # The health reasons naming `entry`, when the universe is degraded.
-  defp failing(u, %{patch: nil, cid: cid} = entry) when is_binary(cid) do
+  # The health reasons naming a committed `entry`, when the universe is
+  # degraded (whether or not a staged patch also defines it).
+  defp failing(u, %{cid: cid} = entry) when is_binary(cid) do
     case Universe.health(u) do
       {:degraded, reasons} -> Enum.filter(reasons, &(&1[:name] == entry.symbol))
       _ -> []
@@ -322,15 +336,17 @@ defmodule KinokoWeb.Console.UniverseLive do
   end
 
   defp load_store(socket, %{stores: stores} = graph, deployments) do
-    %{universe: u, store: store_param, dep: dep_param} = socket.assigns
+    %{store: store_param, dep: dep_param} = socket.assigns
     dep = Enum.find(deployments, hd(deployments), &(&1.name == dep_param))
     counts = rows(dep)
     store = Enum.find(stores, List.first(stores), &(&1.symbol == store_param))
 
+    # Decoded with the models of the commit the deployment runs, never the
+    # head's: a newer signature would add columns to a pinned file.
     {columns, rows, n} =
-      case {store, Universe.models(u)} do
-        {%{symbol: model}, {:ok, models}} ->
-          fields = Map.get(models, model, [])
+      case {store, deployment_models(dep)} do
+        {%{symbol: model}, {:ok, %{} = models}} when is_map_key(models, model) ->
+          fields = Map.fetch!(models, model)
           {id, rest} = Enum.split_with(fields, &(elem(&1, 0) == "id"))
           columns = for {f, type, _} <- id ++ rest, do: %{name: f, numeric: Cell.numeric?(type)}
           n = Map.get(counts, model, 0)
@@ -381,6 +397,12 @@ defmodule KinokoWeb.Console.UniverseLive do
   end
 
   defp load_store(socket, graph, _deployments), do: load_graph(socket, graph)
+
+  # The models of the commit `dep` runs (head, or its pin): the signature
+  # its file is read with.
+  defp deployment_models(dep) do
+    with {:ok, target} <- Deployment.target(dep), do: Universe.models(target)
+  end
 
   # The newest `@shown` rows of `model`, read only when the file has some,
   # so a view never creates a data file.
@@ -501,7 +523,7 @@ defmodule KinokoWeb.Console.UniverseLive do
         row("layer", if(deployment, do: deployment.name, else: "no data"))
       ],
       data_path: ~p"/_/u/#{u}?#{[view: "data", store: store.symbol]}",
-      sample: sample(deployment, store.symbol, n, u),
+      sample: sample(deployment, store.symbol, n),
       more: if(n && n > @sample, do: n - @sample, else: 0)
     }
   end
@@ -510,8 +532,8 @@ defmodule KinokoWeb.Console.UniverseLive do
 
   # The newest rows of `model`, at most `@sample`, as the prototype's
   # three cells: the first field, the middle ones, the last one.
-  defp sample(deployment, model, n, u) when is_integer(n) and n > 0 do
-    with {:ok, models} <- Universe.models(u),
+  defp sample(deployment, model, n) when is_integer(n) and n > 0 do
+    with {:ok, %{^model => _} = models} <- deployment_models(deployment),
          {:ok, repo} <- Data.open(deployment.name),
          {:ok, list} <- Data.list(repo, model, models) do
       for {:rec, _, values} <- list |> Enum.reverse() |> Enum.take(@sample) do
@@ -529,7 +551,7 @@ defmodule KinokoWeb.Console.UniverseLive do
     end
   end
 
-  defp sample(_deployment, _model, _n, _u), do: []
+  defp sample(_deployment, _model, _n), do: []
 
   defp shown(s) when is_binary(s), do: s
   defp shown(v), do: Show.show(v)
@@ -692,7 +714,7 @@ defmodule KinokoWeb.Console.UniverseLive do
           <.reasons_callout
             :if={@code.patch}
             id="staged-reasons"
-            title={"#{@code.patch.id} cannot promote"}
+            title="Blocked"
             reasons={@code.patch.reasons}
           />
           <.reasons_callout
@@ -777,6 +799,7 @@ defmodule KinokoWeb.Console.UniverseLive do
       <span
         :if={@item.patch}
         data-staged
+        title={@item.patch}
         class="flex-none text-[10px] text-(--k-amber) tracking-[.04em] whitespace-nowrap"
       >
         STAGED {@item.patch}
@@ -809,7 +832,7 @@ defmodule KinokoWeb.Console.UniverseLive do
           data-reason
           class="font-(family-name:--k-mono) text-[12px] text-(--k-red-text) break-words"
         >
-          {r[:name]} [{r[:code]}] {r[:message]}
+          <span :if={r[:name]}>{r[:name]}</span> [{r[:code]}] {r[:message]}
         </span>
       </div>
     </div>

@@ -99,8 +99,42 @@ defmodule KinokoWeb.ConsoleCodeDataTest do
       assert has_element?(view, "#code-chip", "staged · ")
       refute has_element?(view, "#code-cid")
       assert has_element?(view, "#source #line-1")
-      assert has_element?(view, "#staged-reasons", "p1")
+      assert has_element?(view, "#staged-reasons", "Blocked")
+      refute has_element?(view, "#staged-reasons", "p1")
       assert has_element?(view, "#staged-reasons [data-reason]", "Forum.missing")
+    end
+
+    test "a staged redefinition shows its staged text, without a CID", %{conn: conn} do
+      u = forum_universe()
+
+      assert {:staged, [_ | _]} =
+               Universe.stage(u, "p2", """
+               def Forum.Threads.view_topic(topic : Forum.Topic) : Html<Forum.Threads.Msg> do
+                 Forum.nowhere(topic)
+               end
+               """)
+
+      {:ok, view, _} = live(conn, "/_/u/#{u}?view=code&sym=Forum.Threads.view_topic")
+      assert has_element?(view, ~s(#sym-Forum-Threads-view_topic [data-staged][title="p2"]))
+      assert has_element?(view, "#code-chip", "staged · ")
+      refute has_element?(view, "#code-cid")
+      assert has_element?(view, "#source #line-2", "Forum.nowhere(topic)")
+      refute has_element?(view, "#source #line-4")
+      assert has_element?(view, "#staged-reasons", "Blocked")
+      # it is committed too: listed once, counted once
+      assert has_element?(view, "#symbols-count", "#{length(Universe.symbols(u))}")
+    end
+
+    test "staged-only symbols count in the panel, sorted case-insensitively", %{conn: conn} do
+      u = forum_universe()
+
+      assert {:staged, _} =
+               Universe.stage(u, "p3", "def Forum.aaa() : Int do\n  Forum.zz()\nend\n")
+
+      {:ok, view, _} = live(conn, "/_/u/#{u}?view=code")
+      assert has_element?(view, "#symbols-count", "#{length(Universe.symbols(u)) + 1}")
+      # `Forum.aaa` sorts before `Forum.Post` once case is ignored
+      assert has_element?(view, "#symbols-list > :nth-child(3)#sym-Forum-aaa")
     end
 
     test "an empty universe shows the empty state", %{conn: conn} do
@@ -112,6 +146,47 @@ defmodule KinokoWeb.ConsoleCodeDataTest do
   end
 
   describe "data" do
+    test "a pinned deployment is read with its commit's models, its file untouched",
+         %{conn: conn} do
+      u = fresh_universe("cd")
+
+      assert {:promoted, _} =
+               Universe.stage(
+                 u,
+                 "base",
+                 @forum <> "\ndefmodel Forum.Note do\n  id : Uuid\n  text : String\nend\n"
+               )
+
+      :ok = Deployment.create(u, u, "Forum")
+      {:ok, models} = Universe.models(u)
+      {:ok, repo} = Data.open(u)
+
+      {:ok, _} =
+        Data.insert(repo, "Forum.Note", models, {:rec, "Forum.Note", %{"text" => "alpha"}})
+
+      :ok = Deployment.pin(u, 1)
+
+      assert {:promoted, _} =
+               Universe.stage(u, "more", """
+               defmodel Forum.Note do
+                 id : Uuid
+                 text : String
+                 extra : Int = 0
+               end
+               """)
+
+      {:ok, view, _} = live(conn, "/_/u/#{u}?view=data&store=Forum.Note")
+      assert has_element?(view, "#data-rows [data-row]", "alpha")
+      assert has_element?(view, ~s(#data-cols [data-col="text"]))
+      refute has_element?(view, ~s(#data-cols [data-col="extra"]))
+
+      {:ok, view, _} = live(conn, "/_/u/#{u}?sel=Forum.Note")
+      assert has_element?(view, "#inspector-rows [data-sample-row]", "alpha")
+
+      [note] = for s <- Data.stats(u), s.model == "Forum.Note", do: s
+      refute Enum.any?(note.columns, &(&1.field == "extra"))
+    end
+
     test "with no deployment, the empty state", %{conn: conn} do
       u = forum_universe()
       {:ok, view, _} = live(conn, "/_/u/#{u}?view=data")
