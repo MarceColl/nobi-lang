@@ -22,6 +22,16 @@ config :kinoko, Kinoko.Repo,
   foreign_keys: :on,
   default_transaction_mode: :immediate
 
+# Each deployment's own SQLite file (Kinoko.Data): a separate repo, never in
+# ecto_repos, started per file as a dynamic instance (the database path is
+# given at start). The same pragmas as Kinoko.Repo, for the same reasons.
+config :kinoko, Kinoko.Data.Repo,
+  journal_mode: :wal,
+  busy_timeout: 5000,
+  foreign_keys: :on,
+  default_transaction_mode: :immediate,
+  pool_size: 2
+
 # Configures the endpoint
 config :kinoko, KinokoWeb.Endpoint,
   url: [host: "localhost"],

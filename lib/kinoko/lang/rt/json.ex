@@ -67,6 +67,28 @@ defmodule Kinoko.Lang.Rt.Json do
     end
   end
 
+  @doc """
+  A store cell's JSON `text` as a value of `type`: `{:ok, value}` or
+  `{:error, why}`. As `parse/3` reads, except that a record's missing
+  field takes its default (an `Option` without one, `None`): the store's
+  rule for rows written before the field existed. Defaults are the
+  store's, never `JSON.parse`'s.
+  """
+  @spec decode_stored(String.t(), term(), map()) :: {:ok, term()} | {:error, String.t()}
+  def decode_stored(text, type, models) when is_binary(text) do
+    case document(text) do
+      {:error, why} ->
+        {:error, "invalid JSON: " <> reason(why)}
+
+      {:ok, json} ->
+        try do
+          {:ok, coerce(json, type, [:root], {:stored, models})}
+        catch
+          {:refused, why} -> {:error, why}
+        end
+    end
+  end
+
   defp ok(v), do: {:var, "Result", "Ok", [v]}
   defp err(why), do: {:var, "Result", "Err", [why]}
 
@@ -326,7 +348,7 @@ defmodule Kinoko.Lang.Rt.Json do
         if is_boolean(json), do: json, else: expected!("Bool", at)
 
       {:named, name} ->
-        case Map.get(models, name) do
+        case model_fields(models, name) do
           nil -> refuse!("cannot decode '#{name}' from JSON at #{path(at)}")
           fields -> record(json, name, fields, at, models)
         end
@@ -378,14 +400,15 @@ defmodule Kinoko.Lang.Rt.Json do
   defp expected!(name, at), do: refuse!("expected #{name} at #{path(at)}")
   defp refuse!(why), do: throw({:refused, why})
 
-  # A record of `model`: every field present and of its type; fields the
-  # model lacks are dropped.
+  # A record of `model`: every field present (in a store cell, a missing
+  # one takes its default) and of its type; fields the model lacks are
+  # dropped.
   defp record({:obj, entries}, model, fields, at, models) do
     out =
-      for {field, ty, _default} <- fields, into: %{} do
+      for {field, ty, default} <- fields, into: %{} do
         case Map.fetch(entries, field) do
           {:ok, v} -> {field, coerce(v, ty, [{:field, field} | at], models)}
-          :error -> refuse!("missing field '#{field}' at #{path(at)}")
+          :error -> {field, missing_field(models, field, ty, default, at)}
         end
       end
 
@@ -393,6 +416,19 @@ defmodule Kinoko.Lang.Rt.Json do
   end
 
   defp record(_, model, _, at, _), do: refuse!("expected object at #{path(at)} for #{model}")
+
+  # `models` is the models table, or `{:stored, table}` when decoding a
+  # store cell (`decode_stored/3`), where a missing field takes its default.
+  defp model_fields({:stored, models}, name), do: Map.get(models, name)
+  defp model_fields(models, name), do: Map.get(models, name)
+
+  defp missing_field({:stored, _}, _field, _ty, default, _at) when default != :none, do: default
+
+  defp missing_field({:stored, _}, _field, {:applied, "Option", [_]}, :none, _at),
+    do: {:var, "Option", "None", []}
+
+  defp missing_field(_models, field, _ty, _default, at),
+    do: refuse!("missing field '#{field}' at #{path(at)}")
 
   # A map from a plain JSON object, its entries in their key texts' order
   # (so of two texts reading back to one key, the one sorting last wins).

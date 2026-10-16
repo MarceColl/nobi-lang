@@ -27,9 +27,18 @@ defmodule Kinoko.Release do
   @doc "Creates the directory of `repo`'s SQLite file (SQLite makes the file, not the directory)."
   @spec ensure_data_dir(module()) :: :ok
   def ensure_data_dir(repo) do
+    case data_dir(repo) do
+      nil -> :ok
+      dir -> File.mkdir_p!(dir)
+    end
+  end
+
+  @doc "The directory of `repo`'s SQLite file, or `nil` when none is configured."
+  @spec data_dir(module()) :: String.t() | nil
+  def data_dir(repo) do
     case Application.get_env(@app, repo, [])[:database] do
-      path when is_binary(path) -> File.mkdir_p!(Path.dirname(path))
-      _ -> :ok
+      path when is_binary(path) -> Path.dirname(path)
+      _ -> nil
     end
   end
 end

@@ -21,6 +21,11 @@ defmodule Kinoko.Application do
         # taking the whole application down.
         {DynamicSupervisor,
          name: Kinoko.Elm.Supervisor, strategy: :one_for_one, max_restarts: 1_000, max_seconds: 60},
+        # Kinoko.Data: one opener per deployment file, found by its path in the
+        # registry (which makes opening single-flight), and the schema cache.
+        Kinoko.Data.Cache,
+        {Registry, keys: :unique, name: Kinoko.Data.Registry},
+        {DynamicSupervisor, name: Kinoko.Data.Supervisor, strategy: :one_for_one},
         {DNSCluster, query: Application.get_env(:kinoko, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Kinoko.PubSub},
         # Owns the ETS table of Kinoko.Universe.at/2's pinned views.
