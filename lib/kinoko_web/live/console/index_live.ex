@@ -90,7 +90,7 @@ defmodule KinokoWeb.Console.IndexLive do
             Workspace
           </span>
           <span class="text-[13px] leading-[1.6] text-(--k-dim) [text-wrap:pretty]">
-            {count(@env_count, "environment")} over one code image. An environment is a running world an agent builds into; forks read the same data but can never write to their base.
+            {count(@env_count, "environment")}, each its own code image and history.
           </span>
         </div>
 

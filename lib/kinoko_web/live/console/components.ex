@@ -546,7 +546,7 @@ defmodule KinokoWeb.Console.Components do
         kicker: "01 · Environments",
         title: "Try anything, break nothing",
         text:
-          "Every change gets its own running copy of the app — code, data and all. Forking takes a second, and a fork can read production data without being able to write to it. Ten agents can work at once and none of them can touch what your users see.",
+          "Every environment is its own universe: code, history and staged work. A fork starts from its parent's commit, and nothing it does touches its parent.",
         figure: :environments,
         try_it: "Switch environments in the sidebar."
       },
@@ -554,7 +554,7 @@ defmodule KinokoWeb.Console.Components do
         kicker: "02 · The graph",
         title: "See what talks to what, always",
         text:
-          "Apps, stores, workflows, crons and queues all show up here, joined by what they actually do to each other: read, write, send. It comes from the code, so it is never out of date — and when an agent proposes a change you can see which connections it adds or cuts before you accept it.",
+          "Apps and stores show up here, joined by what they actually do to each other: read and write. It comes from the code, so it is never out of date.",
         figure: :graph,
         try_it: "Click any node to inspect it."
       }
