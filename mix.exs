@@ -82,10 +82,11 @@ defmodule Kinoko.MixProject do
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["compile", "tailwind kinoko", "esbuild kinoko"],
+      "assets.build": ["compile", "tailwind kinoko", "esbuild kinoko", "esbuild yabu"],
       "assets.deploy": [
         "tailwind kinoko --minify",
         "esbuild kinoko --minify",
+        "esbuild yabu --minify",
         "phx.digest"
       ],
       precommit: ["compile --warning-as-errors", "deps.unlock --unused", "format", "test"]

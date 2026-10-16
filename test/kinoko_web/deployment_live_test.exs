@@ -316,6 +316,16 @@ defmodule KinokoWeb.DeploymentLiveTest do
       assert html =~ ~s(id="threads")
     end
 
+    test "a served app loads the Tailwind runtime, Kinoko's console does not", %{conn: conn, u: u} do
+      served = conn |> on_host(u) |> get("/") |> html_response(200) |> LazyHTML.from_document()
+      assert LazyHTML.query(served, ~s(script[src^="/assets/js/yabu.js"])) |> Enum.count() == 1
+      assert LazyHTML.query(served, ~s(script[src^="/assets/js/app.js"])) |> Enum.count() == 1
+
+      console = conn |> get("/_") |> html_response(200) |> LazyHTML.from_document()
+      assert LazyHTML.query(console, ~s(script[src^="/assets/js/yabu.js"])) |> Enum.count() == 0
+      assert LazyHTML.query(console, ~s(script[src^="/assets/js/app.js"])) |> Enum.count() == 1
+    end
+
     test "/post/<uuid> passes the id", %{conn: conn, u: u} do
       {view, _html} = open(conn, u, "/post/#{@uuid}")
       assert has_element?(view, ~s(#post[data-post="#{@uuid}"]))
@@ -444,7 +454,7 @@ defmodule KinokoWeb.DeploymentLiveTest do
       for {body, n} <- [{"first!", "1"}, {"second", "2"}] do
         change(view, change_id(view, "#draft"), body)
         submit(view, "#reply-form")
-        eventually(view, &(&1 =~ ~s(<span id="reply-count">#{n}</span>)))
+        eventually(view, fn _ -> text(view, "#reply-count") == n end)
       end
 
       assert replies(view) == ["first!", "second"]

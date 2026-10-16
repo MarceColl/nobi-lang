@@ -25,6 +25,7 @@ config :kinoko, KinokoWeb.Endpoint,
   secret_key_base: "4EdRsDt1bKWBrCDE2OR9z25mc1U+9GCofCFiRiAysKZ/I8oZ8HnvBAUBasLa5fzl",
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:kinoko, ~w(--sourcemap=inline --watch)]},
+    esbuild_yabu: {Esbuild, :install_and_run, [:yabu, ~w(--sourcemap=inline --watch)]},
     tailwind: {Tailwind, :install_and_run, [:kinoko, ~w(--watch)]}
   ]
 

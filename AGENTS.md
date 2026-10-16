@@ -37,6 +37,7 @@ custom classes must fully style the input
 
 - **Always use and maintain this import syntax** in the app.css file for projects generated with `phx.new`
 - **Never** use `@apply` when writing raw css
+- Deliberate exception to the two-bundle rule: served Yabu app pages load a second bundle, `yabu.js` (the vendored `@tailwindcss/browser`), via the `yabu_root` layout; Kinoko's own pages use only app.js/app.css
 - **Always** manually write your own tailwind-based components instead of using daisyUI for a unique, world-class design
 - Out of the box **only the app.js and app.css bundles are supported**
   - You cannot reference an external vendor'd script `src` or link `href` in the layouts

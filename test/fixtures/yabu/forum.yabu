@@ -42,25 +42,25 @@ def Forum.Threads.update(msg : Forum.Threads.Msg, model : Forum.Threads.Model) :
 end
 
 def Forum.Threads.view_topic(topic : Forum.Topic) : Html<Forum.Threads.Msg> do
-  <li class="topic flex justify-between py-2">
-    <button class="text-left font-medium hover:underline" on-click={Forum.Threads.Msg.Open(topic.id)}>{topic.title}</button>
-    <span class="text-sm text-gray-500">{topic.replies}</span>
+  <li class="topic flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition hover:border-indigo-300 hover:shadow-md">
+    <button class="flex-1 text-left font-medium text-slate-900 transition hover:text-indigo-600" on-click={Forum.Threads.Msg.Open(topic.id)}>{topic.title}</button>
+    <span class="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-700">{topic.replies}</span>
   </li>
 end
 
 def Forum.Threads.view(model : Forum.Threads.Model) : Html<Forum.Threads.Msg> do
   shown = List.filter(model.topics, fn (topic : Forum.Topic) -> String.contains(topic.title, model.filter) end)
-  <main id="threads" class="mx-auto max-w-xl p-6">
-    <header class="flex items-center justify-between">
-      <h1 class="text-2xl font-bold">Threads</h1>
-      <button id="open-settings" on-click={Forum.Threads.Msg.Settings}>Settings</button>
+  <main id="threads" class="mx-auto min-h-screen max-w-xl bg-slate-50 p-6 font-sans text-slate-800 antialiased">
+    <header class="flex items-center justify-between pb-2">
+      <h1 class="text-3xl font-bold tracking-tight text-slate-900">Threads</h1>
+      <button id="open-settings" class="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900" on-click={Forum.Threads.Msg.Settings}>Settings</button>
     </header>
     <form id="new-thread" class="flex gap-2 py-4" on-submit={Forum.Threads.Msg.Create}>
-      <input id="title" placeholder="New thread" value={model.title} on-change={Forum.Threads.Msg.Title} />
-      <button id="create" type="submit">Create</button>
+      <input id="title" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" placeholder="New thread" value={model.title} on-change={Forum.Threads.Msg.Title} />
+      <button id="create" class="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 active:scale-95" type="submit">Create</button>
     </form>
-    <input id="filter" placeholder="Filter" value={model.filter} on-change={Forum.Threads.Msg.Filter} />
-    <ul id="topics">{List.map(shown, Forum.Threads.view_topic)}</ul>
+    <input id="filter" class="mb-4 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" placeholder="Filter" value={model.filter} on-change={Forum.Threads.Msg.Filter} />
+    <ul id="topics" class="space-y-2">{List.map(shown, Forum.Threads.view_topic)}</ul>
   </main>
 end
 
@@ -121,24 +121,24 @@ end
 def Forum.Post.view_topic(topic : Option<Forum.Topic>) : Html<Forum.Post.Msg> do
   case topic do
     Option.Some(t) ->
-      <header>
-        <h1 id="post-title" class="text-xl font-bold">{t.title}</h1>
-        <p class="text-sm text-gray-500"><span id="reply-count">{t.replies}</span> replies</p>
+      <header class="py-4">
+        <h1 id="post-title" class="text-2xl font-bold tracking-tight text-slate-900">{t.title}</h1>
+        <p class="mt-1 text-sm text-slate-500"><span id="reply-count" class="font-semibold text-indigo-600">{t.replies}</span><span class="ml-1">replies</span></p>
       </header>
-    Option.None -> <h1 id="post-title" class="text-xl font-bold">No such thread</h1>
+    Option.None -> <h1 id="post-title" class="py-4 text-2xl font-bold text-slate-900">No such thread</h1>
   end
 end
 
 def Forum.Post.view(model : Forum.Post.Model) : Html<Forum.Post.Msg> do
-  <main id="post" data-post={model.post_id} class="mx-auto max-w-xl p-6">
-    <button id="back" on-click={Forum.Post.Msg.Back}>All threads</button>
+  <main id="post" data-post={model.post_id} class="mx-auto min-h-screen max-w-xl bg-slate-50 p-6 font-sans text-slate-800 antialiased">
+    <button id="back" class="-ml-3 rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900" on-click={Forum.Post.Msg.Back}>All threads</button>
     {Forum.Post.view_topic(model.topic)}
-    <ul id="replies">{List.map(model.replies, fn (reply : Forum.Reply) -> <li class="reply py-1">{reply.body}</li> end)}</ul>
+    <ul id="replies" class="mb-4 space-y-2">{List.map(model.replies, fn (reply : Forum.Reply) -> <li class="reply rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed shadow-sm">{reply.body}</li> end)}</ul>
     <form id="reply-form" class="flex gap-2" on-submit={Forum.Post.Msg.Reply}>
-      <input id="draft" value={model.draft} on-change={Forum.Post.Msg.Draft} />
-      <button id="reply" type="submit">Reply</button>
+      <input id="draft" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" placeholder="Write a reply" value={model.draft} on-change={Forum.Post.Msg.Draft} />
+      <button id="reply" class="shrink-0 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 active:scale-95" type="submit">Reply</button>
     </form>
-    <p id="post-error" class="text-sm text-red-600">{model.error}</p>
+    <p id="post-error" class="mt-2 text-sm font-medium text-red-600">{model.error}</p>
   </main>
 end
 
@@ -166,12 +166,16 @@ def Forum.Settings.update(msg : Forum.Settings.Msg, model : Forum.Settings.Model
 end
 
 def Forum.Settings.view(model : Forum.Settings.Model) : Html<Forum.Settings.Msg> do
-  <main id="settings" class="mx-auto max-w-xl p-6">
-    <h1 class="text-2xl font-bold">Settings</h1>
-    <input id="name" placeholder="Display name" value={model.name} on-change={Forum.Settings.Msg.Name} />
-    <button id="save" on-click={Forum.Settings.Msg.Save}>Save</button>
-    <span id="saved">{if model.saved do "Saved" else "" end}</span>
-    <button id="done" on-click={Forum.Settings.Msg.Done}>Done</button>
+  <main id="settings" class="mx-auto min-h-screen max-w-xl bg-slate-50 p-6 font-sans text-slate-800 antialiased">
+    <h1 class="pb-4 text-3xl font-bold tracking-tight text-slate-900">Settings</h1>
+    <div class="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <input id="name" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200" placeholder="Display name" value={model.name} on-change={Forum.Settings.Msg.Name} />
+      <div class="flex items-center gap-3">
+        <button id="save" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 active:scale-95" on-click={Forum.Settings.Msg.Save}>Save</button>
+        <span id="saved" class="text-sm font-medium text-emerald-600">{if model.saved do "Saved" else "" end}</span>
+        <button id="done" class="ml-auto rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900" on-click={Forum.Settings.Msg.Done}>Done</button>
+      </div>
+    </div>
   </main>
 end
 

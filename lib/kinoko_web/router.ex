@@ -103,7 +103,9 @@ defmodule KinokoWeb.Router do
     scope "/", KinokoWeb do
       pipe_through [:browser, :deployment]
 
-      live_session :deployment, session: {KinokoWeb.DeploymentStatus, :session, []} do
+      live_session :deployment,
+        session: {KinokoWeb.DeploymentStatus, :session, []},
+        root_layout: {KinokoWeb.Layouts, :yabu_root} do
         live "/*path", DeploymentLive
       end
     end
