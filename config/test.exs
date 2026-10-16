@@ -8,6 +8,8 @@ import Config
 config :kinoko, Kinoko.Repo,
   database: Path.expand("../.kinoko/test#{System.get_env("MIX_TEST_PARTITION")}.db", __DIR__),
   pool: Ecto.Adapters.SQL.Sandbox,
+  # Sandbox transactions queue behind one another on the single writer.
+  busy_timeout: 15_000,
   pool_size: System.schedulers_online() * 2
 
 # We don't run a server during test. If one is required,

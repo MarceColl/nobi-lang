@@ -49,7 +49,7 @@
 - **ElmGenServer / ElmLiveView**: Elixir processes running the same pure loop.
   - **Runtime** is their shared core.
   - **Timeline** is the record of each message, the effects it started, and the state it produced.
-- **PersistentElmGenServer**: an ElmGenServer whose **durable** state is written to Postgres under a **key** before each step's effects run.
+- **PersistentElmGenServer**: an ElmGenServer whose **durable** state is written to SQLite under a **key** before each step's effects run.
 
 ## System
 

@@ -10,7 +10,8 @@ defmodule Kinoko.DataCase do
   we enable the SQL sandbox, so changes done to the database
   are reverted at the end of every test. The database is SQLite, which
   has a single writer and the sandbox holds each test's transaction open,
-  so tests that write must not be `async: true`.
+  so tests that write must not be `async: true`. Sync tests take the write
+  lock up front with a no-op write; async tests skip it and must stay read-only.
   """
 
   use ExUnit.CaseTemplate
@@ -45,12 +46,14 @@ defmodule Kinoko.DataCase do
     pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Kinoko.Repo, shared: not tags[:async])
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
 
+    # Async tests only read (see the moduledoc), so they skip this.
     # SQLite has one writer. The previous test's sandbox transaction is rolled
     # back asynchronously after it stops, so it may still hold the write lock.
     # A transaction that has read cannot wait for that lock (SQLite answers
     # "Database busy" at once), so take it now, as the first statement, where
     # busy_timeout makes it wait. The test then holds it until it ends.
-    Ecto.Adapters.SQL.query!(Kinoko.Repo, "DELETE FROM universes WHERE 0")
+    unless tags[:async],
+      do: Ecto.Adapters.SQL.query!(Kinoko.Repo, "DELETE FROM universes WHERE 0")
   end
 
   @doc """

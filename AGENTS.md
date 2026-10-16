@@ -5,6 +5,13 @@ This is a web application written using the Phoenix web framework.
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 
+### Database
+
+- Kinoko uses SQLite only (`ecto_sqlite3`), a single file with no external services. Dev: `.kinoko/kinoko.db` (git-ignored); override the directory with `KINOKO_DATA`. Test: `.kinoko/test.db`.
+- `mix kinoko.start` creates, migrates and serves from a fresh checkout.
+- Production: the file is `$KINOKO_DATA/kinoko.db` (default `/var/lib/kinoko`). A release has no Mix, so run `bin/kinoko eval "Kinoko.Release.migrate()"` before the first start; it creates the directory and the file.
+- SQLite has one writer: DB-writing tests must not be `async: true`.
+
 ### Phoenix v1.8 guidelines
 
 - **Always** begin your LiveView templates with `<Layouts.app flash={@flash} ...>` which wraps all inner content

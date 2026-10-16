@@ -174,6 +174,18 @@ defmodule Kinoko.DeploymentTest do
     assert :error = Deployment.resolve("")
   end
 
+  test "duplicate hosts collapse to one" do
+    u = fresh_universe()
+    n = dname()
+
+    :ok =
+      Deployment.create(n, u, "Main",
+        hosts: ["A.example.com", "a.example.com:80", "b.example.com"]
+      )
+
+    assert {:ok, %{hosts: ["a.example.com", "b.example.com"]}} = Deployment.get(n)
+  end
+
   test "non-string arguments are bad_name, never a raise" do
     u = fresh_universe()
     assert {:error, :bad_name} = Deployment.create(dname(), nil, "Main")

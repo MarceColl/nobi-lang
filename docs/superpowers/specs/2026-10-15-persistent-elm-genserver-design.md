@@ -4,7 +4,7 @@ Piece 2 of 7. It builds on the Elm foundation (`Kinoko.ElmGenServer`, `Kinoko.El
 
 ## Goal
 
-An `ElmGenServer` whose state survives restarts and crashes. Every state change is written to Postgres, append-only, **before** the effects of that step run. A server started again under the same key resumes from its last written state.
+An `ElmGenServer` whose state survives restarts and crashes. Every state change is written to SQLite, append-only, **before** the effects of that step run. A server started again under the same key resumes from its last written state.
 
 ## Out of scope
 

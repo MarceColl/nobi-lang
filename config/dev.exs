@@ -1,8 +1,10 @@
 import Config
 
-# Configure your database
+# Configure your database. KINOKO_DATA overrides the data directory
+# (default: .kinoko in the checkout).
 config :kinoko, Kinoko.Repo,
-  database: Path.expand("../.kinoko/kinoko.db", __DIR__),
+  database:
+    Path.join(System.get_env("KINOKO_DATA") || Path.expand("../.kinoko", __DIR__), "kinoko.db"),
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
