@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<style>
+  html, body { margin:0; height:100%; background:#F2F1EC; }
+  a { color:#5B4B96; text-decoration:none; }
+  a:hover { color:#48397C; }
+  * { box-sizing:border-box; }
+  ::selection { background:rgba(91,75,150,.18); }
+  ::-webkit-scrollbar { width:10px; }
+  ::-webkit-scrollbar-thumb { background:#D6D2C7; border-radius:5px; border:3px solid transparent; background-clip:content-box; }
+</style>
+</helmet>
+
+<div style="height:100vh; display:flex; flex-direction:column; font-family:Chivo,system-ui,sans-serif; color:#1B1A17; background:#F2F1EC; overflow:hidden;">
+
+  <div style="height:46px; flex:none; display:flex; align-items:center; gap:13px; padding:0 14px; background:#fff; border-bottom:1px solid #DDDAD1;">
+    <div onClick="{{ goHome }}" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5B4B96" stroke-width="1.5"><path d="M12 13v8"></path><path d="M12 21c-3 0-5-1.5-7-3"></path><path d="M12 21c3 0 5-1.5 7-3"></path><path d="M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z" fill="#E4DFF3"></path></svg>
+      <span style="font-size:14px; font-weight:700; letter-spacing:-.01em;">kinoko</span>
+    </div>
+    <div style="width:1px; height:18px; background:#DDDAD1;"></div>
+    <div style="display:flex; align-items:center; gap:7px; font-size:13px;">
+      <span onClick="{{ goHome }}" style="color:#6E6A61; cursor:pointer;">Ski trip</span>
+      <span style="color:#B6B1A5;">/</span>
+      <span style="font-family:'IBM Plex Mono',monospace; font-size:12.5px; font-weight:500;">{{ envName }}</span>
+    </div>
+    <div style="flex:1;"></div>
+    <div onClick="{{ openCmd }}" style="display:flex; align-items:center; gap:9px; height:28px; padding:0 10px 0 9px; border-radius:6px; background:#F2F1EC; border:1px solid #DDDAD1; color:#8A8579; font-size:12.5px; width:250px; cursor:pointer;" style-hover="border-color:#C4BEAE;">
+      <i class="ph ph-magnifying-glass" style="font-size:13px;"></i><span>Jump to…</span><div style="flex:1;"></div>
+      <span style="font-family:'IBM Plex Mono',monospace; font-size:10.5px; border:1px solid #DDDAD1; border-radius:3px; padding:1px 4px; background:#fff;">⌘K</span>
+    </div>
+    <div onClick="{{ openIntro }}" title="What is this?" style="flex:none; width:28px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:6px; color:#8A8579; cursor:pointer;" style-hover="background:#F2F1EC; color:#5B4B96;">
+      <i class="ph ph-question" style="font-size:15px;"></i>
+    </div>
+  </div>
+
+  <div style="flex:1; min-height:0; display:flex;">
+
+    <div style="width:230px; flex:none; background:#EDEBE4; border-right:1px solid #DDDAD1; display:flex; flex-direction:column; overflow-y:auto;">
+      <div style="padding:13px 12px 6px; font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:#8A8579;">Deployments</div>
+      <div style="padding:0 8px; display:flex; flex-direction:column; gap:1px;">
+        <sc-for list="{{ deployments }}" as="d" hint-placeholder-count="2">
+          <div onClick="{{ d.pick }}" style="{{ d.row }}">
+            <span style="{{ d.dot }}"></span>
+            <span style="{{ d.name }}">{{ d.label }}</span>
+            <div style="flex:1;"></div>
+            <span style="{{ d.tagStyle }}">{{ d.tag }}</span>
+          </div>
+        </sc-for>
+        <div style="display:flex; align-items:center; gap:7px; padding:6px 8px; color:#8A8579; font-size:12px; cursor:pointer;" style-hover="color:#5B4B96;"><i class="ph ph-plus" style="font-size:12px;"></i><span>New deployment</span></div>
+      </div>
+
+      <div style="height:1px; background:#DDDAD1; margin:13px 12px 0;"></div>
+
+      <div style="padding:13px 12px 6px; display:flex; align-items:center;">
+        <span style="font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:#8A8579;">Environments</span>
+        <div style="flex:1;"></div>
+        <span style="font-size:10.5px; color:#8A8579;">recent</span>
+      </div>
+      <div style="padding:0 8px; display:flex; flex-direction:column; gap:1px;">
+        <sc-for list="{{ envs }}" as="e" hint-placeholder-count="3">
+          <div onClick="{{ e.pick }}" style="{{ e.row }}">
+            <span style="{{ e.dot }}"></span>
+            <span style="{{ e.name }}">{{ e.label }}</span>
+            <div style="flex:1;"></div>
+            <span style="{{ e.tagStyle }}">{{ e.tag }}</span>
+          </div>
+        </sc-for>
+        <div onClick="{{ goHome }}" style="display:flex; align-items:center; gap:7px; padding:6px 8px; color:#5B4B96; font-size:12px; cursor:pointer;" style-hover="color:#48397C;"><i class="ph ph-list" style="font-size:12px;"></i><span>All 12 environments</span></div>
+        <div style="display:flex; align-items:center; gap:7px; padding:6px 8px; color:#8A8579; font-size:12px; cursor:pointer;" style-hover="color:#5B4B96;"><i class="ph ph-git-fork" style="font-size:12px;"></i><span>Fork {{ envName }}</span></div>
+      </div>
+
+      <div style="height:1px; background:#DDDAD1; margin:13px 12px;"></div>
+
+      <div style="padding:0 8px; display:flex; flex-direction:column; gap:1px;">
+        <sc-for list="{{ nav }}" as="n" hint-placeholder-count="4">
+          <div onClick="{{ n.pick }}" style="{{ n.row }}">
+            <i class="{{ n.icon }}" style="{{ n.iconStyle }}"></i>
+            <span style="{{ n.label }}">{{ n.name }}</span>
+            <div style="flex:1;"></div>
+            <span style="{{ n.badgeStyle }}">{{ n.badge }}</span>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="height:1px; background:#DDDAD1; margin:13px 12px 0;"></div>
+      <div style="padding:11px 12px 6px; font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:#8A8579;">Changes</div>
+      <div style="padding:0 8px; display:flex; flex-direction:column; gap:1px;">
+        <sc-for list="{{ changeNav }}" as="n" hint-placeholder-count="2">
+          <div onClick="{{ n.pick }}" style="{{ n.row }}">
+            <i class="{{ n.icon }}" style="{{ n.iconStyle }}"></i>
+            <span style="{{ n.label }}">{{ n.name }}</span>
+            <div style="flex:1;"></div>
+            <span style="{{ n.badgeStyle }}">{{ n.badge }}</span>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="flex:1; min-height:14px;"></div>
+
+      <div onClick="{{ goSettings }}" style="{{ acctRow }}" style-hover="background:#E5E2D8;">
+        <div style="width:26px; height:26px; border-radius:50%; flex:none; background:linear-gradient(135deg,#5B4B96,#0F7A66);"></div>
+        <div style="display:flex; flex-direction:column; gap:1px; min-width:0;">
+          <span style="font-size:12.5px; font-weight:500;">mcoll</span>
+          <span style="font-size:11px; color:#8A8579;">Workspace, keys, billing</span>
+        </div>
+        <div style="flex:1;"></div>
+        <i class="ph ph-caret-up-down" style="font-size:12px; color:#8A8579;"></i>
+      </div>
+    </div>
+
+    <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
+
+      <div style="height:42px; flex:none; display:flex; align-items:center; gap:12px; padding:0 14px; border-bottom:1px solid #DDDAD1; background:#F7F6F2;">
+        <sc-if value="{{ showViews }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex; align-items:center; gap:2px; padding:2px; border-radius:7px; background:#E7E4DB;">
+            <sc-for list="{{ views }}" as="v" hint-placeholder-count="3">
+              <span onClick="{{ v.pick }}" style="{{ v.style }}">{{ v.name }}</span>
+            </sc-for>
+          </div>
+          <div style="width:1px; height:16px; background:#DDDAD1;"></div>
+        </sc-if>
+        <span style="font-size:13px; font-weight:600; white-space:nowrap;">{{ title }}</span>
+        <span style="font-size:12.5px; color:#6E6A61; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ subtitle }}</span>
+        <div style="flex:1; min-width:8px;"></div>
+        <span title="Generated code runs in an isolate whose bindings are its whole capability set. It has no network egress, so it can only reach the stores and services this environment granted it." style="flex:none; white-space:nowrap; display:flex; align-items:center; gap:6px; font-size:12px; color:#0F7A66; background:#E3F1EC; border:1px solid #BFDDD3; padding:3px 9px; border-radius:5px; cursor:help;"><i class="ph ph-shield-check" style="font-size:12px;"></i>sandboxed · no egress</span>
+        <span style="flex:none; font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:#8A8579;">98ac5a18</span>
+      </div>
+
+      <div style="flex:1; min-height:0; display:flex; position:relative;">
+        <div style="{{ stageStyle }}">{{ stage }}</div>
+
+        <sc-if value="{{ hasPanel }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute; right:0; top:0; bottom:0; width:326px; border-left:1px solid #DDDAD1; background:#F7F6F2; box-shadow:-8px 0 24px rgba(27,26,23,.07); display:flex; flex-direction:column; overflow-y:auto;">
+            <div style="padding:12px 14px 11px; border-bottom:1px solid #DDDAD1; display:flex; align-items:flex-start; gap:8px;">
+              <div style="display:flex; flex-direction:column; gap:5px; min-width:0;">
+                <span style="font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:#8A8579;">{{ panel.eyebrow }}</span>
+                <span style="font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:500;">{{ panel.name }}</span>
+                <span style="font-size:12px; color:#6E6A61;">{{ panel.sub }}</span>
+              </div>
+              <div style="flex:1;"></div>
+              <i onClick="{{ clearSel }}" class="ph ph-x" style="font-size:14px; color:#8A8579; cursor:pointer; padding-top:2px;"></i>
+            </div>
+            <div style="padding:12px 14px; display:flex; flex-direction:column; gap:9px;">
+              <sc-for list="{{ panel.rows }}" as="r" hint-placeholder-count="4">
+                <div style="display:flex; gap:10px; font-size:12.5px;">
+                  <span style="width:76px; flex:none; color:#8A8579;">{{ r.k }}</span>
+                  <span style="{{ r.vStyle }}">{{ r.v }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="padding:0 14px 14px;">{{ panel.extra }}</div>
+          </div>
+        </sc-if>
+      </div>
+
+      <sc-if value="{{ showViews }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:none; border-top:1px solid #DDDAD1; background:#F7F6F2;">
+          <div style="display:flex; align-items:center; gap:10px; padding:5px 14px 4px; font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:#8A8579;">
+            <span style="color:#5B4B96;">›</span>
+            <span style="color:#3A362E; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Split.Msg.Add("ana", "cabin, two nights", 24000)</span>
+            <div style="flex:1; min-width:8px;"></div>
+            <span style="color:#0F7A66;">committed · 1 row · 3ms</span>
+            <span onClick="{{ goTraces }}" style="color:#5B4B96; cursor:pointer;">trace</span>
+          </div>
+          <div style="height:38px; display:flex; align-items:center; gap:10px; padding:0 14px; border-top:1px solid #EAE7DE; background:#fff;">
+            <span style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#5B4B96;">›</span>
+            <span style="flex:1; min-width:0; font-family:'IBM Plex Mono',monospace; font-size:12.5px; color:#B6B1A5; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Evaluate an expression, or send a Msg…</span>
+            <span style="font-size:11.5px; color:#8A8579;">sends to</span>
+            <span style="font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:#3A362E; background:#F2F1EC; border:1px solid #DDDAD1; padding:1px 7px; border-radius:4px;">{{ envName }}</span>
+            <span style="font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:#8A8579; border:1px solid #DDDAD1; border-radius:3px; padding:1px 4px;">⌃↑ history</span>
+            <i class="ph ph-caret-up" style="font-size:12px; color:#8A8579; cursor:pointer;"></i>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <sc-if value="{{ intro }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; inset:0; background:rgba(27,26,23,.34); display:flex; align-items:center; justify-content:center; padding:24px;">
+      <div style="width:640px; max-height:100%; border-radius:12px; background:#F7F6F2; border:1px solid #DDDAD1; box-shadow:0 24px 60px rgba(27,26,23,.26); display:flex; flex-direction:column; overflow:hidden;">
+
+        <div style="flex:none; display:flex; align-items:center; gap:9px; padding:13px 16px; background:#fff; border-bottom:1px solid #DDDAD1;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B4B96" stroke-width="1.5"><path d="M12 13v8"></path><path d="M12 21c-3 0-5-1.5-7-3"></path><path d="M12 21c3 0 5-1.5 7-3"></path><path d="M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z" fill="#E4DFF3"></path></svg>
+          <span style="font-size:13px; font-weight:600;">Welcome to kinoko</span>
+          <div style="flex:1; min-width:8px;"></div>
+          <span onClick="{{ closeIntro }}" style="flex:none; font-size:12px; color:#8A8579; cursor:pointer;" style-hover="color:#5B4B96;">Skip</span>
+        </div>
+
+        <div style="flex:1; min-height:0; overflow-y:auto; padding:20px 22px 22px; display:flex; flex-direction:column; gap:14px;">
+          <span style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.05em; color:#8A8579;">{{ introKicker }}</span>
+          <span style="font-family:Newsreader,Georgia,serif; font-size:23px; font-weight:500; line-height:1.2; max-width:520px;">{{ introTitle }}</span>
+          <span style="font-size:13.5px; line-height:1.65; color:#3A362E; max-width:560px; text-wrap:pretty;">{{ introText }}</span>
+          <div style="padding:14px; border-radius:10px; background:#F2F1EC; border:1px solid #DDDAD1; overflow:hidden;">{{ introFigure }}</div>
+          <div style="display:flex; align-items:center; gap:7px;">
+            <i class="ph ph-cursor-click" style="flex:none; font-size:13px; color:#8A8579;"></i>
+            <span style="font-size:12.5px; color:#6E6A61;">{{ introTryIt }}</span>
+          </div>
+        </div>
+
+        <div style="flex:none; display:flex; align-items:center; gap:10px; padding:12px 16px; background:#fff; border-top:1px solid #DDDAD1;">
+          <div style="display:flex; align-items:center; gap:5px;">
+            <sc-for list="{{ introDots }}" as="d" hint-placeholder-count="4">
+              <span onClick="{{ d.pick }}" style="{{ d.style }}"></span>
+            </sc-for>
+          </div>
+          <div style="flex:1; min-width:8px;"></div>
+          <button onClick="{{ introBack }}" style="{{ introBackStyle }}">Back</button>
+          <button onClick="{{ introNext }}" style="flex:none; white-space:nowrap; height:30px; padding:0 14px; border-radius:6px; border:1px solid #C9C0E4; background:#F3F0FB; color:#5B4B96; font:inherit; font-size:12.5px; font-weight:500; cursor:pointer;">{{ introNextLabel }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ cmdOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeCmd }}" style="position:fixed; inset:0; background:rgba(27,26,23,.28); display:flex; align-items:flex-start; justify-content:center; padding-top:14vh;">
+      <div style="width:520px; border-radius:11px; background:#fff; border:1px solid #DDDAD1; box-shadow:0 20px 50px rgba(27,26,23,.24); overflow:hidden;">
+        <div style="display:flex; align-items:center; gap:10px; padding:13px 15px; border-bottom:1px solid #DDDAD1;">
+          <i class="ph ph-magnifying-glass" style="font-size:15px; color:#8A8579;"></i>
+          <span style="font-size:14px; color:#B6B1A5;">Jump to an app, store, symbol, trace…</span>
+        </div>
+        <div style="padding:7px;">
+          <sc-for list="{{ cmdItems }}" as="c" hint-placeholder-count="5">
+            <div onClick="{{ c.pick }}" style="{{ c.row }}">
+              <i class="{{ c.icon }}" style="font-size:14px; color:#5B4B96; width:16px;"></i>
+              <span style="{{ c.nameStyle }}">{{ c.name }}</span>
+              <div style="flex:1;"></div>
+              <span style="font-size:11.5px; color:#8A8579;">{{ c.hint }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+const P = {ink:"#1B1A17", body:"#3A362E", dim:"#6E6A61", faint:"#8A8579", line:"#DDDAD1", paper:"#F2F1EC", card:"#fff", tint:"#F7F6F2", sand:"#EDEBE4",
+  violet:"#5B4B96", mint:"#0F7A66", amber:"#A9740B", red:"#C0453F"};
+const MONO = "'IBM Plex Mono',monospace";
+const DISPLAY = "Newsreader,Georgia,serif";
+const EXPENSES = [
+  {id:"e41", payer:"mika", what:"lift passes ×4", cents:33600},
+  {id:"e42", payer:"joon", what:"wax + edge tool", cents:1250},
+  {id:"e43", payer:"ana", what:"cabin, two nights", cents:24000},
+  {id:"e44", payer:"mika", what:"groceries", cents:6320},
+  {id:"e45", payer:"joon", what:"petrol", cents:4180}];
+const money = (c) => "£" + (c / 100).toFixed(2);
+const h = React.createElement;
+
+class Component extends DCLogic {
+  state = { env: "main", view: "graph", page: "graph", sel: null, cmdOpen: false, sym: "update", review: false, step: 1, dep: "production", trace: "t_9f21", cam: {z: 1, x: 0, y: 14},
+    intro: false, introPage: 0,
+    tour: (() => { try { return localStorage.getItem("kinoko.tour.seen") !== "1"; } catch (e) { return true; } })(),
+    tourStop: 0, tourRect: null };
+
+  closeIntro = () => {
+    try { localStorage.setItem("kinoko.intro.seen", "1"); } catch (e) {}
+    this.setState({intro: false});
+  };
+
+  canvasRef = React.createRef();
+
+  // --- camera: the world is a fixed 900×730 authored space, panned and scaled into
+  // whatever the flex layout leaves. Everything that used to clip now just needs a fit.
+  fit = () => {
+    const el = this.canvasRef.current;
+    if (!el) return;
+    const w = el.clientWidth, hh = el.clientHeight;
+    if (w === 0 || hh === 0) return;
+    // Fit the real content extent, not the world box — the world is oversized on purpose
+    // so there is somewhere to pan to.
+    // The inspector floats over the canvas, so keep the graph clear of the strip it covers.
+    const gutter = this.state.sel === null && !this.state.review ? 28 : 354;
+    const cw = this.state.review ? 380 : 560, ch = this.state.review ? 270 : 400;
+    const z = Math.max(.5, Math.min(1, (w - gutter) / cw, (hh - 28) / ch));
+    this.setState({cam:{z, x:Math.max(8, (w - gutter - cw * z) / 2 + 8), y:14}});
+  };
+  zoomBy = (f) => this.setState(s => {
+    const el = this.canvasRef.current;
+    const cx = el ? el.clientWidth / 2 : 0, cy = el ? el.clientHeight / 2 : 0;
+    const z = Math.max(.3, Math.min(2, s.cam.z * f)), k = z / s.cam.z;
+    return {cam:{z, x:cx - (cx - s.cam.x) * k, y:cy - (cy - s.cam.y) * k}};
+  });
+  startPan = (e) => {
+    if (e.target !== e.currentTarget) return;
+    this.pan = {sx:e.clientX, sy:e.clientY, ox:this.state.cam.x, oy:this.state.cam.y, moved:false};
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  movePan = (e) => {
+    const p = this.pan;
+    if (!p) return;
+    const dx = e.clientX - p.sx, dy = e.clientY - p.sy;
+    if (!p.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+    p.moved = true;
+    this.setState(s => ({cam:{...s.cam, x:p.ox + dx, y:p.oy + dy}}));
+  };
+  endPan = (e) => {
+    const p = this.pan;
+    this.pan = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if (p && !p.moved) this.setState({sel:null});
+  };
+  onWheel = (e) => {
+    if (e.ctrlKey || e.metaKey) this.zoomBy(Math.exp(-e.deltaY * 0.01));
+    else this.setState(s => ({cam:{...s.cam, x:s.cam.x - e.deltaX, y:s.cam.y - e.deltaY}}));
+  };
+
+  componentDidMount() {
+    setTimeout(this.fit, 0);
+    this._k = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); this.setState(s => ({cmdOpen: !s.cmdOpen})); }
+      if (e.key === "Escape") { this.setState({cmdOpen: false}); if (this.state.tour) this.endTour(); }
+      if (this.state.tour && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+        e.preventDefault();
+        this.goTourStop(this.state.tourStop + (e.key === "ArrowRight" ? 1 : -1));
+      }
+    };
+    window.addEventListener("keydown", this._k);
+  }
+  componentWillUnmount() { window.removeEventListener("keydown", this._k); }
+
+  componentDidUpdate() {
+    // The runtime does not forward prevState, so track what we compare ourselves.
+    const s = this.state;
+    const key = `${s.review}|${s.page}|${s.sel === null}`;
+    if (this._layoutKey !== undefined && this._layoutKey !== key) setTimeout(this.fit, 0);
+    this._layoutKey = key;
+    const tk = `${s.tour}|${s.tourStop}|${s.page}`;
+    if (this._tourKey !== tk) { this._tourKey = tk; if (s.tour) requestAnimationFrame(() => setTimeout(this.measureTour, 30)); }
+  }
+
+  go(page, view) { this.setState({page, view: view ?? this.state.view, sel: null, cmdOpen: false, review: false}); }
+
+  // ---------- first-run tour ----------
+  // Six stops, each anchored to a real element by data-tour. `page` puts the console in
+  // the state where that element means something before the spotlight lands on it.
+  tourStops() {
+    return [
+      {sel:'[data-tour="envs"]', side:"right", page:"graph",
+       kicker:"01 · Environments", title:"Fork the whole app in a second",
+       text:"Not a branch — a running copy, with its own data. An agent works in one, reads real production rows, and cannot write a byte back. Ten of them can go at once and your users see none of it.",
+       cue:"main is the tracked branch. The other two are forks."},
+
+      {sel:'[data-tour="stage"]', side:"left", page:"graph",
+       kicker:"02 · The graph", title:"An architecture diagram that can't go stale",
+       text:"This is read out of the code, not drawn. Screens, stores, workflows, crons and queues, joined by what they do to each other — read, write, send. If a connection is on screen, it exists.",
+       cue:"Click any node to see what reads and writes it."},
+
+      {sel:'[data-tour="sandbox"]', side:"below", page:"graph",
+       kicker:"03 · Capabilities", title:"Code can only reach what you handed it",
+       text:"An environment gets an explicit list: these stores, this service, no network. Anything outside it isn't refused at runtime — it was never wired up. Agent-written code included.",
+       cue:"Every environment shows what it was granted."},
+
+      {sel:'[data-tour="proposals"]', side:"right", page:"proposals",
+       kicker:"04 · Proposals", title:"Judge a change by using it",
+       text:"An agent's work arrives as something you can click through. The graph dims everything it didn't touch, and Try it runs the app exactly as it would be after the merge — same data, same routes.",
+       cue:"One proposal is waiting for you."},
+
+      {sel:'[data-tour="stage"]', side:"left", page:"traces",
+       kicker:"05 · Traces", title:"Never reproduce a bug again",
+       text:"Every failure arrives as something you can re-run: same inputs, same result, on your machine or an agent's. Nothing to set up, nothing that works-for-me.",
+       cue:"Replay it, or hand it to an agent."},
+
+      {sel:'[data-tour="production"]', side:"right", page:"deployment",
+       kicker:"06 · Deployments", title:"No build. No deploy step.",
+       text:"Promoting is seconds — old requests finish on old code, new ones start on new. Rolling back is picking the version you liked. That is the whole release process.",
+       cue:"Promote from here, or fork production to test against it."}];
+  }
+
+  measureTour = () => {
+    if (!this.state.tour) return;
+    const stop = this.tourStops()[this.state.tourStop];
+    const el = stop && stop.sel ? document.querySelector(stop.sel) : null;
+    if (!el) { this.setState({tourRect: null}); return; }
+    const r = el.getBoundingClientRect();
+    this.setState({tourRect: {t: r.top, l: r.left, w: r.width, h: r.height}});
+  };
+
+  goTourStop = (i) => {
+    const stops = this.tourStops();
+    if (i < 0) return;
+    if (i >= stops.length) { this.endTour(); return; }
+    const stop = stops[i];
+    this.setState({tourStop: i, sel: null, cmdOpen: false,
+      page: stop.page, view: ["graph","code","data","tryit"].includes(stop.page) ? stop.page : this.state.view,
+      review: stop.page === "proposals" ? false : this.state.review});
+  };
+
+  endTour = () => {
+    try { localStorage.setItem("kinoko.tour.seen", "1"); } catch (e) {}
+    this.setState({tour: false, tourRect: null});
+  };
+
+  // ---------- introduction ----------
+  // Four concepts, each drawn with the console's own parts rather than an illustration.
+  introPages() {
+    const h = React.createElement;
+    const chip = (t, hue, bg, bd) => h("span", {key:t, style:{flex:"none", whiteSpace:"nowrap", fontSize:11.5, color:hue,
+      background:bg, border:`1px solid ${bd}`, padding:"2px 8px", borderRadius:5}}, t);
+    const mini = (icon, name, kind, meta, hue, w) => h("div", {key:name, style:{width: w ?? 172, flex:"none", borderRadius:8,
+      background:P.card, border:`1px solid ${P.line}`, overflow:"hidden"}},
+      h("div", {style:{display:"flex", alignItems:"center", gap:7, padding:"6px 9px", background:P.tint, borderBottom:`1px solid ${P.line}`}},
+        h("i", {className:icon, style:{flex:"none", fontSize:12, color: hue ?? P.violet}}),
+        h("span", {style:{fontFamily:MONO, fontSize:11.5, fontWeight:500, whiteSpace:"nowrap"}}, name)),
+      h("div", {style:{padding:"7px 9px", display:"flex", flexDirection:"column", gap:3}},
+        h("span", {style:{fontSize:10, letterSpacing:".07em", textTransform:"uppercase", color:P.faint}}, kind),
+        h("span", {style:{fontSize:11, color:P.dim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}, meta)));
+    // Column is sized by its own label, never flex-distributed — a wide label used to
+    // overflow a narrow column and paint under the next card.
+    const arrow = (label, hue, dashed) => h("div", {key:label, style:{flex:"none", minWidth:34, display:"flex", flexDirection:"column",
+      alignItems:"stretch", gap:4}},
+      h("span", {style:{fontSize:10, color: hue ?? P.faint, whiteSpace:"nowrap", textAlign:"center"}}, label),
+      h("span", {style:{width:"100%", borderTop: `1.5px ${dashed ? "dashed" : "solid"} ${hue ?? "#9C978A"}`}}));
+    const envRow = (name, tag, dot, on) => h("div", {key:name, style:{display:"flex", alignItems:"center", gap:8,
+      padding:"6px 9px", borderRadius:6, background: on ? P.card : "transparent",
+      boxShadow: on ? `inset 2px 0 0 ${dot}, 0 1px 2px rgba(27,26,23,.05)` : "none"}},
+      h("span", {style:{width:6, height:6, borderRadius:"50%", flex:"none", background:dot}}),
+      h("span", {style:{fontFamily:MONO, fontSize:12, fontWeight: on ? 500 : 400}}, name),
+      h("div", {style:{flex:1, minWidth:8}}),
+      h("span", {style:{flex:"none", fontSize:10.5, color:P.faint, whiteSpace:"nowrap"}}, tag));
+
+    return [
+      {kicker:"01 · Environments",
+       title:"Try anything, break nothing",
+       text:"Every change gets its own running copy of the app — code, data and all. Forking takes a second, and a fork can read production data without being able to write to it. Ten agents can work at once and none of them can touch what your users see.",
+       figure: h("div", {style:{display:"flex", flexDirection:"column", gap:8}},
+         h("div", {style:{padding:6, borderRadius:9, background:P.sand, border:`1px solid ${P.line}`, display:"flex", flexDirection:"column", gap:1}},
+           envRow("main", "tracked branch", P.violet, true),
+           envRow("fix-rounding", "agent · 2 patches", "#C7C2B5", false),
+           envRow("shares-v2", "you · 9d", "#C7C2B5", false)),
+         h("div", {style:{display:"flex", gap:7}},
+           chip("own layer", P.violet, "#F3F0FB", "#D9D2EE"),
+           chip("reads fall through to production", P.dim, P.card, P.line))),
+       tryIt:"Switch environments in the sidebar."},
+
+      {kicker:"02 · The graph",
+       title:"See what talks to what, always",
+       text:"Apps, stores, workflows, crons and queues all show up here, joined by what they actually do to each other: read, write, send. It comes from the code, so it is never out of date — and when an agent proposes a change you can see which connections it adds or cuts before you accept it.",
+       figure: h("div", {style:{display:"flex", alignItems:"center", gap:6}},
+         mini("ph ph-app-window", "Split", "app", "2 screens · 4 msgs", null, 146),
+         arrow("writes", P.violet),
+         mini("ph ph-database", "Split.Expense", "store", "5 rows", null, 146),
+         arrow("reads"),
+         mini("ph ph-flow-arrow", "SettleReminder", "workflow", "waiting 2d 4h", P.mint, 146)),
+       tryIt:"Click any node to inspect it."},
+
+      {kicker:"03 · Traces",
+       title:"Never reproduce a bug again",
+       text:"Every failure arrives as something you can re-run: the same inputs, the same result, on your machine or an agent's. No staging rituals, no \"works for me\". Hand the trace to an agent and it debugs against the real failure.",
+       figure: h("div", {style:{borderRadius:8, background:P.card, border:`1px solid ${P.line}`, overflow:"hidden"}},
+         h("div", {style:{display:"flex", alignItems:"center", gap:9, padding:"8px 11px"}},
+           h("span", {style:{width:5, height:5, borderRadius:"50%", flex:"none", background:P.red}}),
+           h("span", {style:{fontFamily:MONO, fontSize:11.5, flex:1, minWidth:0, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}, "Split.settle()"),
+           h("span", {style:{flex:"none", fontFamily:MONO, fontSize:11, color:P.faint}}, "seed 0x5c1a"),
+           chip("Replay", P.violet, "#F3F0FB", "#D9D2EE")),
+         h("div", {style:{padding:"7px 11px", borderTop:`1px solid ${P.line}`, background:"#FDF4F3"}},
+           h("span", {style:{fontFamily:MONO, fontSize:11, color:"#8E332E"}}, "always(sum(shares) == 0) violated — sum was 1"))),
+       tryIt:"Open Traces, or a failure count on a deployment."},
+
+      {kicker:"04 · Proposals",
+       title:"Judge a change by using it",
+       text:"An agent's work arrives as a proposal you can click through, not a pile of diffs to read. The graph shows only what moved, and Try it runs the app as it would be after the merge. When it holds up, ship it — deploys take seconds and roll back the same way.",
+       figure: h("div", {style:{display:"flex", flexDirection:"column", gap:8}},
+         h("div", {style:{display:"flex", alignItems:"center", gap:6}},
+           mini("ph ph-app-window", "Settle", "screen · added", "/settle", P.mint, 146),
+           arrow("added", P.mint),
+           mini("ph ph-database", "Split.Share", "store", "3 rows", null, 146),
+           arrow("removed", P.red, true),
+           mini("ph ph-app-window", "Split", "app", "2 screens", null, 146)),
+         h("div", {style:{display:"flex", gap:7}},
+           chip("Try it", P.violet, "#F3F0FB", "#D9D2EE"),
+           chip("Merge into main", P.mint, "#E3F1EC", "#BFDDD3"),
+           chip("Promote to production", P.dim, P.card, P.line))),
+       tryIt:"Open Proposals to review the one waiting."}];
+  }
+
+  // ---------- stage renderers ----------
+  box(children, style) {
+    return h("div", {style: {display:"flex", flexDirection:"column", ...style}}, children);
+  }
+  lbl(t) { return h("span", {style:{fontSize:10.5, letterSpacing:".11em", textTransform:"uppercase", color:P.faint}}, t); }
+
+  // Workflows, crons and queues are actors: same graph citizens as apps, but with no
+  // view, so the box carries its schedule/depth instead of a preview.
+  actorNode(key, r, name, kind, meta, icon, open, sel) {
+    const on = sel === name;
+    return h("div", {key, onClick:(e) => { e.stopPropagation(); this.setState({sel:name}); },
+      style:{position:"absolute", left:r.l, top:r.t, width:r.w, height:r.h, borderRadius:8, background:P.card, cursor:"pointer",
+        boxShadow: on ? `0 0 0 1.5px ${P.violet}, 0 0 0 5px rgba(91,75,150,.11)` : `0 0 0 1px ${P.line}`,
+        padding:"8px 11px", display:"flex", flexDirection:"column", gap:3}},
+      h("div", {style:{display:"flex", alignItems:"center", gap:7}},
+        h("i", {className:icon, style:{flex:"none", fontSize:13, color: on ? P.violet : P.faint}}),
+        h("span", {style:{fontFamily:MONO, fontSize:12, fontWeight:500, whiteSpace:"nowrap"}}, name)),
+      h("span", {style:{fontSize:10.5, color:P.dim, lineHeight:1.45, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}},
+        h("span", {style:{letterSpacing:".05em", textTransform:"uppercase", color:P.faint}}, kind), " · " + meta),
+      h("span", {onClick:(e) => { e.stopPropagation(); open(); }, style:{fontSize:10.5, color:P.violet, marginTop:"auto"}}, "open " + kind));
+  }
+
+  graphStage() {
+    const sel = this.state.sel;
+    const rev = this.state.review;
+    // In review the graph is the diff: untouched geometry fades, changed things keep full contrast.
+    // Review mode always has the sidebar open, so the diagram is re-laid-out for a
+    // ~360px canvas: the app preview collapses to its header and the graph stacks.
+    const L = rev
+      ? {split:{l:24, t:30, w:170, h:29}, exp:{l:24, t:110, w:170, h:61}, shr:{l:24, t:196, w:170, h:52}, set:{l:206, t:30, w:146, h:98}}
+      : {split:{l:38, t:30, w:264, h:252}, exp:{l:38, t:340, w:214, h:52}, shr:{l:320, t:340, w:196, h:52},
+         // h = 8px pad + 13 name + 13 meta + 10 link + 6 gaps + 8 pad, single-line meta
+         que:{l:360, t:60, w:190, h:62}, wfl:{l:360, t:154, w:190, h:62}, crn:{l:360, t:248, w:190, h:62}};
+    const B = (n) => L[n].t + L[n].h;            // bottom edge
+    const R = (n) => L[n].l + L[n].w;            // right edge
+    const lane = rev ? (R("split") + L.set.l) / 2 : 0;   // the gutter between the two columns
+    const touched = ["Settle", "Split.Share"];
+    const fade = (id) => rev && !touched.includes(id) ? .3 : 1;
+    const node = (id, left, top, w, name, fields, rows, icon) => {
+      const on = sel === id && !rev;
+      return h("div", {key:id, onClick:() => { if (!rev) this.setState({sel:id}); },
+        style:{position:"absolute", left, top, width:w, borderRadius:8, background:P.card, cursor: rev ? "default" : "pointer",
+          opacity: fade(id), transition:"opacity .25s, box-shadow .15s",
+          boxShadow: on ? `0 0 0 1.5px ${P.violet}, 0 0 0 5px rgba(91,75,150,.11)`
+            : rev && id === "Split.Share" ? `0 0 0 1.5px ${P.mint}` : `0 0 0 1px ${P.line}`,
+          padding:"9px 11px", display:"flex", flexDirection:"column", gap:4}},
+        h("div", {style:{display:"flex", alignItems:"center", gap:7}},
+          h("i", {className:icon, style:{fontSize:13, color: on ? P.violet : P.faint}}),
+          h("span", {style:{fontFamily:MONO, fontSize:12, fontWeight:500}}, name),
+          h("div", {style:{flex:1}}),
+          h("span", {style:{fontSize:10.5, color:P.dim}}, rows)),
+        h("div", {style:{fontFamily:MONO, fontSize:10.5, color:P.faint}}, fields));
+    };
+    const cam = this.state.cam;
+    const world = h("div", {style:{position:"absolute", left:0, top:0, width:900, height:730,
+      transformOrigin:"0 0", transform:`translate(${cam.x}px, ${cam.y}px) scale(${cam.z})`}},
+      h("svg", {width:900, height:730, style:{position:"absolute", left:0, top:0, pointerEvents:"none"}},
+        h("defs", null,
+          h("marker", {id:"vw", markerWidth:7, markerHeight:7, refX:6, refY:3.5, orient:"auto"}, h("path", {d:"M0 0 L7 3.5 L0 7 z", fill:P.violet})),
+          h("marker", {id:"vr", markerWidth:7, markerHeight:7, refX:6, refY:3.5, orient:"auto"}, h("path", {d:"M0 0 L7 3.5 L0 7 z", fill:"#9C978A"})),
+          h("marker", {id:"va", markerWidth:7, markerHeight:7, refX:6, refY:3.5, orient:"auto"}, h("path", {d:"M0 0 L7 3.5 L0 7 z", fill:P.mint})),
+          h("marker", {id:"vd", markerWidth:7, markerHeight:7, refX:6, refY:3.5, orient:"auto"}, h("path", {d:"M0 0 L7 3.5 L0 7 z", fill:P.red}))),
+        h("g", {style:{opacity: rev ? .22 : 1, transition:"opacity .25s"}},
+          h("path", {d: `M104 ${B("split")} V${L.exp.t}`, stroke:P.violet, strokeWidth:1.6, fill:"none", markerEnd:"url(#vw)"}),
+          h("path", {d: `M170 ${L.exp.t} V${B("split")}`, stroke:"#9C978A", strokeWidth:1.4, fill:"none", markerEnd:"url(#vr)"}),
+          rev ? null : h("g", null,
+            h("path", {d:`M${R("split")} 88 H${L.que.l}`, stroke:P.violet, strokeWidth:1.5, fill:"none", markerEnd:"url(#vw)"}),
+            h("text", {x:R("split") + 8, y:80, fontFamily:MONO, fontSize:10.5, fill:P.faint}, "enqueue"),
+            h("path", {d:`M${L.que.l + 60} ${B("que")} V${L.wfl.t}`, stroke:P.violet, strokeWidth:1.5, fill:"none", markerEnd:"url(#vw)"}),
+            h("text", {x:L.que.l + 68, y:B("que") + 22, fontFamily:MONO, fontSize:10.5, fill:P.faint}, "deliver"),
+            // Down the empty lane right of the actor column — a card sits in the direct corridor.
+            h("path", {d:`M${R("wfl")} ${L.wfl.t + 36} H${R("wfl") + 20} V${L.shr.t + 26} H${R("shr") + 4}`, stroke:"#9C978A", strokeWidth:1.4, fill:"none", markerEnd:"url(#vr)"}),
+            h("text", {x:R("wfl") + 26, y:L.crn.t + 20, fontFamily:"Chivo,sans-serif", fontSize:11, fill:P.faint}, "read"),
+            h("path", {d:`M${L.crn.l + 60} ${B("crn")} V${L.shr.t}`, stroke:"#9C978A", strokeWidth:1.4, fill:"none", markerEnd:"url(#vr)"}))),
+        // Split → Share: a read today, removed by this proposal. In review it runs down
+        // the gutter so the Expense card never covers it.
+        h("path", {d: rev
+            ? `M${R("split")} 44 H${lane} V${B("exp") + 14} H100 V${L.shr.t}`
+            : `M256 ${B("split")} C280 312, 316 330, 340 ${L.shr.t}`,
+          fill:"none", markerEnd: rev ? "url(#vd)" : "url(#vw)",
+          stroke: rev ? P.red : P.violet, strokeWidth:1.6, strokeDasharray: rev ? "5 4" : "none",
+          style:{transition:"stroke .25s"}}),
+        rev ? h("text", {x:106, y:B("exp") + 9, fontFamily:"Chivo,sans-serif", fontSize:11, fill:P.red, textDecoration:"line-through"}, "read") : null,
+        rev ? h("g", null,
+          h("path", {d:`M${R("split") + 2} 44 H${L.set.l - 2}`, stroke:P.mint, strokeWidth:1.8, fill:"none", markerEnd:"url(#va)"}),
+          h("text", {x:142, y:24, fontFamily:MONO, fontSize:10.5, fill:P.mint}, "navigate"),
+          h("path", {d:`M${L.set.l + 60} ${B("set")} V${L.shr.t + 26} H${R("shr") + 4}`, stroke:P.mint, strokeWidth:1.8, fill:"none", markerEnd:"url(#va)"}),
+          h("text", {x:R("shr") + 20, y:L.shr.t + 42, fontFamily:"Chivo,sans-serif", fontSize:11, fill:P.mint}, "read + write")) : null),
+
+      h("div", {onClick:() => { if (!rev) this.setState({sel:"Split"}); },
+        style:{position:"absolute", left:L.split.l, top:L.split.t, width:L.split.w, borderRadius:9, background:P.card, cursor: rev ? "default" : "pointer",
+          opacity: fade("Split"), transition:"opacity .25s, box-shadow .15s",
+          boxShadow: sel === "Split" && !rev ? `0 0 0 1.5px ${P.violet}, 0 0 0 5px rgba(91,75,150,.11)` : `0 0 0 1px ${P.line}, 0 2px 8px rgba(27,26,23,.06)`,
+          overflow:"hidden"}},
+        h("div", {style:{height:29, display:"flex", alignItems:"center", gap:8, padding:"0 10px", background:P.tint, borderBottom:`1px solid ${P.line}`}},
+          h("span", {style:{width:6, height:6, borderRadius:"50%", background:P.mint}}),
+          h("span", {style:{fontFamily:MONO, fontSize:12, fontWeight:500}}, "Split"),
+          h("div", {style:{flex:1}}),
+          h("span", {style:{fontFamily:MONO, fontSize:10.5, color:P.faint}}, "/split"),
+          h("i", {className:"ph ph-arrows-out-simple", style:{fontSize:12, color:P.faint}})),
+        rev ? null : h("div", {style:{padding:12, display:"flex", flexDirection:"column", gap:7}},
+          h("div", {style:{fontSize:12.5, fontWeight:600}}, "Ski trip"),
+          ...["Who paid","What for","Cents"].map(t => h("div", {key:t, style:{height:24, borderRadius:4, border:`1px solid ${P.line}`, display:"flex", alignItems:"center", padding:"0 7px", fontSize:10.5, color:"#9B968A"}}, t)),
+          h("div", {style:{alignSelf:"flex-start", padding:"4px 12px", borderRadius:4, background:P.ink, color:P.paper, fontSize:10.5, fontWeight:600}}, "Add"),
+          h("div", {style:{fontSize:10.5, fontWeight:600, paddingTop:2}}, "Expenses"),
+          ...EXPENSES.slice(0, 2).map(r => h("div", {key:r.id, style:{display:"flex", gap:8, fontSize:10.5, color:"#57534A"}},
+            h("span", {style:{fontWeight:600}}, r.payer),
+            h("span", {style:{color:"#9B968A", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}, r.what),
+            h("span", {style:{fontFamily:MONO}}, money(r.cents)))))),
+
+      ...(rev ? [] : [
+        this.actorNode("wfl", L.wfl, "SettleReminder", "workflow", "2 running · 1 waiting on a timer", "ph ph-flow-arrow", () => this.go("workflows"), sel),
+        this.actorNode("crn", L.crn, "NightlyDigest", "cron", "0 7 * * * · ran 9h ago", "ph ph-clock", () => this.go("crons"), sel),
+        this.actorNode("que", L.que, "settle-nudge", "queue", "41 in flight · oldest 6m", "ph ph-stack", () => this.go("queues"), sel)]),
+
+      node("Split.Expense", L.exp.l, L.exp.t, L.exp.w, "Split.Expense", rev ? "id · payer · cents" : "id · payer · what · cents", "5 rows", "ph ph-database"),
+      node("Split.Share", L.shr.l, L.shr.t, L.shr.w, "Split.Share", "who · owes", "3 rows", "ph ph-database"),
+
+      rev ? h("div", {key:"settle", style:{position:"absolute", left:L.set.l, top:L.set.t, width:L.set.w, height:L.set.h, borderRadius:9, background:P.card,
+        boxShadow:`0 0 0 1.5px ${P.mint}, 0 0 0 5px rgba(15,122,102,.10)`, overflow:"hidden"}},
+        h("div", {style:{height:29, display:"flex", alignItems:"center", gap:8, padding:"0 10px", background:"#EAF4F0", borderBottom:`1px solid #C8E0D8`}},
+          h("span", {style:{fontFamily:MONO, fontSize:12, fontWeight:500}}, "Settle"),
+          h("div", {style:{flex:1}}),
+          h("span", {style:{fontSize:10, letterSpacing:".05em", color:P.mint, fontWeight:600}}, "NEW")),
+        h("div", {style:{padding:"9px 11px", display:"flex", flexDirection:"column", gap:5}},
+          h("span", {style:{fontSize:10.5, color:P.faint}}, "screen · /settle"),
+          h("div", {style:{display:"flex", justifyContent:"space-between", fontSize:10.5}},
+            h("span", {style:{color:P.body}}, "mika owes"), h("span", {style:{fontFamily:MONO}}, "£219.40")),
+          h("div", {style:{display:"flex", justifyContent:"space-between", fontSize:10.5}},
+            h("span", {style:{color:P.body}}, "ana gets"), h("span", {style:{fontFamily:MONO, color:P.mint}}, "£134.10")))) : null,
+
+      null);
+
+    const canvas = h("div", {ref:this.canvasRef,
+      onPointerDown:this.startPan, onPointerMove:this.movePan, onPointerUp:this.endPan, onWheel:this.onWheel,
+      style:{flex:1, minWidth:0, minHeight:0, position:"relative", backgroundColor:P.paper, cursor:"grab",
+        backgroundImage:"radial-gradient(#D7D3C8 1px, transparent 1px)", backgroundSize:"26px 26px", overflow:"hidden"}},
+      world,
+      sel === null && !rev ? h("div", {style:{position:"absolute", right:16, top:14, maxWidth:210, fontSize:12, lineHeight:1.55, color:P.faint, textAlign:"right", textWrap:"pretty", pointerEvents:"none"}},
+        "Click a node to inspect it. Drag the canvas to pan, ⌘-scroll to zoom.") : null);
+
+    const strip = h("div", {key:"strip", style:{flex:"none", height:30, display:"flex", alignItems:"center", gap:14, padding:"0 12px", borderTop:`1px solid ${P.line}`, background:P.tint}},
+      h("div", {style:{display:"flex", alignItems:"center", gap:1}},
+        h("span", {onClick:() => this.zoomBy(1 / 1.2), style:{width:20, height:20, display:"flex", alignItems:"center", justifyContent:"center", color:P.dim, cursor:"pointer"}}, h("i", {className:"ph ph-minus", style:{fontSize:11}})),
+        h("span", {style:{fontFamily:MONO, fontSize:11.5, color:P.body, padding:"0 3px", width:38, textAlign:"center"}}, Math.round(this.state.cam.z * 100) + "%"),
+        h("span", {onClick:() => this.zoomBy(1.2), style:{width:20, height:20, display:"flex", alignItems:"center", justifyContent:"center", color:P.dim, cursor:"pointer"}}, h("i", {className:"ph ph-plus", style:{fontSize:11}})),
+        h("span", {onClick:this.fit, title:"Fit", style:{width:20, height:20, display:"flex", alignItems:"center", justifyContent:"center", color:P.dim, cursor:"pointer"}}, h("i", {className:"ph ph-crosshair", style:{fontSize:11}}))),
+      h("div", {style:{width:1, height:14, background:P.line}}),
+      rev
+        ? h("div", {style:{display:"flex", alignItems:"center", gap:14}},
+            h("span", {style:{display:"flex", alignItems:"center", gap:6, fontSize:11, color:P.dim}}, h("span", {style:{width:16, height:0, borderTop:`1.8px solid ${P.mint}`}}), "added"),
+            h("span", {style:{display:"flex", alignItems:"center", gap:6, fontSize:11, color:P.dim}}, h("span", {style:{width:16, height:0, borderTop:`1.8px dashed ${P.red}`}}), "removed"),
+            h("span", {style:{fontSize:11, color:P.faint, whiteSpace:"nowrap"}}, "faded = untouched"))
+        : h("div", {style:{display:"flex", alignItems:"center", gap:14}},
+            h("span", {style:{display:"flex", alignItems:"center", gap:6, fontSize:11, color:P.dim}}, h("span", {style:{width:16, height:0, borderTop:`1.6px solid ${P.violet}`}}), "writes"),
+            h("span", {style:{display:"flex", alignItems:"center", gap:6, fontSize:11, color:P.dim}}, h("span", {style:{width:16, height:0, borderTop:"1.4px solid #9C978A"}}), "reads")));
+
+    return h("div", {style:{flex:1, minWidth:0, minHeight:0, display:"flex", flexDirection:"column"}}, canvas, strip);
+  }
+
+  codeStage() {
+    const syms = [
+      ["update","ph ph-function","ok"], ["view","ph ph-function","ok"], ["init","ph ph-function","ok"],
+      ["Model","ph ph-cube","ok"], ["Msg","ph ph-cube","ok"], ["settle","ph ph-function","staged"]];
+    const src = {
+      update: [["def"," update(msg, model) ","do"],[null,"  case msg do",null],[null,"    Add(payer, what, cents) ->",null],
+        [null,"      (model, Cmd.store.insert(Expense, %{",null],[null,"        payer: payer, what: what, cents: cents",null],
+        [null,"      }, fn r -> Added(r) end))",null],[null,"",null],[null,"    Added(row) ->",null],
+        [null,"      (%{model | expenses: [row | model.expenses]}, Cmd.none)",null],[null,"  end",null],[null,"end",null]],
+      view: [[null,"def view(model) do",null],[null,'  <form onSubmit={Add}>',null],[null,'    <input name="payer" placeholder="Who paid" />',null],[null,"  </form>",null],[null,"end",null]],
+      init: [[null,"def init(_cfg) do",null],[null,"  (%{expenses: []}, Cmd.none)",null],[null,"end",null]],
+      Model: [[null,"defmodel Model do",null],[null,"  field expenses, list(Expense), 12",null],[null,"end",null]],
+      Msg: [[null,"deftype Msg do",null],[null,"  Add(String, String, Int)",null],[null,"  Added(Expense)",null],[null,"end",null]],
+      settle: [[null,"def settle(model) do",null],[null,"  # staged — Share type not promoted yet",null],[null,"end",null]]};
+    const cur = this.state.sym;
+    const lines = src[cur] ?? src.update;
+    const hot = cur === "update" ? [2,3,4,5] : [];
+
+    return h("div", {style:{flex:1, minWidth:0, display:"flex"}},
+      h("div", {style:{width:212, flex:"none", borderRight:`1px solid ${P.line}`, background:P.tint, display:"flex", flexDirection:"column", overflowY:"auto"}},
+        h("div", {style:{padding:"12px 13px 8px", display:"flex", alignItems:"center"}}, this.lbl("Symbols"), h("div", {style:{flex:1}}), h("span", {style:{fontSize:11, color:P.faint}}, "231")),
+        h("div", {style:{padding:"0 8px 10px", display:"flex", flexDirection:"column", gap:1}},
+          h("div", {style:{padding:"5px 8px", fontSize:11, letterSpacing:".06em", textTransform:"uppercase", color:P.faint}}, "Split"),
+          ...syms.map(([n, ic, st]) => {
+            const on = cur === n;
+            return h("div", {key:n, onClick:() => this.setState({sym:n, sel:null}),
+              style:{display:"flex", alignItems:"center", gap:8, padding:"5px 8px", borderRadius:6, cursor:"pointer",
+                background: on ? P.card : "transparent", boxShadow: on ? `inset 2px 0 0 ${P.violet}, 0 1px 2px rgba(27,26,23,.05)` : "none"}},
+              h("i", {className:ic, style:{fontSize:13, color: st === "staged" ? P.amber : on ? P.violet : P.faint}}),
+              h("span", {style:{fontFamily:MONO, fontSize:11.5, color: on ? P.ink : P.body}}, n),
+              h("div", {style:{flex:1}}),
+              st === "staged"
+                ? h("span", {style:{fontSize:10, color:P.amber, letterSpacing:".04em"}}, "STAGED")
+                : h("span", {style:{width:6, height:6, borderRadius:"50%", background:P.mint}}));
+          }))),
+
+      h("div", {style:{flex:1, minWidth:0, display:"flex", flexDirection:"column", background:P.card}},
+        h("div", {style:{height:36, flex:"none", display:"flex", alignItems:"center", gap:11, padding:"0 14px", borderBottom:`1px solid ${P.line}`, background:P.tint}},
+          h("span", {style:{fontFamily:MONO, fontSize:12.5, fontWeight:500}}, `Split.${cur}`),
+          cur === "settle"
+            ? h("span", {style:{fontSize:11, color:P.amber, background:"#FBF2DF", border:"1px solid #E8D3A4", padding:"1.5px 7px", borderRadius:4}}, "staged · blocked on Share")
+            : h("span", {style:{fontSize:11, color:P.mint, background:"#E3F1EC", border:"1px solid #BFDDD3", padding:"1.5px 7px", borderRadius:4}}, "typechecks · 4ms"),
+          h("div", {style:{flex:1}}),
+          h("span", {style:{fontFamily:MONO, fontSize:11, color:P.faint}}, "blake3 6f2a91c4")),
+        h("div", {style:{flex:1, minHeight:0, overflowY:"auto", padding:"14px 0", fontFamily:MONO, fontSize:12.5, lineHeight:1.75}},
+          ...lines.map((ln, i) => h("div", {key:i, style:{display:"flex", background: hot.includes(i) ? "#F7F5FC" : "transparent"}},
+            h("span", {style:{width:44, flex:"none", textAlign:"right", paddingRight:14, color: hot.includes(i) ? "#9A93B8" : "#C0BCB0"}}, i + 1),
+            h("span", {style:{whiteSpace:"pre"}},
+              ln[0] ? h("span", {style:{color:P.violet}}, ln[0]) : null, ln[1],
+              ln[2] ? h("span", {style:{color:P.violet}}, ln[2]) : null)))),
+        h("div", {style:{flex:"none", borderTop:`1px solid ${P.line}`, background:P.tint, padding:"10px 14px", display:"flex", alignItems:"center", gap:12}},
+          h("span", {style:{fontSize:12, color:P.dim}}, cur === "update" ? "The highlighted branch is the only place Split.Expense is written." : "Every symbol is content-addressed; a body edit with the same signature invalidates nothing."),
+          h("div", {style:{flex:1}}),
+          h("button", {onClick:() => this.go("graph","graph"),
+            style:{height:26, padding:"0 10px", borderRadius:6, border:`1px solid ${P.line}`, background:P.card, color:P.body, font:"inherit", fontSize:12, cursor:"pointer"}}, "Show on the graph"))));
+  }
+
+  dataStage() {
+    const store = this.state.store ?? "Split.Expense";
+    const SHARES = [{who:"mika", owes:-21940}, {who:"joon", owes:8530}, {who:"ana", owes:13410}];
+    const isExp = store === "Split.Expense";
+    const cols = isExp
+      ? [["id",1,"left"],["payer",2,"left"],["what",3,"left"],["cents",1,"right"]]
+      : [["who",2,"left"],["owes",1,"right"]];
+    const rows = isExp
+      ? EXPENSES.map(r => [{v:r.id, mono:true, color:P.faint}, {v:r.payer}, {v:r.what, color:P.body}, {v:money(r.cents), mono:true}])
+      : SHARES.map(r => [{v:r.who}, {v:money(r.owes), mono:true, color: r.owes < 0 ? P.ink : P.mint}]);
+    const total = isExp
+      ? money(EXPENSES.reduce((a, r) => a + r.cents, 0))
+      : money(SHARES.reduce((a, r) => a + r.owes, 0));
+    const STORES = [["Split.Expense", 5], ["Split.Share", 3]];
+    return h("div", {style:{flex:1, minWidth:0, display:"flex", flexDirection:"column", background:P.card}},
+      h("div", {style:{flex:"none", display:"flex", alignItems:"center", gap:10, padding:"8px 14px", borderBottom:`1px solid ${P.line}`, background:P.tint}},
+        h("div", {style:{position:"relative", flex:"none", display:"flex", alignItems:"center"}},
+          h("select", {value:store, onChange:(e) => this.setState({store:e.target.value}),
+            style:{appearance:"none", WebkitAppearance:"none", height:29, padding:"0 30px 0 11px", borderRadius:6,
+              border:`1px solid ${P.line}`, background:P.card, color:P.ink, fontFamily:MONO, fontSize:12, cursor:"pointer"}},
+            ...STORES.map(([n, c]) => h("option", {key:n, value:n}, `${n}  ·  ${c} rows`))),
+          h("i", {className:"ph ph-caret-down", style:{position:"absolute", right:10, fontSize:11, color:P.faint, pointerEvents:"none"}})),
+        h("div", {style:{flex:1, minWidth:8}}),
+        h("span", {style:{flex:"none", fontSize:11.5, color:P.faint, whiteSpace:"nowrap"}}, "own layer · reads fall through to production")),
+      h("div", {style:{flex:"none", display:"flex", borderBottom:`1px solid ${P.line}`, background:P.tint}},
+        ...cols.map(([k, f, al]) =>
+          h("span", {key:k, style:{flex:f, padding:"9px 18px", fontFamily:MONO, fontSize:11.5, color:P.dim, textAlign:al}}, k))),
+      h("div", {style:{flex:"none", maxHeight:"46%", overflowY:"auto"}},
+        ...rows.map((r, i) => h("div", {key:i,
+          style:{display:"flex", borderBottom:`1px solid #EAE7DE`, cursor:"pointer", background: i % 2 ? "#FCFBF8" : P.card}},
+          ...r.map((c, j) => h("span", {key:j, style:{flex:cols[j][1], padding:"9px 18px", textAlign:cols[j][2],
+            fontFamily: c.mono ? MONO : "inherit", fontSize: c.mono ? 12 : 12.5, color: c.color ?? P.ink}}, c.v)))),
+        h("div", {style:{display:"flex", borderBottom:`1px solid ${P.line}`, background:P.tint}},
+          h("span", {style:{flex:6, padding:"9px 18px", fontSize:12, color:P.dim}},
+            `${rows.length} rows · written by ${isExp ? "Split.update" : "Settle.update"}`),
+          h("span", {style:{flex:1, padding:"9px 18px", fontFamily:MONO, fontSize:12, textAlign:"right", fontWeight:500}}, total)),
+        h("div", {style:{padding:"14px 18px", display:"flex", alignItems:"center", gap:10}},
+          h("button", {style:{flex:"none", whiteSpace:"nowrap", height:29, padding:"0 12px", borderRadius:6, border:"1px solid #C9C0E4", background:"#F3F0FB", color:P.violet, font:"inherit", fontSize:12.5, fontWeight:500, cursor:"pointer"}}, "Insert a row"))),
+
+      h("div", {style:{flex:1, minHeight:0, borderTop:`1px solid ${P.line}`, background:P.tint, display:"flex", flexDirection:"column"}},
+        h("div", {style:{flex:"none", display:"flex", alignItems:"center", gap:9, padding:"8px 14px"}},
+          h("span", {style:{fontSize:10.5, letterSpacing:".11em", textTransform:"uppercase", color:P.faint}}, "Query"),
+          h("div", {style:{flex:1, minWidth:8}})),
+        h("div", {style:{flex:1, minHeight:0, margin:"0 14px", borderRadius:8, border:`1px solid ${P.line}`, background:P.card, display:"flex", flexDirection:"column", overflow:"hidden"}},
+          h("div", {style:{flex:1, minHeight:0, overflowY:"auto", padding:"11px 14px", fontFamily:MONO, fontSize:13, lineHeight:1.7, color:P.ink}},
+            isExp
+              ? [h("div", {key:1}, h("span", {style:{color:P.violet}}, "select "), "payer, ", h("span", {style:{color:P.violet}}, "sum"), "(cents) ", h("span", {style:{color:P.violet}}, "as "), "total"),
+                 h("div", {key:2}, h("span", {style:{color:P.violet}}, "from "), "expense"),
+                 h("div", {key:3}, h("span", {style:{color:P.violet}}, "group by "), "payer"),
+                 h("div", {key:4}, h("span", {style:{color:P.violet}}, "order by "), "total ", h("span", {style:{color:P.violet}}, "desc")),
+                 h("div", {key:5, style:{width:1, height:18, background:P.violet, marginTop:2}})]
+              : [h("div", {key:1}, h("span", {style:{color:P.violet}}, "select "), "* ", h("span", {style:{color:P.violet}}, "from "), "share"),
+                 h("div", {key:2}, h("span", {style:{color:P.violet}}, "where "), "owes < 0"),
+                 h("div", {key:3, style:{width:1, height:18, background:P.violet, marginTop:2}})]),
+          h("div", {style:{flex:"none", display:"flex", alignItems:"center", gap:9, padding:"8px 11px", borderTop:`1px solid ${P.line}`, background:P.tint}},
+            h("span", {style:{fontSize:11.5, color:P.faint, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}},
+              isExp ? "3 rows · 4ms · mika 399.20 · ana 240.00 · joon 54.30" : "1 row · 2ms"),
+            h("div", {style:{flex:1, minWidth:8}}),
+            h("span", {style:{flex:"none", fontSize:11.5, color:P.violet, cursor:"pointer", whiteSpace:"nowrap"}}, "Save as a view"),
+            h("span", {style:{flex:"none", fontFamily:MONO, fontSize:10.5, color:P.faint, border:`1px solid ${P.line}`, borderRadius:4, padding:"1px 5px"}}, "⌘⏎"),
+            h("button", {style:{flex:"none", whiteSpace:"nowrap", height:27, padding:"0 12px", borderRadius:6, border:"1px solid #C9C0E4", background:"#F3F0FB", color:P.violet, font:"inherit", fontSize:12, fontWeight:500, cursor:"pointer"}}, "Run"))),
+        h("div", {style:{flex:"none", height:14}})));
+  }
+
+  listStage(items, empty) {
+    return h("div", {style:{flex:1, minWidth:0, overflowY:"auto", padding:"16px 18px", display:"flex", flexDirection:"column", gap:8, background:P.paper}},
+      items.length === 0
+        ? h("div", {style:{maxWidth:420, display:"flex", flexDirection:"column", gap:9, paddingTop:50}},
+            h("span", {style:{fontFamily:DISPLAY, fontSize:18, fontWeight:500}}, empty[0]),
+            h("span", {style:{fontSize:13, lineHeight:1.6, color:P.dim, textWrap:"pretty"}}, empty[1]))
+        : items);
+  }
+
+  proposalsStage() {
+    const card = (title, route, body, meta, open) => h("div", {key:title,
+      onClick: open ? () => this.setState({review:true, page:"graph", view:"graph", sel:null, step:1}) : undefined,
+      style:{maxWidth:620, padding:"12px 14px", borderRadius:9, background:P.card, cursor: open ? "pointer" : "default",
+        border:`1px solid ${open ? "#C9C0E4" : P.line}`, opacity: open ? 1 : .68,
+        display:"flex", flexDirection:"column", gap:6}},
+      h("div", {style:{display:"flex", alignItems:"center", gap:8}},
+        h("i", {className:"ph ph-git-pull-request", style:{fontSize:14, color: open ? P.violet : P.faint}}),
+        h("span", {style:{fontSize:13.5, fontWeight:600}}, title),
+        h("div", {style:{flex:1}}),
+        h("span", {style:{fontSize:11.5, color: open ? P.violet : P.mint, fontWeight:500}}, open ? "review →" : "merged")),
+      h("span", {style:{fontFamily:MONO, fontSize:11, color:P.faint}}, route),
+      body ? h("span", {style:{fontSize:12.5, color:P.dim, lineHeight:1.55}}, body) : null,
+      h("span", {style:{fontSize:11.5, color:P.faint}}, meta));
+    return this.listStage([
+      card("Round shares to whole cents", "fix-rounding → main",
+        "Shares were computed as floats and drifted by a cent on odd splits.", "3 steps · 6m ago", true),
+      card("Add a settle screen", "shares-v2 → main", null, "merged 2h ago", false)], []);
+  }
+
+  decisionsStage() {
+    const d = (chose, over, because, subject) => h("div", {key:chose,
+      style:{maxWidth:620, padding:"12px 14px", borderRadius:9, background:P.card, border:`1px solid ${P.line}`, display:"flex", flexDirection:"column", gap:5}},
+      h("span", {style:{fontSize:13.5, fontWeight:600}}, chose),
+      h("span", {style:{fontSize:12, color:P.faint}}, `instead of ${over}`),
+      h("span", {style:{fontSize:12.5, color:P.dim, lineHeight:1.55, textWrap:"pretty"}}, because),
+      h("div", {style:{display:"flex", alignItems:"center", gap:9, paddingTop:2}},
+        h("span", {style:{fontFamily:MONO, fontSize:11, color:P.faint}}, subject),
+        h("div", {style:{flex:1}}),
+        h("span", {style:{fontSize:11.5, color:P.violet, cursor:"pointer"}}, "Correct")));
+    return this.listStage([
+      d("Cents as integers", "a decimal field", "Rounding has to be exact for a split; floats drift.", "Split.Model"),
+      d("Shares derived, not stored", "a Share row per expense", "One source of truth. The split is a function of the expenses, so storing it invites disagreement.", "Split.update"),
+      d("Payer absorbs the remainder", "spreading it across members", "Someone has to take the odd cent, and the payer already fronted the money.", "Split.settle")], []);
+  }
+
+  tracesStage() {
+    const TRACES = [
+      {id:"t_9f21", msg:'settle()', when:"6m ago", ms:12, ok:false, seed:"0x5c1a",
+       err:"always(sum(shares) == 0) violated — sum was 1", src:"production · v7"},
+      {id:"t_9f20", msg:'Add("ana", "cabin, two nights", 24000)', when:"41s ago", ms:3, ok:true, seed:"0x77b3", src:"main · repl"},
+      {id:"t_9f1f", msg:'Added(#e43)', when:"41s ago", ms:1, ok:true, seed:"0x77b3", src:"main · effect"},
+      {id:"t_9f1e", msg:'Add("joon", "petrol", 4180)', when:"9m ago", ms:4, ok:true, seed:"0x2e08", src:"production · v7"},
+      {id:"t_9f1d", msg:'settle()', when:"14m ago", ms:11, ok:false, seed:"0x91cc",
+       err:"always(sum(shares) == 0) violated — sum was 2", src:"production · v7"},
+      {id:"t_9f1c", msg:'Add("mika", "groceries", 6320)', when:"22m ago", ms:4, ok:true, seed:"0x41da", src:"production · v7"}];
+    const cur = TRACES.find(t => t.id === this.state.trace) ?? TRACES[0];
+    const chip = (t, on) => h("span", {key:t, style:{fontSize:11.5, padding:"3px 9px", borderRadius:5, cursor:"pointer",
+      background: on ? P.card : "transparent", border:`1px solid ${on ? P.line : "transparent"}`,
+      color: on ? P.ink : P.dim, fontWeight: on ? 500 : 400}}, t);
+    const kv = (k, v, style) => h("div", {key:k, style:{display:"flex", gap:10, fontSize:12.5}},
+      h("span", {style:{width:78, flex:"none", color:P.faint}}, k),
+      h("span", {style:{minWidth:0, ...style}}, v));
+
+    return h("div", {style:{flex:1, minWidth:0, display:"flex"}},
+      h("div", {style:{width:340, flex:"none", borderRight:`1px solid ${P.line}`, background:P.tint, display:"flex", flexDirection:"column", overflowY:"auto"}},
+        h("div", {style:{padding:"9px 10px", display:"flex", alignItems:"center", gap:4, borderBottom:`1px solid ${P.line}`}},
+          chip("All", true), chip("Failed only", false), chip("Production", false),
+          h("div", {style:{flex:1}}),
+          h("i", {className:"ph ph-funnel", style:{fontSize:13, color:P.faint}})),
+        ...TRACES.map(t => {
+          const on = t.id === cur.id;
+          return h("div", {key:t.id, onClick:() => this.setState({trace:t.id}),
+            style:{padding:"9px 12px", borderBottom:"1px solid #EAE7DE", cursor:"pointer",
+              background: on ? P.card : "transparent", boxShadow: on ? `inset 2px 0 0 ${t.ok ? P.violet : P.red}` : "none",
+              display:"flex", flexDirection:"column", gap:3}},
+            h("div", {style:{display:"flex", alignItems:"center", gap:8}},
+              h("span", {style:{width:5, height:5, borderRadius:"50%", flex:"none", background: t.ok ? P.mint : P.red}}),
+              h("span", {style:{fontFamily:MONO, fontSize:11.5, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", color: on ? P.ink : P.body}}, t.msg),
+              h("span", {style:{fontFamily:MONO, fontSize:11, color:P.faint}}, t.ms + "ms")),
+            h("div", {style:{display:"flex", gap:8, paddingLeft:13}},
+              h("span", {style:{fontSize:11, color:P.faint}}, t.when),
+              h("span", {style:{fontSize:11, color:P.faint}}, "·"),
+              h("span", {style:{fontSize:11, color:P.faint}}, t.src)));
+        })),
+
+      h("div", {style:{flex:1, minWidth:0, overflowY:"auto", padding:"18px 20px 30px", background:P.paper}},
+        h("div", {style:{maxWidth:620, display:"flex", flexDirection:"column", gap:18}},
+          h("div", {style:{display:"flex", flexDirection:"column", gap:7}},
+            h("div", {style:{display:"flex", alignItems:"center", gap:9}},
+              h("span", {style:{fontFamily:MONO, fontSize:16, fontWeight:500}}, "Split." + cur.msg),
+              h("span", {style:{fontSize:11.5, color: cur.ok ? P.mint : P.red, background: cur.ok ? "#E3F1EC" : "#FBECEB",
+                border:`1px solid ${cur.ok ? "#BFDDD3" : "#EFCFCD"}`, padding:"2px 8px", borderRadius:5}}, cur.ok ? "committed" : "failed")),
+            h("span", {style:{fontSize:12.5, color:P.dim}}, `${cur.id} · ${cur.when} · ${cur.ms}ms · ${cur.src}`)),
+
+          cur.ok ? null : h("div", {style:{padding:"11px 13px", borderRadius:9, background:"#FBECEB", border:"1px solid #EFCFCD", display:"flex", flexDirection:"column", gap:4}},
+            h("span", {style:{fontSize:12.5, fontWeight:600, color:"#8E332E"}}, "Invariant violated"),
+            h("span", {style:{fontFamily:MONO, fontSize:12, color:"#8E332E"}}, cur.err),
+            h("span", {style:{fontSize:12, color:"#8E332E", opacity:.85, lineHeight:1.5}}, "Attributed to step 3 — the remainder was dropped instead of assigned.")),
+
+          h("div", {style:{display:"flex", flexDirection:"column", gap:9}},
+            this.lbl("Replays from"),
+            h("div", {style:{padding:"12px 13px", borderRadius:9, background:P.card, border:`1px solid ${P.line}`, display:"flex", flexDirection:"column", gap:8}},
+              kv("message", "Split." + cur.msg, {fontFamily:MONO, fontSize:11.5}),
+              kv("seed", cur.seed, {fontFamily:MONO, fontSize:11.5}),
+              kv("model in", "%{expenses: [5 rows], draft: …}", {fontFamily:MONO, fontSize:11.5}),
+              kv("effects", cur.ok ? "store.insert → #e43" : "store.read → 5 rows", {fontFamily:MONO, fontSize:11.5}),
+              kv("clock", "virtualized · 2026-08-13T09:41:02Z", {fontSize:12, color:P.dim})),
+            h("span", {style:{fontSize:11.5, color:P.faint, lineHeight:1.5}},
+              "Inputs, effect results and seed are the whole trace, so a replay is bit-exact anywhere — including on another machine.")),
+
+          h("div", {style:{display:"flex", flexDirection:"column", gap:9}},
+            this.lbl("Steps"),
+            h("div", {style:{borderRadius:9, background:P.card, border:`1px solid ${P.line}`, overflow:"hidden"}},
+              ...(cur.ok
+                ? [["1","update received Add",""],["2","store.insert committed","#e43"],["3","model replaced","expenses 4 → 5"]]
+                : [["1","update received settle",""],["2","store.read Expense","5 rows"],["3","shares computed","sum = 1 ✕"],["4","transaction rolled back",""]]
+              ).map(([n, t, v], i, arr) => h("div", {key:n,
+                style:{display:"flex", alignItems:"center", gap:10, padding:"8px 12px", borderTop: i ? "1px solid #EFECE4" : "none",
+                  background: !cur.ok && i === 2 ? "#FDF4F3" : "transparent"}},
+                h("span", {style:{fontFamily:MONO, fontSize:11, color:P.faint, width:12}}, n),
+                h("span", {style:{fontSize:12.5, flex:1}}, t),
+                h("span", {style:{fontFamily:MONO, fontSize:11.5, color: !cur.ok && i === 2 ? P.red : P.faint}}, v))))),
+
+          h("div", {style:{display:"flex", gap:8, paddingTop:2}},
+            h("button", {style:{height:31, padding:"0 13px", borderRadius:6, border:"1px solid #C9C0E4", background:"#F3F0FB", color:P.violet, font:"inherit", fontSize:12.5, fontWeight:500, cursor:"pointer", display:"flex", alignItems:"center", gap:6}},
+              h("i", {className:"ph ph-play", style:{fontSize:13}}), "Replay here"),
+            h("button", {style:{height:31, padding:"0 13px", borderRadius:6, border:`1px solid ${P.line}`, background:P.card, color:P.body, font:"inherit", fontSize:12.5, cursor:"pointer"}}, "Replay in a fork"),
+            cur.ok ? null : h("button", {style:{height:31, padding:"0 13px", borderRadius:6, border:`1px solid ${P.line}`, background:P.card, color:P.body, font:"inherit", fontSize:12.5, cursor:"pointer"}}, "Route to an agent"),
+            h("div", {style:{flex:1}}),
+            h("button", {onClick:() => this.go("code","code"),
+              style:{height:31, padding:"0 12px", borderRadius:6, border:"none", background:"transparent", color:P.violet, font:"inherit", fontSize:12.5, cursor:"pointer"}}, "Open the symbol")))));
+  }
+
+  settingsStage() {
+    const field = (label, hint, placeholder, action) => h("div", {key:label, style:{maxWidth:560, display:"flex", flexDirection:"column", gap:7}},
+      h("span", {style:{fontSize:14, fontWeight:600}}, label),
+      h("span", {style:{fontSize:12.5, color:P.dim, lineHeight:1.55, textWrap:"pretty"}}, hint),
+      h("div", {style:{display:"flex", gap:8, paddingTop:2}},
+        h("div", {style:{flex:1, height:32, borderRadius:6, background:P.card, border:`1px solid ${P.line}`, display:"flex", alignItems:"center", padding:"0 11px", fontSize:13, color:"#B6B1A5"}}, placeholder),
+        h("button", {style:{height:32, padding:"0 13px", borderRadius:6, border:"1px solid #C9C0E4", background:"#F3F0FB", color:P.violet, font:"inherit", fontSize:12.5, fontWeight:500, cursor:"pointer"}}, action)));
+    return h("div", {style:{flex:1, minWidth:0, overflowY:"auto", padding:"22px 24px", background:P.paper, display:"flex", flexDirection:"column", gap:26}},
+      field("API keys", "Long-lived keys for MCP clients. Point the client at kinoko.sh/mcp and send the key as a bearer token; each tool call names the environment it operates on.", "Label (e.g. laptop, ci)", "Create key"),
+      h("div", {style:{maxWidth:560, height:1, background:P.line}}),
+      field("Organization URL", "Deployments serve at mcoll.apps.kinoko.sh/…. Existing URLs keep working after a change.", "mcoll", "Set slug"));
+  }
+
+  homeStage() {
+    const card = (icon, name, id, meta, tint) => h("div", {key:name, onClick:() => this.go("graph","graph"),
+      style:{width:250, padding:"14px 15px", borderRadius:10, background:P.card, border:`1px solid ${P.line}`, cursor:"pointer",
+        display:"flex", flexDirection:"column", gap:9, boxShadow:"0 1px 3px rgba(27,26,23,.05)"}},
+      h("div", {style:{width:30, height:30, borderRadius:7, background:tint, display:"flex", alignItems:"center", justifyContent:"center"}},
+        h("i", {className:icon, style:{fontSize:15, color:P.violet}})),
+      h("div", {style:{display:"flex", flexDirection:"column", gap:2}},
+        h("span", {style:{fontSize:14, fontWeight:600}}, name),
+        h("span", {style:{fontFamily:MONO, fontSize:11, color:P.faint}}, id)),
+      h("span", {style:{fontSize:12, color:P.dim}}, meta));
+    return h("div", {style:{flex:1, minWidth:0, overflowY:"auto", padding:"24px 26px", background:P.paper, display:"flex", flexDirection:"column", gap:22}},
+      h("div", {style:{display:"flex", flexDirection:"column", gap:6, maxWidth:560}},
+        h("span", {style:{fontFamily:DISPLAY, fontSize:25, fontWeight:500, letterSpacing:0}}, "Ski trip"),
+        h("span", {style:{fontSize:13, lineHeight:1.6, color:P.dim, textWrap:"pretty"}},
+          "Three environments over one code image. An environment is a running world an agent builds into; forks read the same data but can never write to their base.")),
+      h("div", {style:{display:"flex", gap:12, flexWrap:"wrap"}},
+        card("ph ph-cube", "main", "e_fc6b22de7ba", "1 app · 2 stores · 5 rows · live", "#EDE8F8"),
+        card("ph ph-git-fork", "fix-rounding", "e_9d10f4c22a", "forked 6m ago · 3 patches", "#FBF2DF"),
+        card("ph ph-git-fork", "shares-v2", "e_5a71b0e83c", "idle · merged into main", "#EDEBE4")),
+      h("div", {style:{maxWidth:560, height:1, background:P.line}}),
+      h("div", {style:{display:"flex", flexDirection:"column", gap:8, maxWidth:560}},
+        h("span", {style:{fontFamily:DISPLAY, fontSize:18, fontWeight:500}}, "Deployments"),
+        h("span", {style:{fontSize:13, lineHeight:1.6, color:P.dim, textWrap:"pretty"}},
+          "A deployment is a stable serving slot — its URL, data and history stay put while environments are promoted into it."),
+        h("div", {style:{display:"flex", gap:12, flexWrap:"wrap", paddingTop:4}},
+          ...[["production","main · 41.2k req / 24h","#E3F1EC"], ["preview","shares-v2 · 320 req / 24h",P.sand]].map(([n, meta, tint]) =>
+            h("div", {key:n, onClick:() => this.setState({page:"deployment", dep:n, sel:null}),
+              style:{width:250, padding:"14px 15px", borderRadius:10, background:P.card, border:`1px solid ${P.line}`, cursor:"pointer", display:"flex", flexDirection:"column", gap:9}},
+              h("div", {style:{width:30, height:30, borderRadius:7, background:tint, display:"flex", alignItems:"center", justifyContent:"center"}},
+                h("i", {className:"ph ph-rocket-launch", style:{fontSize:15, color: n === "production" ? P.mint : P.faint}})),
+              h("span", {style:{fontSize:14, fontWeight:600}}, n),
+              h("span", {style:{fontSize:12, color:P.dim}}, meta))))));
+  }
+
+  // ---------- panel ----------
+  reviewPanel() {
+    const steps = [
+      ["Whole proposal", "7 declarations · 1 capability moved"],
+      ["Integer share arithmetic", "p7a · no capability change"],
+      ["Remainder to the payer", "p7b · no capability change"],
+      ["Settle screen reads Share", "p7c · +1 capability"]];
+    const cur = this.state.step;
+    const comment = (who, when, text, hue) => h("div", {key:who + when, style:{display:"flex", gap:9}},
+      h("div", {style:{width:22, height:22, borderRadius:"50%", flex:"none", background:hue}}),
+      h("div", {style:{display:"flex", flexDirection:"column", gap:3, minWidth:0}},
+        h("div", {style:{display:"flex", alignItems:"baseline", gap:7}},
+          h("span", {style:{fontSize:12, fontWeight:600}}, who),
+          h("span", {style:{fontSize:11, color:P.faint}}, when)),
+        h("span", {style:{fontSize:12.5, color:P.body, lineHeight:1.55, textWrap:"pretty"}}, text)));
+
+    return {
+      eyebrow:"Reviewing", name:"fix-rounding → main", sub:"3 steps · +1 screen, +2 edges, −1 edge",
+      rows:[],
+      extra: h("div", {style:{display:"flex", flexDirection:"column", gap:14, paddingTop:2}},
+        h("div", {style:{display:"flex", flexDirection:"column", gap:5}},
+          h("span", {style:{fontSize:14.5, fontWeight:600, lineHeight:1.4}}, "Round shares to whole cents"),
+          h("span", {style:{fontSize:12.5, color:P.dim, lineHeight:1.55, textWrap:"pretty"}},
+            "Shares were computed as floats and drifted by a cent on odd splits. Now integer division, with the remainder given to the payer.")),
+
+        h("div", {style:{display:"flex", flexDirection:"column", gap:4}},
+          this.lbl("The stack"),
+          h("div", {style:{display:"flex", flexDirection:"column", gap:3, paddingTop:3}},
+            ...steps.map(([t, m], i) => {
+              const on = cur === i;
+              return h("div", {key:i, onClick:() => this.setState({step:i}),
+                style:{padding:"8px 10px", borderRadius:7, cursor:"pointer",
+                  background: on ? P.card : "transparent",
+                  boxShadow: on ? `inset 2px 0 0 ${P.violet}, 0 1px 2px rgba(27,26,23,.05)` : "none",
+                  display:"flex", flexDirection:"column", gap:2}},
+                h("span", {style:{fontSize:12.5, fontWeight: on ? 600 : 400, color: on ? P.ink : P.body}}, t),
+                h("span", {style:{fontSize:11, color:P.faint}}, m));
+            })),
+          h("span", {style:{fontSize:11.5, color:P.faint, lineHeight:1.5, paddingTop:3}},
+            "Every step typechecked to land, so each one is a state the environment actually worked in.")),
+
+        h("div", {style:{height:1, background:P.line}}),
+
+        h("div", {style:{display:"flex", flexDirection:"column", gap:11}},
+          h("div", {style:{display:"flex", alignItems:"center"}}, this.lbl("Comments"),
+            h("div", {style:{flex:1}}), h("span", {style:{fontSize:11, color:P.faint}}, "2")),
+          comment("mcoll", "4m", "Why does the payer absorb the remainder rather than the largest debtor?", "linear-gradient(135deg,#5B4B96,#0F7A66)"),
+          comment("claude-code", "3m", "The payer already fronted the money, so giving them the odd cent never increases anyone's debt. Recorded as a decision.", "linear-gradient(135deg,#0F7A66,#A9740B)"),
+          h("div", {style:{display:"flex", flexDirection:"column", gap:7}},
+            h("div", {style:{minHeight:54, borderRadius:7, background:P.card, border:`1px solid ${P.line}`, padding:"8px 10px", fontSize:12.5, color:"#B6B1A5"}},
+              "Comment on this step…"),
+            h("div", {style:{display:"flex", alignItems:"center", gap:8}},
+              h("button", {style:{height:28, padding:"0 12px", borderRadius:6, border:"none", background:P.violet, color:"#fff", font:"inherit", fontSize:12.5, fontWeight:500, cursor:"pointer"}}, "Comment"),
+              h("span", {style:{fontSize:11.5, color:P.faint}}, cur === 0 ? "on the whole proposal" : `on ${steps[cur][1].split(" · ")[0]}`)))),
+
+        h("div", {style:{height:1, background:P.line}}),
+
+        h("div", {style:{display:"flex", flexDirection:"column", gap:7}},
+          h("button", {style:{height:32, borderRadius:6, border:"none", background:P.violet, color:"#fff", font:"inherit", fontSize:13, fontWeight:500, cursor:"pointer"}}, "Approve · merge into main"),
+          h("button", {onClick:() => this.setState({review:false, page:"proposals"}),
+            style:{height:30, borderRadius:6, border:`1px solid ${P.line}`, background:P.card, color:P.body, font:"inherit", fontSize:12.5, cursor:"pointer"}}, "Request changes")))};
+  }
+
+  deploymentStage() {
+    const dep = this.state.dep;
+    const prod = dep === "production";
+    const btn = (label, primary, icon, onClick) => h("button", {key:label, onClick,
+      style:{height:30, padding:"0 12px", borderRadius:6, font:"inherit", fontSize:12.5, fontWeight: primary ? 500 : 400, cursor:"pointer",
+        display:"flex", alignItems:"center", gap:6,
+        border: primary ? "1px solid #C9C0E4" : `1px solid ${P.line}`,
+        background: primary ? "#F3F0FB" : P.card, color: primary ? P.violet : P.body}},
+      icon ? h("i", {className:icon, style:{fontSize:13}}) : null, label);
+    const metric = (k, v, note, hue) => h("div", {key:k, style:{flex:1, minWidth:0, padding:"11px 13px", borderRadius:9, background:P.card, border:`1px solid ${P.line}`, display:"flex", flexDirection:"column", gap:3}},
+      h("span", {style:{fontSize:10.5, letterSpacing:".09em", textTransform:"uppercase", color:P.faint}}, k),
+      h("span", {style:{fontFamily:MONO, fontSize:17, color: hue ?? P.ink}}, v),
+      h("span", {style:{fontSize:11.5, color:P.faint}}, note));
+    const sect = (label, right, children) => h("div", {key:label, style:{display:"flex", flexDirection:"column", gap:9}},
+      h("div", {style:{display:"flex", alignItems:"baseline", gap:10}},
+        h("span", {style:{fontFamily:DISPLAY, fontSize:16, fontWeight:500}}, label),
+        h("div", {style:{flex:1}}),
+        right ? h("span", {style:{fontSize:11.5, color:P.violet, cursor:"pointer"}}, right) : null),
+      children);
+    const cell = (v, f, al, style) => h("span", {style:{flex:f, padding:"9px 12px", fontSize:12.5, textAlign:al ?? "left", ...style}}, v);
+    const head = (cols) => h("div", {style:{display:"flex", background:P.tint, borderBottom:`1px solid ${P.line}`, borderTopLeftRadius:9, borderTopRightRadius:9}},
+      ...cols.map(([t, f, al]) => h("span", {key:t, style:{flex:f, padding:"7px 12px", fontSize:11, letterSpacing:".05em", textTransform:"uppercase", color:P.faint, textAlign:al ?? "left"}}, t)));
+
+    return h("div", {style:{flex:1, minWidth:0, overflowY:"auto", padding:"20px 24px 40px", background:P.paper}},
+      h("div", {style:{maxWidth:860, display:"flex", flexDirection:"column", gap:22}},
+
+        h("div", {style:{display:"flex", alignItems:"flex-start", gap:16}},
+          h("div", {style:{display:"flex", flexDirection:"column", gap:6, minWidth:0}},
+            h("div", {style:{display:"flex", alignItems:"center", gap:9}},
+              h("span", {style:{fontFamily:DISPLAY, fontSize:25, fontWeight:500, letterSpacing:0}}, dep),
+              h("span", {style:{fontSize:11.5, color: prod ? P.mint : P.faint, background: prod ? "#E3F1EC" : P.sand, border:`1px solid ${prod ? "#BFDDD3" : P.line}`, padding:"2px 8px", borderRadius:5}}, prod ? "healthy" : "preview")),
+            h("span", {style:{fontFamily:MONO, fontSize:12.5, color:P.violet}}, prod ? "mcoll.apps.kinoko.sh/ski-trip" : "preview--ski-trip.apps.kinoko.sh"),
+            h("span", {style:{fontSize:12.5, color:P.dim}},
+              prod ? "serving main · module 98ac5a18 · deployed 3d ago by claude-code" : "serving shares-v2 · module 41c0e9b2 · deployed 9d ago")),
+          h("div", {style:{flex:1}}),
+          h("div", {style:{display:"flex", gap:8, flex:"none"}},
+            btn("Open", false, "ph ph-arrow-square-out"),
+            btn("Promote main", true, "ph ph-arrow-fat-line-up"))),
+
+        h("div", {style:{padding:"11px 13px", borderRadius:9, background:"#F3F0FB", border:"1px solid #D9D2EE", display:"flex", alignItems:"center", gap:12}},
+          h("i", {className:"ph ph-arrow-fat-line-up", style:{fontSize:15, color:P.violet}}),
+          h("div", {style:{display:"flex", flexDirection:"column", gap:2, minWidth:0}},
+            h("span", {style:{fontSize:12.5, fontWeight:500}}, "main is 2 patches ahead of this deployment"),
+            h("span", {style:{fontSize:12, color:P.dim}}, "Adds the Settle screen and one read on Split.Share. Old requests finish on old code.")),
+          h("div", {style:{flex:1}}),
+          h("span", {style:{fontSize:11.5, color:P.violet, cursor:"pointer", flex:"none"}}, "See the diff")),
+
+        h("div", {style:{display:"flex", gap:10}},
+          metric("Requests · 24h", "41.2k", "+8% on last week"),
+          metric("p50 / p95", "18 / 74ms", "cold starts 0.4%"),
+          metric("Error rate", "0.12%", "49 failed · all replayable", P.amber),
+          metric("Rows written", "1,204", "own layer · 812MB")),
+
+        sect("Per-app usage", "last 24h",
+          h("div", {style:{borderRadius:9, background:P.card, border:`1px solid ${P.line}`, overflow:"hidden"}},
+            head([["app",3],["route",2],["requests",1,"right"],["p95",1,"right"],["errors",1,"right"]]),
+            ...[["Split","/split","38.9k","71ms","44"], ["Settle","/settle","2.3k","88ms","5"]].map((r, i) =>
+              h("div", {key:r[0], style:{display:"flex", alignItems:"center", borderTop: i ? `1px solid #EFECE4` : "none"}},
+                cell(r[0], 3, null, {fontFamily:MONO, fontSize:12}),
+                cell(r[1], 2, null, {fontFamily:MONO, fontSize:11.5, color:P.faint}),
+                cell(r[2], 1, "right", {fontFamily:MONO, fontSize:12}),
+                cell(r[3], 1, "right", {fontFamily:MONO, fontSize:12}),
+                h("span", {onClick:() => this.go("traces"), style:{flex:1, padding:"9px 12px", fontFamily:MONO, fontSize:12, textAlign:"right", color:P.amber, cursor:"pointer"}}, r[4]))))),
+
+        sect("Deployed versions", null,
+          h("div", {style:{borderRadius:9, background:P.card, border:`1px solid ${P.line}`, overflow:"hidden"}},
+            head([["version",1],["module",2],["from",2],["deployed",2],["errors",1,"right"],["",1,"right"]]),
+            ...[["v7","98ac5a18","main","3d ago","0.12%",true],
+                ["v6","41c0e9b2","main","9d ago","0.31%",false],
+                ["v5","7ba15d33","main","16d ago","2.4%",false]].map((r, i) =>
+              h("div", {key:r[0], style:{display:"flex", alignItems:"center", borderTop: i ? `1px solid #EFECE4` : "none", background: r[5] ? "#FAFAF7" : P.card}},
+                cell(r[0], 1, null, {fontFamily:MONO, fontSize:12, fontWeight:500}),
+                cell(r[1], 2, null, {fontFamily:MONO, fontSize:11.5, color:P.faint}),
+                cell(r[2], 2, null, {fontFamily:MONO, fontSize:11.5}),
+                cell(r[3], 2, null, {fontSize:12, color:P.dim}),
+                cell(r[4], 1, "right", {fontFamily:MONO, fontSize:12, color: parseFloat(r[4]) > 1 ? P.red : P.body}),
+                h("span", {style:{flex:1, padding:"9px 12px", textAlign:"right", fontSize:11.5, color: r[5] ? P.mint : P.violet, cursor: r[5] ? "default" : "pointer", fontWeight:500}}, r[5] ? "current" : "roll back"))))),
+
+        sect("Work from this deployment", null,
+          h("div", {style:{display:"flex", gap:10}},
+            h("div", {style:{flex:1, padding:"13px 14px", borderRadius:9, background:P.card, border:`1px solid ${P.line}`, display:"flex", flexDirection:"column", gap:7}},
+              h("span", {style:{fontSize:13, fontWeight:600}}, "Fork to an environment"),
+              h("span", {style:{fontSize:12, color:P.dim, lineHeight:1.55, textWrap:"pretty"}},
+                "Same module — 98ac5a18 — in a fresh environment. Its layer reads production data and physically cannot write to it."),
+              h("div", {style:{display:"flex", gap:7, paddingTop:2}},
+                btn("Fork · shape only", true, null),
+                btn("Fork · copy data", false, null)),
+              h("span", {style:{fontSize:11.5, color:P.faint}}, "Copying 2,914 rows takes about a minute; shape-only is instant.")),
+            h("div", {style:{width:250, flex:"none", padding:"13px 14px", borderRadius:9, background:P.card, border:`1px solid ${P.line}`, display:"flex", flexDirection:"column", gap:7}},
+              h("span", {style:{fontSize:13, fontWeight:600}}, "Capabilities granted"),
+              ...[["store", "Expense, Share"], ["ai", "not granted"], ["blob", "not granted"], ["egress", "blocked"]].map(([k, v]) =>
+                h("div", {key:k, style:{display:"flex", gap:8, fontSize:12}},
+                  h("span", {style:{width:54, flex:"none", color:P.faint, fontFamily:MONO, fontSize:11}}, k),
+                  h("span", {style:{color: v.includes("not") || v === "blocked" ? P.faint : P.body}}, v))))))));
+  }
+
+  // Shared table: cols = [label, flex, align], rows = [[cell, …], …] where a cell is
+  // a string or {v, mono, color, onClick}.
+  table(cols, rows) {
+    const cellOf = (c, f, al, first) => {
+      const o = typeof c === "object" && c !== null ? c : {v:c};
+      return h("span", {key:String(o.v) + f, onClick:o.onClick,
+        style:{flex:f, minWidth:0, padding:"9px 12px", textAlign:al ?? "left", fontSize:12.5,
+          fontFamily: o.mono ? MONO : "inherit", color: o.color ?? P.ink, fontWeight: first ? 500 : 400,
+          whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", cursor: o.onClick ? "pointer" : "inherit"}}, o.v);
+    };
+    return h("div", {style:{borderRadius:9, background:P.card, border:`1px solid ${P.line}`, overflow:"hidden"}},
+      h("div", {style:{display:"flex", background:P.tint, borderBottom:`1px solid ${P.line}`}},
+        ...cols.map(([t, f, al]) => h("span", {key:t, style:{flex:f, padding:"7px 12px", fontSize:11, letterSpacing:".05em",
+          textTransform:"uppercase", color:P.faint, textAlign:al ?? "left", whiteSpace:"nowrap"}}, t))),
+      ...rows.map((r, i) => h("div", {key:i, style:{display:"flex", alignItems:"center", borderTop: i ? "1px solid #EFECE4" : "none"}},
+        ...r.map((c, j) => cellOf(c, cols[j][1], cols[j][2], j === 0)))));
+  }
+
+  page(title, blurb, children) {
+    return h("div", {style:{flex:1, minWidth:0, overflowY:"auto", padding:"20px 24px 40px", background:P.paper}},
+      h("div", {style:{maxWidth:860, display:"flex", flexDirection:"column", gap:18}},
+        h("div", {style:{display:"flex", flexDirection:"column", gap:5, maxWidth:600}},
+          h("span", {style:{fontFamily:DISPLAY, fontSize:21, fontWeight:500, letterSpacing:0}}, title),
+          h("span", {style:{fontSize:13, lineHeight:1.6, color:P.dim, textWrap:"pretty"}}, blurb)),
+        ...children));
+  }
+
+  workflowsStage() {
+    const dim = {color:P.dim}, mono = {mono:true};
+    return this.page("Workflows",
+      "A workflow is an actor with a mailbox and no view. Cmd plus a durable mailbox is already a workflow engine, so a paused workflow costs nothing and survives a deploy.",
+      [
+        h("div", {key:"defs", style:{display:"flex", flexDirection:"column", gap:9}},
+          this.lbl("Definitions"),
+          this.table([["workflow",3],["steps",1,"right"],["running",1,"right"],["waiting",1,"right"],["failed",1,"right"]], [
+            [{v:"SettleReminder", mono:true}, {v:"4", ...mono, color:P.dim}, {v:"2", ...mono}, {v:"1", ...mono, color:P.amber}, {v:"0", ...mono, color:P.dim}],
+            [{v:"ExportMonthly", mono:true}, {v:"3", ...mono, color:P.dim}, {v:"0", ...mono, color:P.dim}, {v:"1", ...mono, color:P.amber}, {v:"1", ...mono, color:P.red}]])),
+
+        h("div", {key:"inst", style:{display:"flex", flexDirection:"column", gap:9}},
+          h("div", {style:{display:"flex", alignItems:"center"}}, this.lbl("Live instances"),
+            h("div", {style:{flex:1}}),
+            h("span", {style:{fontSize:11.5, color:P.violet, cursor:"pointer"}}, "show finished")),
+          this.table([["instance",2],["workflow",2],["step",2],["waiting on",2],["age",1,"right"]], [
+            [{v:"#w-1042", mono:true}, {v:"SettleReminder", mono:true, color:P.dim}, "3 · nudge unpaid", {v:"timer · 2d 4h", color:P.amber}, {v:"18h", ...mono, color:P.dim}],
+            [{v:"#w-1041", mono:true}, {v:"SettleReminder", mono:true, color:P.dim}, "2 · await settle", {v:"Msg Settled", color:P.dim}, {v:"1d", ...mono, color:P.dim}],
+            [{v:"#w-1038", mono:true}, {v:"ExportMonthly", mono:true, color:P.dim}, "2 · write blob", {v:"blob capability", color:P.red}, {v:"3d", ...mono, color:P.dim}]])),
+
+        h("div", {key:"fail", style:{padding:"11px 13px", borderRadius:9, background:"#FBECEB", border:"1px solid #EFCFCD", display:"flex", alignItems:"center", gap:11}},
+          h("i", {className:"ph ph-warning", style:{fontSize:15, color:P.red, flex:"none"}}),
+          h("span", {style:{fontSize:12.5, color:"#8E332E", minWidth:0}}, "#w-1038 is stuck: ExportMonthly asks for a blob capability this environment was never granted."),
+          h("div", {style:{flex:1, minWidth:8}}),
+          h("span", {onClick:() => this.go("traces"), style:{flex:"none", fontSize:11.5, color:"#8E332E", cursor:"pointer", fontWeight:500}}, "Open the trace"))]);
+  }
+
+  cronsStage() {
+    const mono = {mono:true};
+    return this.page("Crons",
+      "A cron is a workflow with no inbound messages — a TEA program woken by an alarm. Time is virtualized, so a cron replays exactly like anything else.",
+      [
+        this.table([["cron",2],["schedule",2],["last run",2],["next",2],["p95",1,"right"],["",1,"right"]], [
+          [{v:"FxRateSync", mono:true}, {v:"every 5m", mono:true, color:P.dim}, {v:"2m ago · ok", color:P.mint}, {v:"in 3m", color:P.dim}, {v:"41ms", ...mono, color:P.dim}, {v:"Run now", color:P.violet, onClick:() => {}}],
+          [{v:"NightlyDigest", mono:true}, {v:"0 7 * * *", mono:true, color:P.dim}, {v:"9h ago · ok", color:P.mint}, {v:"in 15h", color:P.dim}, {v:"1.2s", ...mono, color:P.dim}, {v:"Run now", color:P.violet, onClick:() => {}}],
+          [{v:"ReindexSearch", mono:true}, {v:"0 3 * * 0", mono:true, color:P.dim}, {v:"4d ago · failed", color:P.red, onClick:() => this.go("traces")}, {v:"paused", color:P.faint}, {v:"—", ...mono, color:P.faint}, {v:"Resume", color:P.violet, onClick:() => {}}]]),
+
+        h("div", {key:"note", style:{display:"flex", alignItems:"center", gap:10, padding:"11px 13px", borderRadius:9, background:P.card, border:`1px solid ${P.line}`}},
+          h("i", {className:"ph ph-clock-countdown", style:{fontSize:15, color:P.faint, flex:"none"}}),
+          h("span", {style:{fontSize:12.5, color:P.dim, minWidth:0}}, "A paused cron keeps its mailbox. Resuming does not backfill missed windows unless the workflow asks for them."),
+          h("div", {style:{flex:1, minWidth:8}}),
+          h("button", {style:{flex:"none", whiteSpace:"nowrap", height:28, padding:"0 11px", borderRadius:6, border:"1px solid #C9C0E4", background:"#F3F0FB", color:P.violet, font:"inherit", fontSize:12, fontWeight:500, cursor:"pointer"}}, "New cron"))]);
+  }
+
+  queuesStage() {
+    const mono = {mono:true};
+    const bar = (depth, cap, hue) => h("div", {style:{display:"flex", alignItems:"center", gap:8}},
+      h("div", {style:{width:64, height:5, borderRadius:3, background:"#E7E4DB", overflow:"hidden", flex:"none"}},
+        h("div", {style:{width:`${Math.min(100, depth / cap * 100)}%`, height:"100%", background:hue}})),
+      h("span", {style:{fontFamily:MONO, fontSize:12}}, depth));
+    return this.page("Queues",
+      "Queues carry messages between actors when the send should outlive the sender. Intra-environment sends stay in the environment; anything crossing one is a capability.",
+      [
+        this.table([["queue",2],["depth",2],["oldest",1,"right"],["consumers",2],["dead letters",1,"right"]], [
+          [{v:"notify", mono:true}, {v:bar(3, 50, P.mint)}, {v:"4s", ...mono, color:P.dim}, {v:"VendorNotifier", mono:true, color:P.dim}, {v:"0", ...mono, color:P.dim}],
+          [{v:"ocr", mono:true}, {v:bar(0, 50, P.mint)}, {v:"—", ...mono, color:P.faint}, {v:"OcrIngest", mono:true, color:P.dim}, {v:"1", ...mono, color:P.red, onClick:() => this.go("traces")}],
+          [{v:"settle-nudge", mono:true}, {v:bar(41, 50, P.amber)}, {v:"6m", ...mono, color:P.amber}, {v:"SettleReminder", mono:true, color:P.dim}, {v:"0", ...mono, color:P.dim}]]),
+
+        h("div", {key:"dl", style:{display:"flex", flexDirection:"column", gap:9}},
+          this.lbl("Dead letters"),
+          this.table([["message",4],["queue",2],["attempts",1,"right"],["failed",2],["",1,"right"]], [
+            [{v:'Ocr.Ingest(#blob-91)', mono:true}, {v:"ocr", mono:true, color:P.dim}, {v:"3", ...mono, color:P.red}, {v:"2d ago", color:P.dim}, {v:"Replay", color:P.violet, onClick:() => this.go("traces")}]])),
+
+        h("div", {key:"note", style:{display:"flex", alignItems:"center", gap:10, padding:"11px 13px", borderRadius:9, background:P.card, border:`1px solid ${P.line}`}},
+          h("span", {style:{fontSize:12.5, color:P.dim, minWidth:0}}, "settle-nudge is backing up — its consumer is the workflow waiting on a timer."),
+          h("div", {style:{flex:1, minWidth:8}}),
+          h("span", {onClick:() => this.go("workflows"), style:{flex:"none", fontSize:11.5, color:P.violet, cursor:"pointer", fontWeight:500}}, "Open SettleReminder"))]);
+  }
+
+  tryStage() {
+    const tab = (t, on) => h("span", {key:t, style:{flex:"none", whiteSpace:"nowrap", fontFamily:MONO, fontSize:11.5, padding:"4px 11px", borderRadius:5, cursor:"pointer",
+      background: on ? P.card : "transparent", boxShadow: on ? "0 1px 2px rgba(27,26,23,.08)" : "none", color: on ? P.ink : P.dim, fontWeight: on ? 500 : 400}}, t);
+    const line = (who, what, amount, hue) => h("div", {key:who, style:{display:"flex", alignItems:"baseline", gap:10, padding:"9px 0", borderTop:"1px solid #EFECE4"}},
+      h("span", {style:{fontSize:13, fontWeight:600, width:52}}, who),
+      h("span", {style:{fontSize:12.5, color:P.dim, flex:1}}, what),
+      h("span", {style:{fontFamily:MONO, fontSize:13, color:hue}}, amount));
+
+    return h("div", {style:{flex:1, minWidth:0, minHeight:0, display:"flex", flexDirection:"column", background:P.paper}},
+      h("div", {style:{flex:"none", display:"flex", alignItems:"center", gap:10, padding:"9px 14px", background:"#FBF2DF", borderBottom:"1px solid #E8D3A4"}},
+        h("i", {className:"ph ph-flask", style:{fontSize:15, color:P.amber}}),
+        h("span", {style:{fontSize:12.5, color:"#7A5406"}}, "This is the app as it would be after the merge. It runs in fix-rounding — writes land in the fork's own layer and can never touch main."),
+        h("div", {style:{flex:1}}),
+        h("span", {style:{fontSize:11.5, color:"#7A5406", whiteSpace:"nowrap"}}, "module 6f2a91c4")),
+
+      h("div", {style:{flex:"none", display:"flex", alignItems:"center", gap:10, padding:"9px 14px", borderBottom:`1px solid ${P.line}`, background:P.tint}},
+        h("div", {style:{display:"flex", gap:2, padding:2, borderRadius:7, background:"#E7E4DB"}}, tab("/split", false), tab("/settle", true)),
+        h("div", {style:{flex:1}}),
+        h("span", {style:{fontFamily:MONO, fontSize:11.5, color:P.faint, minWidth:0, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", direction:"rtl", textAlign:"right"}}, "fix-rounding.apps.kinoko.sh/settle"),
+        h("i", {className:"ph ph-arrow-square-out", style:{flex:"none", fontSize:13, color:P.violet, cursor:"pointer"}})),
+
+      h("div", {style:{flex:1, minHeight:0, overflowY:"auto", display:"flex", justifyContent:"center", padding:"26px 20px"}},
+        h("div", {style:{width:420, padding:"20px 22px", borderRadius:11, background:P.card, border:`1px solid ${P.line}`, boxShadow:"0 2px 10px rgba(27,26,23,.05)", display:"flex", flexDirection:"column", gap:3}},
+          h("span", {style:{fontSize:17, fontWeight:700, letterSpacing:"-.01em", paddingBottom:8}}, "Settle up"),
+          line("mika", "paid £399.20 of £179.80 owed", "−£219.40", P.ink),
+          line("joon", "paid £54.30 of £139.60 owed", "+£85.30", P.mint),
+          line("ana", "paid £240.00 of £105.90 owed", "+£134.10", P.mint),
+          h("div", {style:{display:"flex", alignItems:"center", gap:8, paddingTop:12}},
+            h("button", {style:{flex:"none", whiteSpace:"nowrap", height:31, padding:"0 13px", borderRadius:6, border:"none", background:P.ink, color:P.paper, font:"inherit", fontSize:12.5, fontWeight:600, cursor:"pointer"}}, "Mark as settled"),
+            h("span", {style:{fontSize:11.5, color:P.faint, whiteSpace:"nowrap"}}, "sums to 0 · remainder to mika")))),
+
+      h("div", {style:{flex:"none", display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderTop:`1px solid ${P.line}`, background:P.tint}},
+        h("span", {style:{fontSize:12, color:P.dim, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}, "Clicking here writes real rows into the fork."),
+        h("div", {style:{flex:1, minWidth:8}}),
+        h("button", {style:{flex:"none", whiteSpace:"nowrap", height:28, padding:"0 11px", borderRadius:6, border:`1px solid ${P.line}`, background:P.card, color:P.body, font:"inherit", fontSize:12, cursor:"pointer"}}, "Reset fork data"),
+        h("button", {style:{flex:"none", whiteSpace:"nowrap", height:28, padding:"0 11px", borderRadius:6, border:"1px solid #C9C0E4", background:"#F3F0FB", color:P.violet, font:"inherit", fontSize:12, fontWeight:500, cursor:"pointer"}}, "Run a simulation")));
+  }
+
+  panelFor() {
+    const sel = this.state.sel;
+    if (this.state.review) return this.reviewPanel();
+    if (this.state.page !== "graph" || sel === null) return null;
+    if (sel === "Split") return {
+      eyebrow:"Selected", name:"Split", sub:"Screen · live instance",
+      rows:[{k:"route", v:"/e/main/split"}, {k:"model", v:"Split.Model · 6 fields"},
+        {k:"data", v:"inserts into Expense · reads Expense"}, {k:"trace", v:"142 transactions"}],
+      extra: h("div", {style:{display:"flex", flexDirection:"column", gap:14, paddingTop:4}},
+        h("div", {style:{display:"flex", flexDirection:"column", gap:8}},
+          this.lbl("Live model"),
+          h("div", {style:{padding:"10px 11px", borderRadius:7, background:P.card, border:`1px solid ${P.line}`, fontFamily:MONO, fontSize:11.5, lineHeight:1.75, color:P.body}},
+            "expenses: [5 rows]", h("br"), "draft: %{payer: \"\", cents: 0}")),
+        h("div", {style:{display:"flex", flexDirection:"column", gap:8}},
+          h("div", {style:{display:"flex", alignItems:"center"}}, this.lbl("Traces"), h("div", {style:{flex:1}}),
+            h("span", {onClick:() => this.go("traces"), style:{fontSize:11.5, color:P.violet, cursor:"pointer", fontWeight:500}}, "all 142")),
+          h("div", {style:{borderRadius:7, background:P.card, border:`1px solid ${P.line}`, overflow:"hidden"}},
+            ...[["Add(\"ana\", \"cabin…\", 24000)","41s",true], ["Added(#e43)","41s",true], ["settle()","6m",false]].map(([m, w, ok], i) =>
+              h("div", {key:m, style:{display:"flex", alignItems:"center", gap:8, padding:"7px 10px", borderTop: i ? "1px solid #EFECE4" : "none", cursor:"pointer"}},
+                h("span", {style:{width:5, height:5, borderRadius:"50%", flex:"none", background: ok ? P.mint : P.red}}),
+                h("span", {style:{fontFamily:MONO, fontSize:11, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}, m),
+                h("span", {style:{fontSize:11, color:P.faint}}, w)))),
+          h("span", {style:{fontSize:11.5, color:P.faint, lineHeight:1.5}}, "Every one replays bit-exact from its inputs and seed.")))};
+    const ACTORS = {
+      SettleReminder: {sub:"Workflow · actor, no view", to:"workflows",
+        rows:[{k:"steps", v:"4"}, {k:"running", v:"2 · 1 waiting on a timer"}, {k:"reads", v:"Split.Share", mono:true},
+          {k:"inbox", v:"settle-nudge", mono:true}, {k:"effects", v:"timer · store.read"}],
+        note:"A workflow is Cmd plus a durable mailbox, so a paused instance costs nothing and survives a deploy."},
+      NightlyDigest: {sub:"Cron · woken by an alarm", to:"crons",
+        rows:[{k:"schedule", v:"0 7 * * *", mono:true}, {k:"last run", v:"9h ago · ok"}, {k:"next", v:"in 15h"},
+          {k:"reads", v:"Split.Share", mono:true}, {k:"p95", v:"1.2s", mono:true}],
+        note:"Time is virtualized, so a cron replays exactly like any other trace."},
+      "settle-nudge": {sub:"Queue · 41 in flight", to:"queues",
+        rows:[{k:"depth", v:"41 · oldest 6m"}, {k:"producer", v:"Split", mono:true}, {k:"consumer", v:"SettleReminder", mono:true},
+          {k:"dead letters", v:"0"}, {k:"retries", v:"3 then dead-letter"}],
+        note:"Backing up because its consumer is waiting on a timer, not because delivery is failing."}};
+    if (ACTORS[sel]) {
+      const a = ACTORS[sel];
+      return {eyebrow:"Selected", name:sel, sub:a.sub, rows:a.rows,
+        extra: h("div", {style:{display:"flex", flexDirection:"column", gap:9, paddingTop:4}},
+          h("span", {style:{fontSize:12, color:P.dim, lineHeight:1.55, textWrap:"pretty"}}, a.note),
+          h("button", {onClick:() => this.go(a.to),
+            style:{alignSelf:"flex-start", height:29, padding:"0 12px", borderRadius:6, border:"1px solid #C9C0E4", background:"#F3F0FB", color:P.violet, font:"inherit", fontSize:12.5, fontWeight:500, cursor:"pointer"}},
+            "Open " + a.sub.split(" ")[0].toLowerCase() + "s"))};
+    }
+    const share = sel === "Split.Share";
+    const shares = [["mika","−£21,940"], ["joon","+£8,530"], ["ana","+£13,410"]];
+    return {
+      eyebrow:"Selected", name:sel, sub: share ? "Model store · 3 rows · derived" : "Model store · 5 rows",
+      rows:[{k:"fields", v: share ? "who · owes" : "id · payer · what · cents", mono:true},
+        {k:"written by", v: share ? "Split.settle (staged)" : "Split (insert)"},
+        {k:"read by", v:"Split"},
+        {k:"layer", v:"own layer · no base"}],
+      extra: h("div", {style:{display:"flex", flexDirection:"column", gap:8, paddingTop:4}},
+        h("div", {style:{display:"flex", alignItems:"center"}}, this.lbl("Rows"), h("div", {style:{flex:1}}),
+          h("span", {onClick:() => this.go("data","data"), style:{fontSize:11.5, color:P.violet, cursor:"pointer", fontWeight:500}}, "Open in Data")),
+        h("div", {style:{borderRadius:8, background:P.card, border:`1px solid ${P.line}`, overflow:"hidden"}},
+          ...(share ? shares : EXPENSES.slice(0, 4).map(r => [r.payer, money(r.cents), r.what])).map((row, i) =>
+            h("div", {key:i, style:{display:"flex", alignItems:"baseline", gap:8, padding:"7px 10px", borderTop: i ? `1px solid #EFECE4` : "none"}},
+              h("span", {style:{fontSize:12, fontWeight:500, width:44, flex:"none"}}, row[0]),
+              h("span", {style:{fontSize:11.5, color:P.faint, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}, row[2] ?? ""),
+              h("span", {style:{fontFamily:MONO, fontSize:11.5, color: share && row[1].startsWith("+") ? P.mint : P.body}}, row[1])))),
+        share ? null : h("span", {style:{fontSize:11.5, color:P.faint}}, "+1 more · newest first"))};
+  }
+
+  renderVals() {
+    const s = this.state;
+    const page = s.page;
+    const isEnvPage = ["graph","code","data","tryit"].includes(page);
+
+    const deployments = [["production","serving main",P.mint], ["preview","serving shares-v2","#C7C2B5"]].map(([n, tag, c]) => {
+      const on = page === "deployment" && s.dep === n;
+      return {
+        label:n, tag,
+        pick: () => this.setState({page:"deployment", dep:n, sel:null, review:false, cmdOpen:false}),
+        row:`display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; background:${on ? "#fff" : "transparent"}; box-shadow:${on ? `inset 2px 0 0 ${c}, 0 1px 2px rgba(27,26,23,.05)` : "none"};`,
+        dot:`width:6px; height:6px; border-radius:50%; flex:none; background:${c};`,
+        name:`font-family:${MONO}; font-size:12px; font-weight:${on ? 500 : 400}; color:${on ? P.ink : P.body};`,
+        tagStyle:`font-size:10.5px; color:${P.faint};`};
+    });
+
+    const envs = [["main","base",P.violet], ["fix-rounding","agent",P.amber], ["shares-v2","idle","#C7C2B5"]].map(([n, tag, c]) => {
+      const on = s.env === n;
+      return {
+        label:n, tag,
+        pick: () => this.setState({env:n, sel:null}),
+        row:`display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; background:${on ? "#fff" : "transparent"}; box-shadow:${on ? `inset 2px 0 0 ${c}, 0 1px 2px rgba(27,26,23,.05)` : "none"};`,
+        dot:`width:6px; height:6px; border-radius:50%; flex:none; background:${c};`,
+        name:`font-family:${MONO}; font-size:12px; font-weight:${on ? 500 : 400}; color:${on ? P.ink : P.body};`,
+        tagStyle:`font-size:10.5px; color:${on ? c : P.faint};`};
+    });
+
+    const navDefs = [
+      ["graph","ph ph-graph","System","", null],
+      ["workflows","ph ph-flow-arrow","Workflows","2", null],
+      ["crons","ph ph-clock","Crons","3", null],
+      ["queues","ph ph-stack","Queues","44", null]];
+    const changeDefs = [
+      ["proposals","ph ph-git-pull-request","Proposals","1", P.amber],
+      ["decisions","ph ph-scroll","Decisions","3", null]];
+    const rowOf = ([id, icon, name, badge, hue]) => {
+      const on = id === "graph" ? isEnvPage : page === id;
+      return {
+        name, icon, badge, pick: () => this.go(id, id === "graph" ? "graph" : s.view),
+        row:`display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; background:${on ? "#E2DFD5" : "transparent"};`,
+        iconStyle:`font-size:14px; color:${hue ?? (on ? P.violet : P.faint)};`,
+        label:`font-size:13px; font-weight:${on ? 600 : 400}; color:${on ? P.ink : P.body};`,
+        badgeStyle: badge === "1"
+          ? `font-family:${MONO}; font-size:10.5px; color:#fff; background:${P.amber}; padding:1px 6px; border-radius:9px;`
+          : `font-size:11px; color:${P.faint};`};
+    };
+    const nav = navDefs.map(rowOf), changeNav = changeDefs.map(rowOf);
+
+    const views = (s.review ? [["graph","Graph"], ["code","Code"], ["tryit","Try it"]] : [["graph","Graph"], ["code","Code"], ["data","Data"]]).map(([id, name]) => ({
+      name,
+      pick: () => s.review ? this.setState({page:id, view:id, sel:null, cmdOpen:false}) : this.go(id, id),
+      style:`font-size:12.5px; padding:4px 12px; border-radius:5px; cursor:pointer; flex:none; white-space:nowrap; ${page === id
+        ? "background:#fff; color:#1B1A17; font-weight:500; box-shadow:0 1px 2px rgba(27,26,23,.08);"
+        : "color:#6E6A61;"}`}));
+
+    const cmdItems = [
+      ["ph ph-app-window","Split","screen","graph"], ["ph ph-database","Split.Expense","store","data"],
+      ["ph ph-function","Split.update","symbol","code"], ["ph ph-git-pull-request","Round shares to whole cents","proposal","proposals"],
+      ["ph ph-activity","Split.settle() failed","trace","traces"],
+      ["ph ph-flow-arrow","SettleReminder #w-1042","workflow","workflows"],
+      ["ph ph-stack","settle-nudge","queue","queues"]].map(([icon, name, hint, to], i) => ({
+      icon, name, hint,
+      pick: () => { if (to === "graph") this.setState({page:"graph", view:"graph", sel:"Split", cmdOpen:false, proposal:false}); else this.go(to, to); },
+      row:`display:flex; align-items:center; gap:10px; padding:8px 9px; border-radius:7px; cursor:pointer; background:${i === 0 ? "#F3F0FB" : "transparent"};`,
+      nameStyle:`font-family:${MONO}; font-size:12.5px; color:${P.ink};`}));
+
+    const stageMap = {
+      graph: () => this.graphStage(), code: () => this.codeStage(), data: () => this.dataStage(),
+      proposals: () => this.proposalsStage(), decisions: () => this.decisionsStage(),
+      traces: () => this.tracesStage(), settings: () => this.settingsStage(), home: () => this.homeStage(),
+      deployment: () => this.deploymentStage(), tryit: () => this.tryStage(),
+      workflows: () => this.workflowsStage(), crons: () => this.cronsStage(), queues: () => this.queuesStage()};
+    const titles = {
+      graph:["System","1 app · 2 stores · 0 staged"], code:["Code","231 symbols · 1 staged"],
+      data:["Data", (s.store ?? "Split.Expense") === "Split.Share" ? "Split.Share · 3 rows" : "Split.Expense · 5 rows"], proposals:["Proposals","1 open"],
+      decisions:["Decisions","3 standing"], traces:["Traces","142 replayable · Split"],
+      settings:["Keys & settings",""], home:["Ski trip","12 environments · 2 deployments"],
+      deployment:["Deployment", s.dep],
+      tryit:["Try it", "the app as it would be after the merge"],
+      workflows:["Workflows", "2 definitions · 3 live instances"],
+      crons:["Crons", "3 · 1 paused"],
+      queues:["Queues", "3 · 44 in flight · 1 dead letter"]};
+
+    const pages = this.introPages();
+    const pg = pages[Math.min(s.introPage, pages.length - 1)];
+    const p = this.panelFor();
+    const panel = p === null ? {eyebrow:"", name:"", sub:"", rows:[], extra:null} : {
+      ...p, rows: p.rows.map(r => ({k:r.k, v:r.v,
+        vStyle: r.mono ? `font-family:${MONO}; font-size:11.5px; color:${P.body};` : `color:${P.ink};`}))};
+
+    return {
+      envName: s.env, envs, deployments, nav, changeNav, views, cmdItems, panel,
+      goTraces: () => this.go("traces"),
+      showViews: isEnvPage,
+      title: (titles[page] ?? titles.graph)[0],
+      subtitle: (titles[page] ?? titles.graph)[1],
+      stage: (stageMap[page] ?? stageMap.graph)(),
+      stageStyle: "flex:1; min-width:0; display:flex; min-height:0;",
+      hasPanel: p !== null,
+      intro: s.intro,
+      introPage: pg,
+      introKicker: pg.kicker, introTitle: pg.title, introText: pg.text, introTryIt: pg.tryIt,
+      introFigure: pg.figure,
+      introDots: pages.map((_, i) => ({
+        pick: () => this.setState({introPage:i}),
+        style: `width:${i === s.introPage ? 16 : 6}px; height:6px; border-radius:3px; cursor:pointer; background:${i === s.introPage ? P.violet : "#D7D3C8"};`})),
+      introNextLabel: s.introPage === pages.length - 1 ? "Start exploring" : "Next",
+      introNext: () => s.introPage === pages.length - 1 ? this.closeIntro() : this.setState({introPage: s.introPage + 1}),
+      introBack: () => this.setState({introPage: Math.max(0, s.introPage - 1)}),
+      introBackStyle: `height:30px; padding:0 12px; border-radius:6px; font:inherit; font-size:12.5px; cursor:pointer; flex:none; white-space:nowrap; border:1px solid ${P.line}; background:${P.card}; color:${P.body}; visibility:${s.introPage === 0 ? "hidden" : "visible"};`,
+      openIntro: () => this.setState({intro:true, introPage:0}),
+      closeIntro: this.closeIntro,
+      cmdOpen: s.cmdOpen,
+      openCmd: () => this.setState({cmdOpen:true}),
+      closeCmd: () => this.setState({cmdOpen:false}),
+      clearSel: () => this.setState({sel:null}),
+      goHome: () => this.go("home"),
+      goSettings: () => this.go("settings"),
+      acctRow: `margin:8px; padding:7px 8px; border-radius:8px; display:flex; align-items:center; gap:9px; cursor:pointer; background:${page === "settings" ? "#E2DFD5" : "transparent"};`,
+    };
+  }
+}
+
+</script>
+</body>
+</html>
+
