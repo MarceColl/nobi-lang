@@ -49,7 +49,7 @@ defmodule Kinoko.Data do
 
   require Logger
 
-  alias Kinoko.Data.{Codec, Opener, Repo, Schema}
+  alias Kinoko.Data.{Cache, Codec, Opener, Repo, Schema}
 
   @max_rows 10_000
 
@@ -281,11 +281,30 @@ defmodule Kinoko.Data do
   `delete/4` of a row that cannot be read. `fun` may carry on, but nothing
   it writes is kept: the transaction answers `{:error, :rollback}`.
 
-  A schema sync done inside the transaction is not cached (a rollback
-  would undo it), so the next call outside syncs again.
+  A schema sync done inside the transaction is cached only once it
+  commits (a rollback would undo it): until then later calls in the
+  transaction reuse it, and after a rollback the next call syncs again.
+  A `transaction/2` inside another joins it.
   """
   @spec transaction(repo(), (-> term())) :: {:ok, term()} | {:error, term()}
-  def transaction(repo, fun), do: run(repo, fn -> transaction(fun) end)
+  def transaction(repo, fun) do
+    run(repo, fn ->
+      if Repo.in_transaction?() do
+        transaction(fun)
+      else
+        Cache.defer_begin()
+
+        try do
+          with {:ok, _} = result <- transaction(fun) do
+            Cache.defer_publish()
+            result
+          end
+        after
+          Cache.defer_end()
+        end
+      end
+    end)
+  end
 
   @doc "Rolls back the transaction `transaction/2` is running, which answers `{:error, value}`."
   @spec rollback(term()) :: no_return()
@@ -342,6 +361,13 @@ defmodule Kinoko.Data do
   defp error(code, message), do: {:error, %{code: code, message: message}}
 
   defp store_error(message), do: error("store", message)
+
+  defp layout(_repo, model, _sig) when not is_binary(model),
+    do:
+      store_error(
+        "this store operation's model never settled (an expression evaluated alone), " <>
+          "so it does not run: give the expression a type that names the model"
+      )
 
   defp layout(repo, model, sig) do
     models = if is_list(sig), do: %{model => sig}, else: sig

@@ -48,8 +48,11 @@ defmodule Kinoko.Data.Opener do
     end
   end
 
+  # No call timeout: the open it waits for is bounded by the file's own
+  # waits (`busy_timeout`), and a caller timing out first would only leave
+  # an opener that succeeds after its caller gave up.
   defp repo(opener) do
-    GenServer.call(opener, :repo)
+    GenServer.call(opener, :repo, :infinity)
   catch
     :exit, reason -> {:error, {:opener_down, reason}}
   end

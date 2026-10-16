@@ -468,6 +468,15 @@ defmodule Kinoko.Lang.RtTest do
       assert Rt.eq(ins, {:tx, :insert, "C.Row", row})
     end
 
+    test "a Store handle is its own kind, and comparing handles is a runtime error" do
+      store = {:store, self(), make_ref()}
+      assert Rt.kind_name(store) == "a Store"
+      assert {:yabu_error, message} = catch_throw(Rt.compare(store, store))
+      assert message =~ "Store"
+      assert {:yabu_error, _} = catch_throw(Rt.compare([store], [store]))
+      assert Rt.eq(store, store)
+    end
+
     test "JSON applied as a value" do
       assert Stdlib.json_parse("1") ==
                {:var, "Result", "Err",

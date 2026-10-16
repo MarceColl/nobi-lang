@@ -77,4 +77,9 @@ defmodule Kinoko.Data.HooksTest do
   test "something not a handle is a Yabu runtime error" do
     assert {:yabu_error, _} = catch_throw(Hooks.store_list(:nope, "A.Post"))
   end
+
+  test "an answer of the wrong shape is a Yabu runtime error, not a crash" do
+    pid = coordinator(:what)
+    assert {:yabu_error, _} = catch_throw(Hooks.store_list({:store, pid, make_ref()}, "A.Post"))
+  end
 end

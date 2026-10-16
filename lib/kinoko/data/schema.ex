@@ -31,10 +31,11 @@ defmodule Kinoko.Data.Schema do
   predates the field, hold `NULL` there). It never drops or alters a
   column. It runs in one `IMMEDIATE` transaction, so concurrent ensures of
   one file serialize. Its layout is cached per `{repo, model, signature
-  hash}` (`Kinoko.Data.Cache`), but only when it ran outside any enclosing
-  transaction: inside one (`Kinoko.Data.transaction/2`) a rollback would
-  undo the table or columns the cache would claim, so it is not cached
-  there and the next call syncs again.
+  hash}` (`Kinoko.Data.Cache`). Inside an enclosing transaction
+  (`Kinoko.Data.transaction/2`) a rollback would undo the table or
+  columns the cache would claim, so there the layout is deferred: kept
+  for the rest of the transaction and cached only once it commits
+  (`Kinoko.Data.Cache`'s "Deferred entries").
   """
 
   alias Kinoko.Data.{Cache, Codec, Repo}
@@ -123,10 +124,28 @@ defmodule Kinoko.Data.Schema do
       _ ->
         # Checked before `sync/3` opens its own transaction: only an
         # enclosing one can roll the sync back after it returns.
-        enclosed? = Repo.in_transaction?()
+        if Repo.in_transaction?(),
+          do: enclosed_layout(key, model, fields),
+          else: synced(key, model, fields)
+    end
+  end
 
+  defp synced(key, model, fields) do
+    with {:ok, layout} <- sync(model, fields) do
+      Cache.put(key, {fields, layout})
+      {:ok, layout}
+    end
+  end
+
+  # Inside a transaction: deferred until it commits (`Cache.defer/2`).
+  defp enclosed_layout(key, model, fields) do
+    case Cache.deferred(key) do
+      {:ok, {^fields, layout}} ->
+        {:ok, layout}
+
+      _ ->
         with {:ok, layout} <- sync(model, fields) do
-          unless enclosed?, do: Cache.put(key, {fields, layout})
+          Cache.defer(key, {fields, layout})
           {:ok, layout}
         end
     end

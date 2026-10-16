@@ -30,8 +30,19 @@ defmodule Kinoko.Data.Hooks do
 
   A coordinator that is gone, or answers `:closed`, means the handle
   outlived its transaction: the Yabu runtime error
-  `"store handle used outside its transaction"`. No answer within
-  `read_timeout/0` is a Yabu runtime error too.
+  `"store handle used outside its transaction"`. An answer of any other
+  shape is a Yabu runtime error too, never a crash.
+
+  ## No deadline of its own
+
+  A read waits for its answer without a timeout of its own
+  (`read_timeout/0` is `:infinity`): the transaction's one deadline
+  governs it. The body runs in an Exec worker bounded by the transaction
+  timeout (`Kinoko.Data.Tx`), which kills the reader, waiting or not; and
+  the coordinator answers every read promptly while it lives (`:closed`
+  once the body has returned, including for a ref not its own), so a
+  read on a live coordinator never hangs and one on a dead coordinator
+  ends on the monitor. `request/3` takes an explicit timeout, for tests.
 
   The reader monitors the coordinator for the read's duration, and takes
   only a reply carrying the handle's `ref`.
@@ -39,11 +50,11 @@ defmodule Kinoko.Data.Hooks do
 
   import Kinoko.Lang.Rt, only: [error!: 1]
 
-  @read_timeout 10_000
+  @read_timeout :infinity
   @outside "store handle used outside its transaction"
 
-  @doc "How long a read waits for the coordinator, in ms."
-  @spec read_timeout() :: pos_integer()
+  @doc "How long a read waits for the coordinator: `:infinity` (see \"No deadline of its own\")."
+  @spec read_timeout() :: timeout()
   def read_timeout, do: @read_timeout
 
   @doc "`Store.get(s, id)` of `model`: `Option<M>`."
@@ -84,4 +95,5 @@ defmodule Kinoko.Data.Hooks do
   defp answer({:ok, value}), do: value
   defp answer({:error, message}) when is_binary(message), do: error!(message)
   defp answer(:closed), do: error!(@outside)
+  defp answer(_), do: error!("the store answered a read with something not a reply")
 end

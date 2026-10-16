@@ -54,8 +54,11 @@ defmodule Kinoko.Lang.Rt do
   A batch holds its commands *bare*: `:none`, `{:batch, _}` or
   `{:effect, ...}`, never re-wrapped in `{:cmd, _}`.
 
-  A Yabu tuple is never mistaken for a record, variant, Uuid or Cmd: those
-  tag their first element with an atom that no Yabu value is.
+  A Yabu tuple is never mistaken for a record, variant, Uuid, Cmd, Tx op
+  or Store: those tag their first element with an atom (`:rec`, `:var`,
+  `:uuid`, `:cmd`, `:tx`, `:store`) that no Yabu value is. A Store is its
+  own kind (`kind_name/1` "a Store"); comparing two is a runtime error, as
+  a handle has no order (`eq/2` is still structural).
 
   ## Errors
 
@@ -75,7 +78,7 @@ defmodule Kinoko.Lang.Rt do
   never compared.
 
   `compare/2` is Rust's `Value` `Ord`: first by kind (Int, String, Bool,
-  Uuid, List, Map, tuple, record, variant, function, Cmd), then
+  Uuid, List, Map, tuple, record, variant, function, Cmd, Store), then
   structurally. Functions order as Rust's do, read without their
   environment (`fun_order`): closures first (by their code's identity),
   then defs, then constructors, each by name.
@@ -418,6 +421,7 @@ defmodule Kinoko.Lang.Rt do
   defp kind({:tx, _, _, _} = op), do: kind(tx_variant(op))
   defp kind({:tx, _, _, _, _} = op), do: kind(tx_variant(op))
   defp kind({:cmd, _}), do: 10
+  defp kind({:store, pid, ref}) when is_pid(pid) and is_reference(ref), do: 11
   defp kind(v) when is_tuple(v), do: 6
   defp kind(v) when is_function(v), do: 9
 
@@ -449,6 +453,7 @@ defmodule Kinoko.Lang.Rt do
   # their code's identity, the rest by what they name. Never by environment.
   defp same_kind(9, a, b), do: order(fun_order(a), fun_order(b))
   defp same_kind(10, {:cmd, a}, {:cmd, b}), do: bare_cmd(a, b)
+  defp same_kind(11, _, _), do: error!("a Store cannot be compared")
 
   # Rust's `Cmd` Ord: None < Batch < Effect, then their parts.
   defp bare_cmd(a, b) do
@@ -613,7 +618,7 @@ defmodule Kinoko.Lang.Rt do
   def kind_name(v) do
     elem(
       {"an Int", "a String", "a Bool", "a Uuid", "a List", "a Map", "a tuple", "a record",
-       "a variant", "a function", "a Cmd"},
+       "a variant", "a function", "a Cmd", "a Store"},
       kind(v)
     )
   end

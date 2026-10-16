@@ -632,6 +632,21 @@ defmodule Kinoko.DataTest do
       assert {:error, %{code: "store"}} =
                Data.insert(repo, "Forum.Post", @v1, post(%{"title" => 1, "votes" => 1}))
     end
+
+    test "an operation whose model never settled is refused before any SQL", %{dir: dir} do
+      repo = open!(dir)
+
+      for result <- [
+            Data.insert(repo, nil, @v1, v1_post("t", 1)),
+            Data.list(repo, nil, %{"Forum.Post" => @v1}),
+            Data.get(repo, nil, @v1, {:uuid, Ecto.UUID.generate()})
+          ] do
+        assert {:error, %{code: "store", message: message}} = result
+        assert message =~ "never settled"
+      end
+
+      assert sql!(repo, "SELECT COUNT(*) FROM _kinoko_tables") == [[0]]
+    end
   end
 
   describe "stats" do
