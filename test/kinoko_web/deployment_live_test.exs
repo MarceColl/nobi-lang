@@ -433,6 +433,13 @@ defmodule KinokoWeb.DeploymentLiveTest do
       submit(old, "#new-thread")
       assert "/post/" <> _ = assert_patch(old, 5_000)
       assert stat(u, "Forum.Topic").rows == 2
+
+      # The head (v2) reads v1's row with the new field's default.
+      {:ok, image} = Universe.image(u)
+      {:ok, repo} = Data.open(u)
+      {:ok, rows} = Data.list(repo, "Forum.Topic", image.module.__yabu__(:models))
+      pinned = Map.new(rows, fn {:rec, _, f} -> {f["title"], f["pinned"]} end)
+      assert pinned == %{"From v2" => true, "From v1" => false}
     end
 
     test "a row storage cannot read: the banner, or tx's Err", %{conn: conn, u: u} do
@@ -459,6 +466,52 @@ defmodule KinokoWeb.DeploymentLiveTest do
       eventually(post, fn _ -> has_element?(post, "#post-error", "Forum.Topic") end)
       refute has_element?(post, "#kinoko-error")
       assert stat(u, "Forum.Reply").rows == 0
+    end
+  end
+
+  describe "store errors the browser sees" do
+    setup do
+      %{u: deploy(@forum, "Forum")}
+    end
+
+    test "SQLite's own words never reach the banner or a tx's Err", %{conn: conn, u: u} do
+      {view, _html} = open(conn, u, "/")
+      change(view, change_id(view, "#title"), "Dup")
+      submit(view, "#new-thread")
+      assert "/post/" <> _ = path = assert_patch(view, 5_000)
+
+      {:ok, repo} = Data.open(u)
+      {:ok, image} = Universe.image(u)
+      :ok = Data.ensure(repo, "Forum.Reply", image.module.__yabu__(:models))
+      Data.Repo.put_dynamic_repo(repo)
+      Data.Repo.query!(~s[CREATE UNIQUE INDEX one_title ON "forum__topic" ("title")])
+      Data.Repo.query!(~s[CREATE UNIQUE INDEX one_body ON "forum__reply" ("body")])
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          {view, _html} = open(conn, u, "/")
+          change(view, change_id(view, "#title"), "Dup")
+          submit(view, "#new-thread")
+          eventually(view, &(&1 =~ ~s(id="kinoko-error")))
+          assert has_element?(view, "#kinoko-error", "the store rejected the operation")
+          refute render(view) =~ "UNIQUE"
+
+          {post, _html} = open(conn, u, path)
+
+          for _ <- 1..2 do
+            change(post, change_id(post, "#draft"), "same")
+            submit(post, "#reply-form")
+          end
+
+          eventually(post, fn _ ->
+            has_element?(post, "#post-error", "the store rejected the operation")
+          end)
+
+          refute render(post) =~ "UNIQUE"
+          refute has_element?(post, "#kinoko-error")
+        end)
+
+      assert log =~ "UNIQUE constraint failed"
     end
   end
 
@@ -754,6 +807,18 @@ defmodule KinokoWeb.DeploymentLiveTest do
       assert m.error.message =~ "Cmd.store.list"
       assert m.error.message =~ "never settled"
       refute Enum.any?(List.flatten([fx]), &match?({:async, {:task, _}, _}, &1))
+    end
+
+    test "a store task in flight counts as busy until its result arrives" do
+      {m, _} = DeploymentLive.update({:committed, "x", %{commit: 3}}, following(2))
+      cmd = {:cmd, {:effect, "Cmd.store.list", "X.Row", [fn rows -> rows end]}}
+      {m, fx} = DeploymentLive.update({:stepped, 1, {:ok, %{cmd: cmd}}}, m)
+      assert m.storing == 1 and DeploymentLive.busy?(m)
+      assert Enum.any?(List.flatten([fx]), &match?({:async, {:task, _}, _}, &1))
+
+      # Even a result for a replaced mount ends the wait.
+      {m, _} = DeploymentLive.update({:stored, -1, {:ok, :msg}}, m)
+      assert m.storing == 0 and not DeploymentLive.busy?(m)
     end
 
     test "a crashed step shows a generic banner, never the crash" do

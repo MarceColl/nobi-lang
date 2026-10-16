@@ -55,8 +55,11 @@ defmodule Kinoko.Data.Tx do
   - the file busy (`SQLITE_BUSY`, past `busy_timeout`) on every try:
     `"the store is busy …"`. Busy is retried up to 3 times, the body
     run again each time, which is safe as the body is pure;
-  - anything internal (a crash in the runtime, a dead repo): a generic
-    message; the details are logged, not shown.
+  - the store down (closed, crashed): `"the store is unavailable …"`,
+    never retried;
+  - anything internal (a crash in the runtime): a generic message; the
+    details are logged, not shown. SQLite's own messages never reach the
+    program (`Kinoko.Data` logs them).
 
   ## One deadline
 
@@ -180,9 +183,14 @@ defmodule Kinoko.Data.Tx do
     end
   end
 
-  defp busy?(%{code: "unavailable"}), do: true
-  defp busy?({:data, %{code: "unavailable"}}), do: true
+  # Only a busy file is worth another try; a store that is down stays down.
+  defp busy?(%{reason: :busy}), do: true
+  defp busy?({:data, %{reason: :busy}}), do: true
   defp busy?(_), do: false
+
+  defp down?(%{reason: :down}), do: true
+  defp down?({:data, %{reason: :down}}), do: true
+  defp down?(_), do: false
 
   # Inside the transaction: run the body, serve its reads, apply its ops.
   defp body_phase(state) do
@@ -201,9 +209,10 @@ defmodule Kinoko.Data.Tx do
     deadline = System.monotonic_time(:millisecond) + state.timeout + @grace
 
     case serve(state, ref, runner, deadline, nil) do
-      {_, "unavailable" = code} ->
-        # A read found the file busy: the body's answer is not to be trusted.
-        Data.rollback({:data, %{code: code, message: "a read found the store busy"}})
+      {_, %{code: "unavailable"} = error} ->
+        # A read found the file busy (or the store down): the body's answer
+        # is not to be trusted.
+        Data.rollback({:data, error})
 
       {{:ok, {ops, r}}, _} when is_list(ops) ->
         with :ok <- check_ops(ops),
@@ -223,7 +232,8 @@ defmodule Kinoko.Data.Tx do
     end
   end
 
-  # Answers reads until the body answers: `{answer, failed read's code}`.
+  # Answers reads until the body answers: `{answer, the first read error
+  # that was "unavailable"}`.
   defp serve(state, ref, runner, deadline, failed) do
     left = max(deadline - System.monotonic_time(:millisecond), 0)
     caller = state.caller
@@ -233,9 +243,9 @@ defmodule Kinoko.Data.Tx do
         {answer, failed}
 
       {:kinoko_store_read, ^ref, from, op} ->
-        {reply, code} = read(state, op)
+        {reply, error} = read(state, op)
         send(from, {:kinoko_store_reply, ref, reply})
-        serve(state, ref, runner, deadline, failed || code)
+        serve(state, ref, runner, deadline, failed || unavailable(error))
 
       {:kinoko_store_read, other, from, _op} ->
         send(from, {:kinoko_store_reply, other, :closed})
@@ -262,18 +272,21 @@ defmodule Kinoko.Data.Tx do
     case Data.get(state.repo, model, state.models, id) do
       {:ok, nil} -> {{:ok, @none}, nil}
       {:ok, row} -> {{:ok, {:var, "Option", "Some", [row]}}, nil}
-      {:error, %{code: code, message: message}} -> {{:error, message}, code}
+      {:error, %{message: message} = error} -> {{:error, message}, error}
     end
   end
 
   defp read(state, {:list, model}) do
     case Data.list(state.repo, model, state.models) do
       {:ok, rows} -> {{:ok, rows}, nil}
-      {:error, %{code: code, message: message}} -> {{:error, message}, code}
+      {:error, %{message: message} = error} -> {{:error, message}, error}
     end
   end
 
   defp read(_state, op), do: {{:error, "a store read of an unknown kind: #{inspect(op)}"}, nil}
+
+  defp unavailable(%{code: "unavailable"} = error), do: error
+  defp unavailable(_error), do: nil
 
   defp check_ops(ops) do
     Enum.find_value(ops, :ok, fn
@@ -358,12 +371,17 @@ defmodule Kinoko.Data.Tx do
   defp message(:caller_down, _timeout), do: "the transaction's caller stopped"
 
   defp message(reason, _timeout) do
-    if busy?(reason) do
-      Logger.warning("Kinoko.Data.Tx: busy after #{@retries} retries: #{inspect(reason)}")
-      "the store is busy; the transaction was not applied, try again"
-    else
-      Logger.error("Kinoko.Data.Tx failed: #{inspect(reason, limit: 20)}")
-      "the transaction failed (an internal error); nothing was applied"
+    cond do
+      busy?(reason) ->
+        Logger.warning("Kinoko.Data.Tx: busy after #{@retries} retries: #{inspect(reason)}")
+        "the store is busy; the transaction was not applied, try again"
+
+      down?(reason) ->
+        "the store is unavailable; the transaction was not applied"
+
+      true ->
+        Logger.error("Kinoko.Data.Tx failed: #{inspect(reason, limit: 20)}")
+        "the transaction failed (an internal error); nothing was applied"
     end
   end
 end

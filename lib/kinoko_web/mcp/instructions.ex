@@ -184,7 +184,8 @@ defmodule KinokoWeb.Mcp.Instructions do
     Cmd.store.get(id, fn (row : Option<M>) -> msg end)
     Cmd.store.update(id, row, fn (id : Uuid) -> msg end)  whole-row replace
     Cmd.store.delete(id, fn (row : Option<M>) -> msg end)
-    The model M comes from the callback's type, so pass a Msg constructor
+    The model M comes from the row (insert, update) or from the callback's
+    type (list, get, delete), so pass a Msg constructor
     (`Cmd.store.list(Counter.Msg.Loaded)` with `Loaded(List<Counter.Snapshot>)`).
     A failed operation shows the page's error banner and sends no msg.
   - Read-modify-write is a TRANSACTION closure, run atomically (concurrent

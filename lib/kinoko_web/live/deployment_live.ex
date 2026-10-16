@@ -54,7 +54,9 @@ defmodule KinokoWeb.DeploymentLive do
     * `App.update(msg, model)`, then `App.view`. The new model and view
       are kept only if both succeed: an error (runtime, timeout, heap,
       degraded, unavailable, ...) keeps the previous model and view and
-      shows a banner. Internal errors show a generic message; their detail
+      shows a banner. The banner stays until an event, a new mount or a
+      dismiss: an effect callback that succeeds after another failed (two
+      effects of one batch) leaves it in place. Internal errors show a generic message; their detail
       goes to the log, never to the browser.
 
   ## Effects
@@ -76,7 +78,10 @@ defmodule KinokoWeb.DeploymentLive do
       shows the banner (`"store"`, `"unavailable"`, `"too-many-rows"`,
       `"not-found"`) and delivers no msg, except `tx`, whose callback
       receives `Result.Err(message)`. An effect whose model never settled
-      (`nil`, from a lone expression) is refused with a banner.
+      (`nil`, from a lone expression) is refused with a banner. While a
+      store task runs the page is busy too (progress bar, `aria-busy`):
+      its answer arrives as `{:stored, gen, result}`, which ends the wait
+      even for a replaced mount, then queues as a callback.
     * Anything else (`Cmd.blob.*`, `Cmd.ai.*`): a notice, "`<effect>` is
       not available yet".
 
@@ -179,6 +184,8 @@ defmodule KinokoWeb.DeploymentLive do
        # Steps: the last seq started, the one in flight, and what waits.
        seq: 0,
        inflight: nil,
+       # Store tasks started and not yet answered (busy while any run).
+       storing: 0,
        queue: :queue.new(),
        queued: 0
      }), Fx.none()}
@@ -207,6 +214,9 @@ defmodule KinokoWeb.DeploymentLive do
   def update({:event, _event, _params}, m), do: {m, Fx.none()}
 
   def update({:yabu_callback, gen, result}, m), do: enqueue(m, {:callback, gen, result})
+
+  def update({:stored, gen, result}, m),
+    do: enqueue(%{m | storing: max(m.storing - 1, 0)}, {:callback, gen, result})
 
   def update(
         {:committed, universe, _info},
@@ -442,10 +452,10 @@ defmodule KinokoWeb.DeploymentLive do
       true ->
         gen = m.gen
 
-        {m,
+        {%{m | storing: m.storing + 1},
          Fx.task(store(m, origin, op, model, args), fn
            {:ok, msg} -> msg
-           {:error, crash} -> {:yabu_callback, gen, {:error, {:store_crashed, name, crash}}}
+           {:error, crash} -> {:stored, gen, {:error, {:store_crashed, name, crash}}}
          end)}
     end
   end
@@ -491,7 +501,7 @@ defmodule KinokoWeb.DeploymentLive do
           Universe.apply(target, cb, [value], [])
         end
 
-      {:yabu_callback, gen, result}
+      {:stored, gen, result}
     end
   end
 
@@ -839,19 +849,25 @@ defmodule KinokoWeb.DeploymentLive do
     %{code: "internal", message: "Something went wrong on the server."}
   end
 
+  @doc "Whether a step or a store task is running (the progress bar, `aria-busy`)."
+  def busy?(m), do: m.inflight != nil or m.storing > 0
+
   ## view
 
   @impl KinokoWeb.ElmLiveView
   def view(assigns) do
     ~H"""
     <Layouts.app flash={@flash} bare>
-      <div id="kinoko-deployment" class="min-h-screen" aria-busy={to_string(@model.inflight != nil)}>
+      <div id="kinoko-deployment" class="min-h-screen" aria-busy={to_string(busy?(@model))}>
         <div
           id="kinoko-progress"
           aria-hidden="true"
           class={[
             "pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 origin-left bg-zinc-900/70 transition-all duration-300 ease-out",
-            if(@model.inflight, do: "scale-x-75 opacity-100 delay-150", else: "scale-x-0 opacity-0")
+            if(busy?(@model),
+              do: "scale-x-75 opacity-100 delay-150",
+              else: "scale-x-0 opacity-0"
+            )
           ]}
         />
         <%= case @model.page do %>

@@ -578,10 +578,40 @@ defmodule Kinoko.DataTest do
     test "a closed deployment's repo is unavailable", %{dir: dir} do
       repo = open!(dir)
       :ok = Data.close("app", dir: dir)
-      assert {:error, %{code: "unavailable"}} = Data.list(repo, "Forum.Post", @v1)
 
-      assert {:error, %{code: "unavailable"}} =
-               Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, %{code: "unavailable"}} = Data.list(repo, "Forum.Post", @v1)
+
+        assert {:error, %{code: "unavailable"}} =
+                 Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+      end)
+    end
+
+    test "SQLite's own words never come back: a constraint is a generic store error",
+         %{dir: dir} do
+      repo = open!(dir)
+      :ok = Data.ensure(repo, "Forum.Post", @v1)
+      sql!(repo, ~s[CREATE UNIQUE INDEX one_title ON "forum__post" ("title")])
+      {:ok, _} = Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+
+      {result, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          Data.insert(repo, "Forum.Post", @v1, v1_post("t", 2))
+        end)
+
+      assert {:error, %{code: "store", message: "the store rejected the operation"}} = result
+      assert log =~ "UNIQUE constraint failed"
+    end
+
+    test "a closed store is down (not busy), with a generic message", %{dir: dir} do
+      repo = open!(dir)
+      :ok = Data.close("app", dir: dir)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error,
+                %{code: "unavailable", reason: :down, message: "the store is unavailable"}} =
+                 Data.list(repo, "Forum.Post", @v1)
+      end)
     end
 
     test "a locked file is unavailable, not a store error", %{dir: dir} do
@@ -592,8 +622,10 @@ defmodule Kinoko.DataTest do
       :ok = Exqlite.Sqlite3.execute(conn, "BEGIN IMMEDIATE")
 
       try do
-        assert {:error, %{code: "unavailable"}} =
+        assert {:error, %{code: "unavailable", reason: :busy, message: message}} =
                  Data.insert(repo, "Forum.Post", @v1, v1_post("t", 1))
+
+        assert message == "the store is busy; try again"
       after
         :ok = Exqlite.Sqlite3.execute(conn, "ROLLBACK")
         Exqlite.Sqlite3.close(conn)

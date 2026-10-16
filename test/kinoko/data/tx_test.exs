@@ -264,6 +264,46 @@ defmodule Kinoko.Data.TxTest do
       assert notes(repo, models) == ["a"]
     end
 
+    test "a closed store says so plainly: unavailable, not busy", %{
+      dir: dir,
+      image: image,
+      models: models
+    } do
+      repo = open!(dir)
+      :ok = Data.ensure(repo, "T.Note", models)
+      :ok = Data.close("app", dir: dir)
+      parent = self()
+
+      body = fn _ ->
+        send(parent, :ran)
+        {[{:tx, :insert, "T.Note", note("a")}], 0}
+      end
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, "the store is unavailable; the transaction was not applied"} =
+                 Tx.run(repo, image, body, [])
+      end)
+
+      refute_received :ran
+    end
+
+    test "a constraint SQLite enforces comes back without SQLite's words", %{
+      dir: dir,
+      image: image,
+      models: models
+    } do
+      repo = open!(dir)
+      {:ok, _} = Data.insert(repo, "T.Note", models, note("a"))
+      Data.Repo.put_dynamic_repo(repo)
+      Data.Repo.query!(~s[CREATE UNIQUE INDEX one_text ON "t__note" ("text")])
+
+      body = fn _ -> {[{:tx, :insert, "T.Note", note("a")}], 0} end
+
+      {result, log} = ExUnit.CaptureLog.with_log(fn -> Tx.run(repo, image, body, []) end)
+      assert {:error, "the store rejected the operation"} = result
+      assert log =~ "UNIQUE constraint failed"
+    end
+
     test "a file busy past every retry is unavailable", %{dir: dir, image: image, models: models} do
       repo = open!(dir, busy_timeout: 20)
       :ok = Data.ensure(repo, "T.Note", models)

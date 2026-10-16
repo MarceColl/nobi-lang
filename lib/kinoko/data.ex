@@ -38,10 +38,16 @@ defmodule Kinoko.Data do
 
   `{:error, %{code: code, message: message}}`:
 
-  - `"unavailable"`: the file is busy or locked past `busy_timeout`, or
-    the repo is gone (closed, crashed). Safe to retry.
+  - `"unavailable"`: the file is busy or locked past `busy_timeout`
+    (`reason: :busy`, "the store is busy; try again": safe to retry), or
+    the repo is gone, closed or crashed (`reason: :down`, "the store is
+    unavailable": retrying does not help).
   - `"store"`: a constraint failed, a value cannot be stored, or a stored
-    value cannot be read as the reader's type. Never a wrong value.
+    value cannot be read as the reader's type. Never a wrong value. A
+    value or row the codec refuses is named (`Model.field`); anything
+    SQLite itself refuses is "the store rejected the operation".
+
+  SQLite's and the pool's own messages are logged, never returned.
   - `"too-many-rows"`, `"not-found"`: as above.
 
   `open/2` alone answers `{:error, :bad_name}` for a deployment name that
@@ -53,6 +59,10 @@ defmodule Kinoko.Data do
   alias Kinoko.Data.{Cache, Codec, Opener, Repo, Schema}
 
   @max_rows 10_000
+
+  @busy "the store is busy; try again"
+  @down "the store is unavailable"
+  @rejected "the store rejected the operation"
 
   @type repo :: pid()
   @type error :: %{code: String.t(), message: String.t()}
@@ -338,35 +348,47 @@ defmodule Kinoko.Data do
           {:error, sql_error(e)}
 
         e in DBConnection.ConnectionError ->
-          unavailable(Exception.message(e))
+          down(e)
 
         # Ecto's lookup of a repo pid that died since the liveness check.
         e in RuntimeError ->
           if String.starts_with?(e.message, "could not lookup Ecto repo"),
-            do: unavailable(e.message),
+            do: down(e),
             else: reraise(e, __STACKTRACE__)
       catch
-        :exit, reason -> unavailable("the store stopped: #{inspect(reason, limit: 5)}")
+        :exit, reason -> down({:exit, reason})
       after
         Repo.put_dynamic_repo(previous)
       end
     else
-      unavailable("the deployment's store is closed")
+      down(:closed)
     end
   end
 
-  defp sql_error(%Exqlite.Error{message: message}) do
+  # SQLite's and the pool's own words (table and column names, file
+  # states, pids) never leave here: they are logged, and the caller gets
+  # one generic message per class.
+  defp sql_error(%Exqlite.Error{message: message} = e) do
     text = String.downcase(message || "")
 
-    code =
-      if String.contains?(text, "locked") or String.contains?(text, "busy"),
-        do: "unavailable",
-        else: "store"
-
-    %{code: code, message: message}
+    if String.contains?(text, "locked") or String.contains?(text, "busy") do
+      Logger.info("Kinoko.Data: busy: #{Exception.message(e)}")
+      %{code: "unavailable", reason: :busy, message: @busy}
+    else
+      Logger.error("Kinoko.Data: SQLite refused: #{Exception.message(e)}")
+      %{code: "store", message: @rejected}
+    end
   end
 
-  defp unavailable(message), do: {:error, %{code: "unavailable", message: message}}
+  defp down(:closed) do
+    Logger.warning("Kinoko.Data: a call on a closed store")
+    {:error, %{code: "unavailable", reason: :down, message: @down}}
+  end
+
+  defp down(detail) do
+    Logger.error("Kinoko.Data: the store is down: #{inspect(detail, limit: 20)}")
+    {:error, %{code: "unavailable", reason: :down, message: @down}}
+  end
 
   defp error(code, message), do: {:error, %{code: code, message: message}}
 
