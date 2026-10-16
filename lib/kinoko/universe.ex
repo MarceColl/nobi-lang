@@ -22,7 +22,7 @@ defmodule Kinoko.Universe do
       out). A write's outcome is then unknown: restage the same id, which is
       idempotent.
 
-  `eval/3`, `call/4`, `test/3`, `apply/4` and `routes/1` also return
+  `eval/3`, `call/4`, `test/3`, `apply/4`, `routes/1` and `graph/1` also return
   `{:error, %{code: "degraded", message: m}}` while the universe is
   degraded (`health/1`), `m` naming the declarations that fail.
 
@@ -31,8 +31,8 @@ defmodule Kinoko.Universe do
   ## Pinned views
 
   `at/2` gives a `Kinoko.Universe.At`, the universe as of one commit.
-  `eval/3`, `call/4`, `test/3`, `apply/4`, `apps/1` and `routes/1` take
-  one in place of the universe's name and answer with that commit's code,
+  `eval/3`, `call/4`, `test/3`, `apply/4`, `apps/1`, `routes/1` and
+  `graph/1` take one in place of the universe's name and answer with that commit's code,
   whatever promotes later. `subscribe/1` hears of each new commit.
 
   ## Degraded
@@ -60,8 +60,8 @@ defmodule Kinoko.Universe do
   blocks the universe. They first ask the CodeDb for its image's hash and
   signatures only (`:image_key`), and take the whole committed code
   (`:snapshot`) only when no image of that hash is loaded yet
-  (`Kinoko.Exec.loaded/1`). `apply/4`, `routes/1` and `at/2` (which
-  replays history and reads the CAS) run in the caller the same way.
+  (`Kinoko.Exec.loaded/1`). `apply/4`, `routes/1`, `graph/1` and `at/2`
+  (which replays history and reads the CAS) run in the caller the same way.
 
   A promotion is announced by the CodeDb itself, after it is stored, on
   `Kinoko.PubSub` topic `"universe:<name>"` (`subscribe/1`).
@@ -434,6 +434,48 @@ defmodule Kinoko.Universe do
          {:ok, routes} <- Exec.routes(run_on(target)),
          do: routes
   end
+
+  @doc """
+  The system graph of the current commit or a pinned view
+  (`Kinoko.Lang.Graph`):
+  `%{apps: [%{symbol, routes: [pattern]}], stores: [%{symbol, fields}],
+  edges: [%{from: app, to: model, kind: :reads | :writes}]}`, each list
+  sorted, `routes` patterns as written (`"/post/:id"`), `stores` the
+  models that declare `id : Uuid` with their field names in order, and an
+  edge for each model an app's `init`/`update`/`view` (through every def
+  they reach) reads or writes. Worked out in the caller from the checked
+  code and cached by image hash, so asking again for the same code reads
+  nothing but the hash. A degraded universe answers `"degraded"`.
+  """
+  @spec graph(name | At.t()) :: Lang.Graph.t() | error
+  def graph(%At{hash: hash} = at), do: cached_graph(hash, fn -> snapshot_at(at) end)
+
+  def graph(universe) do
+    case read_request(universe, :image_key) do
+      {:ok, hash, _sigs} -> cached_graph(hash, fn -> snapshot(universe) end)
+      other -> runnable(universe, other)
+    end
+  end
+
+  # The graph of image `hash`, else of `snapshot`'s code, cached under that
+  # code's own hash: a promotion between the two reads caches the newer
+  # code under its hash, never under the older one. Nothing is evicted, as
+  # images are not (`Kinoko.Exec`).
+  defp cached_graph(hash, snapshot) do
+    case :persistent_term.get(graph_key(hash), nil) do
+      nil ->
+        with {:ok, snapshot} <- snapshot.() do
+          graph = Lang.graph(snapshot)
+          :persistent_term.put(graph_key(Lang.image_hash(snapshot)), graph)
+          graph
+        end
+
+      graph ->
+        graph
+    end
+  end
+
+  defp graph_key(hash), do: {__MODULE__, :graph, hash}
 
   @doc """
   Subscribes the caller to the universe's commits: after each write that

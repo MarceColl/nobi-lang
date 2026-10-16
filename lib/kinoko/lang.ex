@@ -52,7 +52,7 @@ defmodule Kinoko.Lang do
   (a fault of the checker or universe, the universe left as it was).
   """
 
-  alias Kinoko.Lang.{Ast, Cid, Codegen, Format, Parser, Universe}
+  alias Kinoko.Lang.{Ast, Cid, Codegen, Format, Graph, Parser, Universe}
   alias Kinoko.Lang.Types.{Check, Extract}
 
   @type reason :: %{name: String.t() | nil, code: String.t(), message: String.t()}
@@ -332,8 +332,18 @@ defmodule Kinoko.Lang do
   The hash of the committed code's image (`Kinoko.Lang.Codegen.image_hash/1`):
   what `image/1` would name its module by, without compiling anything.
   """
-  @spec image_hash(Universe.t()) :: String.t()
+  @spec image_hash(Universe.t() | snapshot()) :: String.t()
+  def image_hash(%{committed: committed, signatures: _}), do: Codegen.image_hash(committed)
   def image_hash(u), do: u |> Universe.committed() |> Codegen.image_hash()
+
+  @doc """
+  The committed code's system graph (`Kinoko.Lang.Graph.of/1`): its apps
+  with their route patterns, its stored models with their fields, and the
+  `reads`/`writes` edges from apps to models.
+  """
+  @spec graph(Universe.t() | snapshot()) :: Graph.t()
+  def graph(%{committed: committed, signatures: _}), do: Graph.of(committed)
+  def graph(u), do: u |> committed() |> Graph.of()
 
   @doc """
   The committed code compiled to one Erlang module (`Kinoko.Lang.Codegen`):
