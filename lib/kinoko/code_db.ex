@@ -51,7 +51,20 @@ defmodule Kinoko.CodeDb do
   ## Storage
 
   `durable/1` is `Kinoko.Lang.durable/1`: commits and staged patches as names
-  and CIDs, never text. `decode/1` fetches the declarations by CID from
+  and CIDs, never text.
+
+  `encode/1` writes it with **no atom anywhere** (version 2): strings, lists
+  and maps with string keys only, an entry `["live", symbol, cid]` or
+  `["gone", symbol]`. `binary_to_term/2` with `:safe` refuses atoms the node
+  does not know yet, and in dev modules load lazily, so a fresh VM booting a
+  universe may not have loaded `Kinoko.Lang` (whose atoms the durable shape
+  uses) when the CodeDb decodes. An atom-free binary decodes on any node.
+  Version 1 stored the durable map itself (atoms); `stored/1` still reads
+  it, its atoms being literals of this module (so known once it runs), and
+  `migrate/2` has nothing left to do: the first step stores it again as
+  version 2.
+
+  `decode/1` fetches the declarations by CID from
   `Kinoko.Cas`, parses them and rebuilds the universe with
   `Kinoko.Lang.restore/3`, which checks the code again.
 
@@ -181,11 +194,69 @@ defmodule Kinoko.CodeDb do
   def durable(%{u: u}), do: Lang.durable(u)
 
   @impl true
-  def encode(durable), do: :erlang.term_to_binary(durable, compressed: 6)
+  def version, do: 2
+
+  # `decode/1` already reads a version-1 binary into the current state
+  # (see "Storage"), so there is nothing left to migrate.
+  @impl true
+  def migrate(state, 1), do: state
+
+  @impl true
+  def encode(%{commits: commits, staged: staged}) do
+    :erlang.term_to_binary(
+      %{
+        "commits" =>
+          for(%{ids: ids, entries: entries} <- commits, do: [ids, Enum.map(entries, &applied/1)]),
+        "staged" => for({id, entries} <- staged, do: [id, Enum.map(entries, &staged_entry/1)])
+      },
+      compressed: 6
+    )
+  end
+
+  defp applied({:live, symbol, cid}), do: ["live", symbol, cid]
+  defp applied({:gone, symbol}), do: ["gone", symbol]
+
+  defp staged_entry({symbol, :gone}), do: ["gone", symbol]
+  defp staged_entry({symbol, cid}), do: ["live", symbol, cid]
+
+  # Every atom a version-1 binary holds. Literal atoms exist once this
+  # module is loaded, so `binary_to_term/2` with `:safe` reads such a
+  # binary on a node that has not loaded `Kinoko.Lang` yet.
+  @v1_atoms [:commits, :staged, :ids, :entries, :live, :gone]
+
+  @doc """
+  The `Kinoko.Lang.durable/1` a binary stored by this module holds, read
+  without the CAS. Reads both encodings: version 2 (`encode/1`, no atoms)
+  and version 1 (`term_to_binary` of the durable map itself).
+  """
+  @spec stored(binary()) :: %{commits: [map()], staged: [{String.t(), [tuple()]}]}
+  def stored(binary) do
+    case :erlang.binary_to_term(binary, [:safe]) do
+      %{"commits" => commits, "staged" => staged} ->
+        %{
+          commits:
+            for(
+              [ids, entries] <- commits,
+              do: %{ids: ids, entries: Enum.map(entries, &from_applied/1)}
+            ),
+          staged: for([id, entries] <- staged, do: {id, Enum.map(entries, &from_staged_entry/1)})
+        }
+
+      %{commits: _, staged: _} = v1 ->
+        true = Enum.all?(@v1_atoms, &is_atom/1)
+        v1
+    end
+  end
+
+  defp from_applied(["live", symbol, cid]), do: {:live, symbol, cid}
+  defp from_applied(["gone", symbol]), do: {:gone, symbol}
+
+  defp from_staged_entry(["live", symbol, cid]), do: {symbol, cid}
+  defp from_staged_entry(["gone", symbol]), do: {symbol, :gone}
 
   @impl true
   def decode(binary) do
-    %{commits: commits, staged: staged} = :erlang.binary_to_term(binary, [:safe])
+    %{commits: commits, staged: staged} = stored(binary)
 
     case restore(commits, staged) do
       {:ok, u} ->

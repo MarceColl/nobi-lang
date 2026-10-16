@@ -41,16 +41,17 @@ defmodule Kinoko.CodeDbTest do
 
     [%{state: binary} | _] = rows(u)
 
-    durable = :erlang.binary_to_term(binary, [:safe])
+    durable = CodeDb.stored(binary)
 
     assert %{commits: [%{ids: ["p1"], entries: [{:live, "A.g", cid}]}], staged: [{"p2", staged}]} =
              durable
 
     assert [{"A.f", _}, {"A.x", _}, {"A.g", :gone}] = staged
 
-    for leaf <- leaves(durable) do
+    for leaf <- leaves(:erlang.binary_to_term(binary, [:safe])) do
       case leaf do
-        {:atom, a} -> assert a in [:commits, :staged, :ids, :entries, :live, :gone]
+        {:atom, a} -> flunk("the stored binary holds the atom #{inspect(a)}")
+        {:binary, b} when b in ["commits", "staged", "live", "gone"] -> :ok
         {:binary, b} -> assert b in ["p1", "p2", "A.g", "A.f", "A.x"] or b =~ ~r/^[0-9a-f]{64}$/
       end
     end

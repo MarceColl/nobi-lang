@@ -683,7 +683,7 @@ defmodule Kinoko.UniverseTest do
 
   defp stored_commits(u) do
     {:ok, row} = Kinoko.Elm.Store.latest(key(u))
-    %{commits: commits} = :erlang.binary_to_term(row.state)
+    %{commits: commits} = Kinoko.CodeDb.stored(row.state)
     length(commits)
   end
 end

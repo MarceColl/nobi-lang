@@ -176,6 +176,21 @@ defmodule Kinoko.PersistentElmGenServer do
   module, a removed tag) refuses to boot with an error naming the key and seq
   rather than leaking atoms.
 
+  **An atom is "known" only once some loaded module holds it.** Dev (and
+  any interactive-mode node) loads modules lazily, so after a restart the
+  decoding node may not yet have loaded the module whose atoms a state
+  carries, and the default `decode/1` refuses a binary the previous VM
+  wrote without trouble. Tests, which encode and decode in one VM, never
+  see it. The default is therefore safe only for a durable projection whose
+  atoms are all literals of the using module itself (that module is loaded
+  by the time its `decode/1` runs): its own tags and map keys, `true`,
+  `false`, `nil`. A projection carrying another module's atoms (a
+  `Kinoko.Lang` universe's shapes, a struct, an Elixir module name) must
+  override `encode/1` and `decode/1` with an atom-free form, as
+  `Kinoko.CodeDb` does. The default stays `:safe` rather than loading
+  modules before decoding: no generic decode knows which modules a binary
+  needs, and creating atoms from stored data is what `:safe` exists to stop.
+
   The code DB server (piece 3) holds a `Kinoko.Lang` universe: its
   `durable/1` is `Kinoko.Lang.durable/1` (commits and staged patches as
   names and CIDs, no text), and its `decode/1` fetches the declarations by
@@ -411,7 +426,8 @@ defmodule Kinoko.PersistentElmGenServer do
           reraise "#{inspect(module)} could not decode the state stored under " <>
                     "#{inspect(key)} (seq #{seq}, version #{version}): " <>
                     "#{Exception.message(e)}. The default decode/1 refuses atoms " <>
-                    "this node does not know (binary_to_term with :safe).",
+                    "this node does not know (binary_to_term with :safe): a state " <>
+                    "carrying atoms of modules not yet loaded needs an atom-free encode/1.",
                   __STACKTRACE__
       end
 
