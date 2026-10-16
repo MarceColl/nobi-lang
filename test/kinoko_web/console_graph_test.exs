@@ -5,6 +5,7 @@ defmodule KinokoWeb.ConsoleGraphTest do
   import ExUnit.CaptureLog
   import Phoenix.LiveViewTest
   import Kinoko.UniverseHelpers
+  import KinokoWeb.ConsoleHelpers
 
   alias Kinoko.{Data, Deployment, Universe}
 
@@ -18,24 +19,6 @@ defmodule KinokoWeb.ConsoleGraphTest do
     u = fresh_universe("gr")
     assert {:promoted, _} = Universe.stage(u, "base", @forum)
     u
-  end
-
-  defp eventually(view, selector, deadline \\ nil) do
-    deadline = deadline || System.monotonic_time(:millisecond) + 5_000
-
-    cond do
-      has_element?(view, selector) ->
-        :ok
-
-      System.monotonic_time(:millisecond) > deadline ->
-        flunk("never appeared: #{selector}")
-
-      true ->
-        receive do
-        after
-          2 -> eventually(view, selector, deadline)
-        end
-    end
   end
 
   test "renders a node per app and store, and an edge per read and write", %{conn: conn} do
@@ -105,21 +88,21 @@ defmodule KinokoWeb.ConsoleGraphTest do
     assert has_element?(view, "#graph-hint")
   end
 
-  test "a store's inspector lists who writes and reads it, and its first rows", %{conn: conn} do
+  test "a store's inspector lists who writes and reads it, and its newest rows", %{conn: conn} do
     u = forum_universe()
     :ok = Deployment.create(u, u, "Forum")
-    {:ok, image} = Universe.image(u)
-    models = image.module.__yabu__(:models)
+    {:ok, models} = Universe.models(u)
     {:ok, repo} = Data.open(u)
 
-    for t <- ~w(a b c d e),
+    # six rows, more than the sample's four
+    for i <- 1..6,
         do:
           {:ok, _} =
             Data.insert(
               repo,
               "Forum.Topic",
               models,
-              {:rec, "Forum.Topic", %{"title" => t, "replies" => 1}}
+              {:rec, "Forum.Topic", %{"title" => "topic-#{i}", "replies" => 1}}
             )
 
     {:ok, view, _} = live(conn, "/_/u/#{u}?sel=Forum.Topic")
@@ -132,9 +115,20 @@ defmodule KinokoWeb.ConsoleGraphTest do
              ~s(#inspector-open-data[href="/_/u/#{u}?view=data&store=Forum.Topic"])
            )
 
-    assert has_element?(view, "#inspector-rows [data-sample-row]:nth-child(4)")
+    # the four newest, newest first; the rest counted from the file's row count
+    for {i, nth} <- Enum.zip(6..3//-1, 1..4),
+        do:
+          assert(
+            has_element?(
+              view,
+              "#inspector-rows [data-sample-row]:nth-child(#{nth})",
+              "topic-#{i}"
+            )
+          )
+
     refute has_element?(view, "#inspector-rows [data-sample-row]:nth-child(5)")
-    assert has_element?(view, "#inspector-more", "+1 more")
+    refute has_element?(view, "#inspector-rows [data-sample-row]", "topic-2")
+    assert has_element?(view, "#inspector-more", "+2 more")
   end
 
   test "a click on empty canvas clears the selection", %{conn: conn} do

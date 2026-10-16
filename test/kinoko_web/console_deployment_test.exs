@@ -4,6 +4,7 @@ defmodule KinokoWeb.ConsoleDeploymentTest do
 
   import Phoenix.LiveViewTest
   import Kinoko.UniverseHelpers
+  import KinokoWeb.ConsoleHelpers
 
   alias Kinoko.{Data, Deployment, Universe}
 
@@ -58,6 +59,24 @@ defmodule KinokoWeb.ConsoleDeploymentTest do
       assert has_element?(view, "#deployment-commit[data-mode=pinned]")
       assert has_element?(view, "#dep-serving", "commit #1")
       assert has_element?(view, "#dep-promote-btn", "Promote #{u}")
+    end
+
+    test "the crumb and commit label are the deployment's universe and serving commit",
+         %{conn: conn} do
+      u = universe()
+      other = universe(1)
+      :ok = Deployment.create(u, u, "Forum", commit: 1)
+
+      {:ok, view, _} =
+        conn |> put_connect_params(%{"console_universe" => other}) |> live("/_/d/#{u}")
+
+      assert has_element?(view, "#crumb-universe", u)
+      assert has_element?(view, "#sidebar-env-#{u}[data-on]")
+      assert has_element?(view, "#commit-label", "#1")
+      refute has_element?(view, "#commit-label", "#3")
+
+      view |> element("#dep-promote-btn") |> render_click()
+      assert has_element?(view, "#commit-label", "#3")
     end
 
     test "Promote follows head", %{conn: conn} do
@@ -133,6 +152,21 @@ defmodule KinokoWeb.ConsoleDeploymentTest do
       assert has_element?(view, "#deployment-commit[data-mode=pinned]")
       assert has_element?(view, "#dep-serving", "commit #2")
       assert has_element?(view, "#dep-ver-3 button", "follow head")
+    end
+
+    test "rows newer than the pin roll forward, older ones roll back", %{conn: conn} do
+      u = universe(4)
+      :ok = Deployment.create(u, u, "Forum", commit: 2)
+      {:ok, view, _} = live(conn, "/_/d/#{u}")
+
+      assert has_element?(view, "#dep-ver-1 button", "roll back")
+      assert has_element?(view, "#dep-ver-2[data-current]")
+      assert has_element?(view, "#dep-ver-3 button", "roll forward")
+      refute has_element?(view, "#dep-ver-3 button", "roll back")
+      assert has_element?(view, "#dep-ver-4 button", "follow head")
+
+      view |> element("#dep-ver-3 button") |> render_click()
+      assert {:ok, %{commit: 3}} = Deployment.get(u)
     end
 
     test "follow head on the head row returns to following", %{conn: conn} do
@@ -234,17 +268,18 @@ defmodule KinokoWeb.ConsoleDeploymentTest do
                ~s(#dep-models [data-model="Forum.Topic"] .dep-columns),
                "replies"
              )
+
+      # declared fields only: no `id`, no internal `_seq`
+      columns =
+        view
+        |> element(~s(#dep-models [data-model="Forum.Topic"] .dep-columns))
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.text()
+        |> String.split(",", trim: true)
+        |> Enum.map(&String.trim/1)
+
+      assert Enum.sort(columns) == ["replies", "title"]
     end
-  end
-
-  defp eventually(view, check, ms \\ 5_000) do
-    deadline = System.monotonic_time(:millisecond) + ms
-
-    Stream.repeatedly(fn ->
-      _ = render(view)
-      check.() or (Process.sleep(5) && false)
-    end)
-    |> Enum.find(&(&1 or System.monotonic_time(:millisecond) > deadline))
-    |> then(&assert(&1, "never held:\n#{render(view)}"))
   end
 end

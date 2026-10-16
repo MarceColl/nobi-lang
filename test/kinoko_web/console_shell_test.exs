@@ -3,6 +3,7 @@ defmodule KinokoWeb.ConsoleShellTest do
 
   import Phoenix.LiveViewTest
   import Kinoko.UniverseHelpers
+  import KinokoWeb.ConsoleHelpers
 
   alias Kinoko.{Deployment, Universe}
 
@@ -143,6 +144,39 @@ defmodule KinokoWeb.ConsoleShellTest do
       view |> element("#intro-open") |> render_click()
       view |> element("#intro-skip") |> render_click()
       refute has_element?(view, "#intro")
+
+      # Esc: ConsoleKeys pushes this event when the intro is open
+      view |> element("#intro-open") |> render_click()
+      render_hook(view, "console:intro-close", %{})
+      refute has_element?(view, "#intro")
+    end
+  end
+
+  describe "the sidebar" do
+    test "follows a roll back and a follow on the deployment page", %{conn: conn} do
+      u = forum_universe()
+      assert {:promoted, _} = Universe.stage(u, "more", "def Forum.more() : Int do\n  1\nend")
+      :ok = Deployment.create(u, u, "Forum")
+      {:ok, view, _} = live(conn, "/_/d/#{u}")
+
+      assert has_element?(view, ~s(#sidebar-dep-#{u}[data-hue=mint]))
+      view |> element("#dep-ver-1 button") |> render_click()
+      assert has_element?(view, ~s(#sidebar-dep-#{u}[data-hue=grey]))
+      view |> element("#dep-promote-btn") |> render_click()
+      assert has_element?(view, ~s(#sidebar-dep-#{u}[data-hue=mint]))
+    end
+
+    test "a pin from elsewhere and a new deployment show without navigating", %{conn: conn} do
+      u = forum_universe()
+      :ok = Deployment.create(u, u, "Forum")
+      {:ok, view, _} = live(conn, "/_/d/#{u}")
+
+      other = u <> "-b"
+      :ok = Deployment.create(other, u, "Forum")
+      :ok = Deployment.pin(u, 1)
+
+      eventually(view, ~s(#sidebar-dep-#{u}[data-hue=grey]))
+      assert has_element?(view, "#sidebar-dep-#{other}")
     end
   end
 
@@ -153,6 +187,22 @@ defmodule KinokoWeb.ConsoleShellTest do
 
       view |> form("#repl-form", repl: %{expr: "1 + 2"}) |> render_submit()
       assert has_element?(view, "#repl-echo [data-ok]", "ok · 3")
+    end
+
+    test "shows a record, an Option and a string as the MCP eval does", %{conn: conn} do
+      u = forum_universe()
+      {:ok, view, _} = live(conn, "/_/u/#{u}")
+
+      for expr <- [~s(%Forum.Topic{title: "Hi", replies: 2}), "Option.Some(1)", ~s("hi")] do
+        {:ok, value, type} = Universe.eval(u, expr)
+        shown = Kinoko.Exec.show(value, type)
+
+        view |> form("#repl-form", repl: %{expr: expr}) |> render_submit()
+        assert has_element?(view, "#repl-echo [data-ok]", "ok · " <> shown)
+        refute has_element?(view, "#repl-echo [data-ok]", "{:")
+      end
+
+      assert has_element?(view, "#repl-echo [data-ok]", ~s("hi"))
     end
 
     test "shows the reason of a failing expression", %{conn: conn} do

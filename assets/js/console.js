@@ -1,7 +1,7 @@
 // The console shell's keyboard and memory (KinokoWeb.Console.Live holds the state).
 //
 // ConsoleKeys sits on the shell's root (#console):
-// - ⌘K / Ctrl-K toggles the palette, Esc closes it;
+// - ⌘K / Ctrl-K toggles the palette; Esc closes it, else the intro;
 // - on a universe page it remembers the universe in sessionStorage, and
 //   consoleParams() hands it to the next LiveView join as `console_universe`,
 //   so Home and Deployment pages know which universe was visited last;
@@ -41,6 +41,8 @@ export const ConsoleKeys = {
         this.pushEvent("console:palette-toggle", {})
       } else if (e.key === "Escape" && document.getElementById("cmd-palette")) {
         this.pushEvent("console:palette-close", {})
+      } else if (e.key === "Escape" && document.getElementById("intro")) {
+        this.pushEvent("console:intro-close", {})
       }
     }
     window.addEventListener("keydown", this.onKey)

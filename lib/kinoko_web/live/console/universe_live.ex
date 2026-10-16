@@ -91,12 +91,7 @@ defmodule KinokoWeb.Console.UniverseLive do
 
   def handle_info(_, socket), do: {:noreply, socket}
 
-  defp known?(universe) do
-    case Universe.list() do
-      list when is_list(list) -> Enum.any?(list, &(&1.name == universe))
-      _ -> false
-    end
-  end
+  defp known?(universe), do: Enum.any?(universes(), &(&1.name == universe))
 
   ## Loading
 
@@ -263,10 +258,10 @@ defmodule KinokoWeb.Console.UniverseLive do
     |> Enum.flat_map(fn [first | _] = chunk ->
       g = group(first.symbol)
 
-      [%{id: "symgroup-" <> sanitize(g), kind: :group, label: g}] ++
+      [%{id: "symgroup-" <> GraphLayout.sanitize(g), kind: :group, label: g}] ++
         for e <- chunk do
           %{
-            id: "sym-" <> sanitize(e.symbol),
+            id: "sym-" <> GraphLayout.sanitize(e.symbol),
             kind: :symbol,
             symbol: e.symbol,
             name: if(e.symbol == g, do: g, else: String.replace_prefix(e.symbol, g <> ".", "")),
@@ -311,8 +306,6 @@ defmodule KinokoWeb.Console.UniverseLive do
   end
 
   defp graph_path(u, _graph, _symbol), do: ~p"/_/u/#{u}"
-
-  defp sanitize(s), do: String.replace(s, ~r/[^A-Za-z0-9_-]/, "-")
 
   defp chip_reason(%{reasons: [%{message: m} | _]}) do
     if String.length(m) > @chip_reason,
@@ -429,9 +422,6 @@ defmodule KinokoWeb.Console.UniverseLive do
   defp rows_label(nil, _symbol), do: "no data"
   defp rows_label(rows, symbol), do: count(Map.get(rows, symbol, 0), "row")
 
-  defp listed(list) when is_list(list), do: list
-  defp listed(_), do: []
-
   ## The inspector (`panelFor()`)
 
   defp panel(nil, _graph, _deployment, _rows, _u), do: nil
@@ -531,12 +521,13 @@ defmodule KinokoWeb.Console.UniverseLive do
   defp row(k, v, mono \\ false), do: %{k: k, v: v, mono: mono}
 
   # The newest rows of `model`, at most `@sample`, as the prototype's
-  # three cells: the first field, the middle ones, the last one.
+  # three cells: the first field, the middle ones, the last one. Only those
+  # rows are read; "+N more" counts from the file's row count, `n`.
   defp sample(deployment, model, n) when is_integer(n) and n > 0 do
     with {:ok, %{^model => _} = models} <- deployment_models(deployment),
          {:ok, repo} <- Data.open(deployment.name),
-         {:ok, list} <- Data.list(repo, model, models) do
-      for {:rec, _, values} <- list |> Enum.reverse() |> Enum.take(@sample) do
+         {:ok, list} <- Data.list(repo, model, models, order: :desc, limit: @sample) do
+      for {:rec, _, values} <- list do
         fields = for {f, _, _} <- Map.get(models, model, []), f != "id", do: shown(values[f])
 
         case fields do
@@ -594,13 +585,13 @@ defmodule KinokoWeb.Console.UniverseLive do
           <.list_empty
             id={if(@view == :graph, do: "graph-empty", else: "data-uncommitted")}
             title="Nothing committed"
-            body="Stage a patch through the MCP or the REPL below."
+            body="Stage a patch through the MCP."
           />
         <% :code_empty -> %>
           <.list_empty
             id="code-empty"
             title="Nothing committed"
-            body="Stage a patch through the MCP or the REPL below."
+            body="Stage a patch through the MCP."
           />
         <% :code -> %>
           <.code_stage streams={@streams} code={@code} />

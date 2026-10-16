@@ -10,6 +10,7 @@ defmodule KinokoWeb.Console.Components do
   use KinokoWeb, :html
 
   alias Kinoko.Lang.Graph
+  alias Kinoko.Universe
 
   @doc """
   The console frame. Every console page renders its stage inside it:
@@ -222,6 +223,7 @@ defmodule KinokoWeb.Console.Components do
         <.link
           :for={{dom_id, d} <- @streams.console_deployments}
           id={dom_id}
+          data-hue={d.hue}
           navigate={~p"/_/d/#{d.name}"}
           class={[row_class(), if(d.on, do: "bg-white " <> on_shadow(d.hue), else: "bg-transparent")]}
         >
@@ -244,6 +246,7 @@ defmodule KinokoWeb.Console.Components do
           <.link
             :for={{dom_id, e} <- @streams.console_envs}
             id={dom_id}
+            data-on={e.on || nil}
             navigate={~p"/_/u/#{e.name}"}
             class={[
               row_class(),
@@ -381,7 +384,7 @@ defmodule KinokoWeb.Console.Components do
           value={@console.repl_form[:expr].value}
           autocomplete="off"
           spellcheck="false"
-          placeholder="Evaluate an expression, or send a Msg…"
+          placeholder="Evaluate an expression…"
           class="flex-1 min-w-0 font-(family-name:--k-mono) text-[12.5px] text-(--k-ink) placeholder:text-(--k-placeholder) whitespace-nowrap overflow-hidden text-ellipsis bg-transparent border-0 p-0 outline-none"
         />
         <span class="text-[11.5px] text-(--k-faint)">sends to</span>
@@ -712,6 +715,15 @@ defmodule KinokoWeb.Console.Components do
   def universe_tag(%{parent: nil}), do: "base"
   def universe_tag(%{parent: parent}), do: "fork of " <> parent
 
+  @doc "Every universe (`Kinoko.Universe.list/0`), or `[]` when they cannot be listed."
+  @spec universes() :: [map()]
+  def universes, do: listed(Universe.list())
+
+  @doc "`list` when it is one, else `[]`: a read that failed shows as nothing."
+  @spec listed(term()) :: list()
+  def listed(list) when is_list(list), do: list
+  def listed(_), do: []
+
   @doc "`count(2, \"app\")` is `\"2 apps\"`, `count(1, \"app\")` `\"1 app\"`."
   @spec count(non_neg_integer(), String.t()) :: String.t()
   def count(1, noun), do: "1 " <> noun
@@ -752,11 +764,6 @@ defmodule KinokoWeb.Console.Components do
 
   @doc "The prototype's table card: white, 1px line, 9px radius."
   def table_class, do: "rounded-[9px] bg-(--k-card) border border-(--k-line) overflow-hidden"
-
-  @doc "A row of a table card: 12.5px cells, a #EFECE4 rule between rows."
-  def row_rule_class,
-    do:
-      "flex items-baseline gap-[10px] px-[12px] py-[9px] text-[12.5px] border-t border-(--k-row-line-2) first:border-t-0"
 
   @doc "The empty state of a table card, in its row style."
   def empty_class, do: "hidden only:block px-[12px] py-[9px] text-[12.5px] text-(--k-dim)"

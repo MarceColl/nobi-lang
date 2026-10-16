@@ -3,6 +3,7 @@ defmodule KinokoWeb.ConsoleTest do
 
   import Phoenix.LiveViewTest
   import Kinoko.UniverseHelpers
+  import KinokoWeb.ConsoleHelpers
 
   alias Kinoko.{Deployment, Universe}
 
@@ -19,25 +20,6 @@ defmodule KinokoWeb.ConsoleTest do
   end
 
   defp id(prefix, name), do: ~s([id="#{prefix}-#{name}"])
-
-  defp eventually(view, selector, ms \\ 5_000),
-    do: eventually(view, selector, System.monotonic_time(:millisecond) + ms, nil)
-
-  defp eventually(view, selector, deadline, _) do
-    cond do
-      has_element?(view, selector) ->
-        :ok
-
-      System.monotonic_time(:millisecond) > deadline ->
-        flunk("never appeared: #{selector}\n#{render(view)}")
-
-      true ->
-        receive do
-        after
-          2 -> eventually(view, selector, deadline, nil)
-        end
-    end
-  end
 
   describe "/_" do
     test "lists universes and deployments with links", %{conn: conn} do

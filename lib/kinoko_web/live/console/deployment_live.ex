@@ -13,6 +13,7 @@ defmodule KinokoWeb.Console.DeploymentLive do
   import KinokoWeb.Console.Components
 
   alias Kinoko.{Data, Deployment, Universe}
+  alias KinokoWeb.Console.Live, as: Console
 
   @impl true
   def mount(%{"name" => name}, _session, socket) do
@@ -42,7 +43,7 @@ defmodule KinokoWeb.Console.DeploymentLive do
   def handle_event("roll_back", %{"n" => n}, socket) do
     with {n, ""} <- Integer.parse(n),
          :ok <- Deployment.pin(socket.assigns.name, n) do
-      {:noreply, load(socket)}
+      {:noreply, socket |> load() |> Console.refresh_sidebar()}
     else
       _ -> {:noreply, put_flash(socket, :error, "Could not roll back")}
     end
@@ -50,7 +51,7 @@ defmodule KinokoWeb.Console.DeploymentLive do
 
   def handle_event("follow", _params, socket) do
     case Deployment.follow(socket.assigns.name) do
-      :ok -> {:noreply, load(socket)}
+      :ok -> {:noreply, socket |> load() |> Console.refresh_sidebar()}
       _ -> {:noreply, put_flash(socket, :error, "Could not follow head")}
     end
   end
@@ -58,11 +59,7 @@ defmodule KinokoWeb.Console.DeploymentLive do
   defp load(socket) do
     case Deployment.get(socket.assigns.name) do
       {:ok, d} ->
-        rounds =
-          case Universe.history(d.universe) do
-            list when is_list(list) -> list
-            _ -> []
-          end
+        rounds = listed(Universe.history(d.universe))
 
         head = length(rounds)
         current = d.commit || head
@@ -93,7 +90,8 @@ defmodule KinokoWeb.Console.DeploymentLive do
               id: "dep-model-" <> stat.model,
               model: stat.model,
               rows: stat.rows,
-              columns: Enum.map_join(stat.columns, ", ", & &1.name)
+              # declared fields only: `id` and the internal `_seq` have no field
+              columns: stat.columns |> Enum.filter(& &1.field) |> Enum.map_join(", ", & &1.name)
             }
           end
 
@@ -135,6 +133,7 @@ defmodule KinokoWeb.Console.DeploymentLive do
 
   defp version_action(n, current, _head, _commit) when n == current, do: :current
   defp version_action(n, _current, head, commit) when commit != nil and n == head, do: :follow
+  defp version_action(n, current, _head, _commit) when n > current, do: :roll_forward
   defp version_action(_n, _current, _head, _commit), do: :roll_back
 
   @impl true
@@ -146,6 +145,7 @@ defmodule KinokoWeb.Console.DeploymentLive do
       streams={@streams}
       title="Deployment"
       subtitle={@deployment.name}
+      commit={"##{@current}"}
     >
       <.page>
         <div id="dep-header" class="flex items-start gap-[16px]">
@@ -277,14 +277,14 @@ defmodule KinokoWeb.Console.DeploymentLive do
                       >
                         follow head
                       </button>
-                    <% :roll_back -> %>
+                    <% action when action in [:roll_back, :roll_forward] -> %>
                       <button
                         type="button"
                         phx-click="roll_back"
                         phx-value-n={v.n}
                         class="text-(--k-violet) cursor-pointer hover:text-(--k-violet-hover)"
                       >
-                        roll back
+                        {if(action == :roll_forward, do: "roll forward", else: "roll back")}
                       </button>
                   <% end %>
                 </span>

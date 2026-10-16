@@ -193,6 +193,10 @@ defmodule KinokoWeb.Console.GraphLayout do
   @spec dom_id(String.t()) :: String.t()
   def dom_id(symbol), do: "node-" <> sanitize(symbol)
 
+  @doc "`s` safe in a DOM id: anything but `[A-Za-z0-9_-]` as `-`."
+  @spec sanitize(String.t()) :: String.t()
+  def sanitize(s), do: String.replace(s, ~r/[^A-Za-z0-9_-]/, "-")
+
   @doc """
   Points along `edge`: every corner of its segments, and its curve
   sampled, for checking it against the node boxes.
@@ -463,8 +467,6 @@ defmodule KinokoWeb.Console.GraphLayout do
     ys = for(n <- nodes, do: n.y + n.h) ++ for(e <- edges, {_, y} <- points(e, 1), do: y)
     {Enum.max(xs, fn -> 0 end) + @margin, Enum.max(ys, fn -> 0 end) + @margin}
   end
-
-  defp sanitize(s), do: String.replace(s, ~r/[^A-Za-z0-9_-]/, "-")
 
   defp line({x0, y0}, {x1, y1}, steps),
     do: for(i <- steps..1//-1, do: {x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps})

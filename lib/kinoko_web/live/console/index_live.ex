@@ -12,11 +12,7 @@ defmodule KinokoWeb.Console.IndexLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    universes =
-      case Universe.list() do
-        list when is_list(list) -> list
-        _ -> []
-      end
+    universes = universes()
 
     deployments = Deployment.list()
 
