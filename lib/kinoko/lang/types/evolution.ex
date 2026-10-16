@@ -16,11 +16,14 @@ defmodule Kinoko.Lang.Types.Evolution do
   starts it; one that loses `id` is removing a field). Every violation is a
   `"model-evolution"` error whose message names the fix.
 
-  The rule reaches through a stored model's field types: every model
-  reachable from them (inside `List`, `Option`, `Map`, tuples, deftype
-  variants, other models), is stored inside its rows, so its committed
-  fields are held to the same rule (`check/5`), stored itself or not. A
-  model no stored model reaches evolves freely.
+  The rule reaches through a stored model's field types: every model and
+  deftype reachable from them (inside `List`, `Option`, `Map`, tuples,
+  deftype variants, other models) is stored inside its rows (`check/5`).
+  Such a model's committed fields are held to the same rule, stored itself
+  or not. Such a deftype keeps its type parameters and every variant with
+  exactly its payload types; it may only gain variants. A model or deftype
+  no stored model reaches evolves freely. (The stdlib's `Option` and
+  `Result` have no committed version and are never compared.)
 
   Only a model redefining a model is compared. Removing a stored model (a
   tombstone, or its name redefined as another kind) is not refused: its
@@ -65,15 +68,13 @@ defmodule Kinoko.Lang.Types.Evolution do
     # A stored model reaches what its fields do even on its first commit,
     # so a later patch to what it reaches checks it again.
     if Store.stored?(new) or (Store.stored?(old) and match?({:model, _}, new)) do
-      {models, reached} = reach(new, lookup)
+      {kept, reached} = reach(new, lookup)
 
       nested =
-        for n <- models,
+        for n <- kept,
             Store.stored?(old),
             n != name,
-            {:model, before} <- [committed.(n)],
-            {:model, now} <- [lookup.(n)],
-            e <- fields(n, before, now),
+            e <- inside(n, committed.(n), lookup.(n)),
             do: %{e | message: e.message <> " (#{n} is kept inside the stored model #{name})"}
 
       {own ++ nested, reached}
@@ -82,10 +83,54 @@ defmodule Kinoko.Lang.Types.Evolution do
     end
   end
 
-  # The models `sig`'s fields reach, in the order met, and every name read.
+  # A model or deftype kept inside a stored model's rows, against its
+  # committed signature: a model's fields as a stored model's; a deftype's
+  # parameters and every variant's payload kept, variants only added.
+  defp inside(n, {:model, before}, {:model, now}), do: fields(n, before, now)
+
+  defp inside(n, {:type, ps, before}, {:type, qs, now}) do
+    params =
+      if ps == qs,
+        do: [],
+        else: [
+          error(
+            "#{n} had type parameters #{params(ps)}, cannot become #{params(qs)}; declare a new " <>
+              "type instead"
+          )
+        ]
+
+    params ++
+      Enum.flat_map(before, fn {v, args} ->
+        case List.keyfind(now, v, 0) do
+          {_, ^args} ->
+            []
+
+          {_, other} ->
+            [
+              error(
+                "#{n}.#{v} had #{payload(args)}, cannot become #{payload(other)}; add a new variant " <>
+                  "instead"
+              )
+            ]
+
+          nil ->
+            [error("cannot remove #{n}.#{v}; leave it in place")]
+        end
+      end)
+  end
+
+  defp inside(_n, _before, _now), do: []
+
+  defp params([]), do: "<>"
+  defp params(ps), do: "<#{Enum.join(ps, ", ")}>"
+
+  defp payload(args), do: "(#{Enum.map_join(args, ", ", &Format.type/1)})"
+
+  # The models and deftypes `sig`'s fields reach, in the order met, and
+  # every name read.
   defp reach({:model, fields}, lookup) do
-    {models, seen} = walk(Enum.map(fields, &elem(&1, 1)), lookup, [], MapSet.new())
-    {Enum.reverse(models), seen |> MapSet.to_list() |> Enum.sort()}
+    {kept, seen} = walk(Enum.map(fields, &elem(&1, 1)), lookup, [], MapSet.new())
+    {Enum.reverse(kept), seen |> MapSet.to_list() |> Enum.sort()}
   end
 
   defp walk([], _lookup, models, seen), do: {models, seen}
@@ -113,7 +158,7 @@ defmodule Kinoko.Lang.Types.Evolution do
           walk(args ++ Enum.map(fs, &elem(&1, 1)) ++ rest, lookup, [n | models], seen)
 
         {:type, _, variants} ->
-          walk(args ++ Enum.flat_map(variants, &elem(&1, 1)) ++ rest, lookup, models, seen)
+          walk(args ++ Enum.flat_map(variants, &elem(&1, 1)) ++ rest, lookup, [n | models], seen)
 
         _ ->
           walk(args ++ rest, lookup, models, seen)

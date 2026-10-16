@@ -590,6 +590,51 @@ defmodule Kinoko.Lang.StoreLangTest do
       promoted!(u, "ok", "defmodel Forum.Tag do\n  label : String\n  n : Int = 0\nend")
     end
 
+    test "a deftype kept inside a stored model's rows only gains variants" do
+      u = promoted!(Lang.new(), "v1", @nested)
+
+      {_, [m]} =
+        refused!(u, "retype", "deftype Forum.Body do Text(Int) | Tagged(List<Forum.Tag>) end")
+
+      assert m ==
+               "Forum.Body.Text had (String), cannot become (Int); add a new variant instead " <>
+                 "(Forum.Body is kept inside the stored model Forum.Post)"
+
+      {_, [m]} = refused!(u, "remove", "deftype Forum.Body do Text(String) end")
+      assert m =~ "cannot remove Forum.Body.Tagged; leave it in place"
+
+      # (the model's own `body : Forum.Body` breaks too: an arity error beside it)
+      {_, {:staged, reasons}} =
+        Lang.stage(
+          u,
+          "params",
+          "deftype Forum.Body<T> do Text(String) | Tagged(List<Forum.Tag>) end"
+        )
+
+      assert Enum.any?(
+               reasons,
+               &(&1.code == "model-evolution" and
+                   &1.message =~ "Forum.Body had type parameters <>, cannot become <T>")
+             )
+
+      promoted!(
+        u,
+        "add",
+        "deftype Forum.Body do Text(String) | Tagged(List<Forum.Tag>) | Empty | Quote(String, Int) end"
+      )
+    end
+
+    test "a deftype no stored model reaches evolves freely" do
+      u =
+        promoted!(
+          Lang.new(),
+          "v1",
+          "deftype A.Body do Text(String) | Gone end\ndefmodel A.State do\n  body : A.Body\nend"
+        )
+
+      promoted!(u, "v2", "deftype A.Body do Text(Int) end")
+    end
+
     test "reached through a deftype's variant, three deep" do
       src =
         "defmodel A.Leaf do\n  v : Int\nend\ndefmodel A.Mid do\n  leaf : A.Leaf\nend\n" <>
