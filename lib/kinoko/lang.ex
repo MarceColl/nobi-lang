@@ -251,19 +251,25 @@ defmodule Kinoko.Lang do
   defdelegate signatures(u), to: Universe
 
   @doc """
-  What is staged, by id: `%{source:, removes:, reasons:}`. `source` is the
-  canonical text of the declarations the patch defines (`""` for none),
-  `removes` the names it removes, in the order staged, and `reasons` why it
-  cannot promote now (`reasons/2`, worked out afresh for each patch).
+  What is staged, by id: `%{source:, defines:, removes:, reasons:}`.
+  `source` is the canonical text of the declarations the patch defines
+  (`""` for none), `defines` their names in order, `removes` the names it
+  removes, in the order staged, and `reasons` why it cannot promote now (`reasons/2`, worked out afresh for each patch).
   """
   @spec staged(Universe.t()) :: %{
-          String.t() => %{source: String.t(), removes: [String.t()], reasons: [reason]}
+          String.t() => %{
+            source: String.t(),
+            defines: [String.t()],
+            removes: [String.t()],
+            reasons: [reason]
+          }
         }
   def staged(u) do
     Map.new(Universe.staged(u), fn {id, entries} ->
       {id,
        %{
          source: Format.program(for {:live, decl} <- entries, do: decl),
+         defines: for({:live, decl} <- entries, do: Ast.name(decl)),
          removes: for({:gone, name} <- entries, do: name),
          reasons: Universe.reasons(u, id)
        }}

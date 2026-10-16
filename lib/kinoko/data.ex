@@ -165,18 +165,22 @@ defmodule Kinoko.Data do
 
   @doc """
   Every row, in insertion order. Above `max_rows/0` (or `cap:`) rows,
-  `"too-many-rows"`.
+  `"too-many-rows"`. Options: `order: :desc` for newest first, and
+  `limit: n` for at most the first `n` rows in that order (never
+  `"too-many-rows"`).
   """
   @spec list(repo(), String.t(), sig(), keyword()) :: {:ok, [term()]} | {:error, error()}
   def list(repo, model, sig, opts \\ []) do
+    limit = Keyword.get(opts, :limit)
     cap = Keyword.get(opts, :cap, @max_rows)
+    dir = if Keyword.get(opts, :order, :asc) == :desc, do: " DESC", else: ""
 
     run(repo, fn ->
       with {:ok, layout, tables} <- layout(repo, model, sig) do
         result =
-          Repo.query!("#{select(layout)} ORDER BY _seq LIMIT ?", [cap + 1])
+          Repo.query!("#{select(layout)} ORDER BY _seq#{dir} LIMIT ?", [limit || cap + 1])
 
-        if length(result.rows) > cap do
+        if limit == nil and length(result.rows) > cap do
           error(
             "too-many-rows",
             "#{model} has more than #{cap} rows, more than a list reads at once"

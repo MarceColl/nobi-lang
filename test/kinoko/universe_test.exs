@@ -72,8 +72,15 @@ defmodule Kinoko.UniverseTest do
     test "a broken patch is staged with reasons, fixed, then promoted", %{u: u} do
       assert {:staged, [%{code: "unbound"}]} = Universe.stage(u, "p1", @f)
 
-      assert [%{id: "p1", source: "def A.f" <> _, removes: [], reasons: [%{code: "unbound"}]}] =
-               Universe.staged(u)
+      assert [
+               %{
+                 id: "p1",
+                 source: "def A.f" <> _,
+                 defines: ["A.f"],
+                 removes: [],
+                 reasons: [%{code: "unbound"}]
+               }
+             ] = Universe.staged(u)
 
       assert {:ok, "def A.f" <> _} = Universe.read(u, "A.f")
       assert [] = Universe.symbols(u)

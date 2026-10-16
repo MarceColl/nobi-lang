@@ -5,8 +5,12 @@ defmodule KinokoWeb.Console.UniverseLive do
   `graphStage()`: its apps and stores laid out by
   `KinokoWeb.Console.GraphLayout`, joined by what they read and write,
   with `?sel=<symbol>` opening the inspector (`panelFor()`). The camera
-  (pan, zoom, fit) is the `GraphCamera` hook's. `?view=code` and
-  `?view=data` leave the stage empty for now.
+  (pan, zoom, fit) is the `GraphCamera` hook's.
+
+  `?view=code&sym=<symbol>` is `codeStage()`: the committed and staged
+  symbols by namespace, one symbol's canonical text, and a staged patch's
+  reasons. `?view=data&store=<model>&dep=<deployment>` is `dataStage()`
+  without its query panel: a store's newest rows in the deployment's file.
 
   Refreshes on every commit once connected.
   """
@@ -17,10 +21,20 @@ defmodule KinokoWeb.Console.UniverseLive do
 
   alias Kinoko.{Data, Deployment, Universe}
   alias Kinoko.Exec.Show
-  alias KinokoWeb.Console.GraphLayout
+  alias KinokoWeb.Console.{Cell, GraphLayout}
 
   # The inspector's rows sample, as the prototype's `EXPENSES.slice(0, 4)`.
   @sample 4
+
+  # The Data stage's rows: the newest this many.
+  @shown 200
+
+  # How much of a staged patch's first reason its header chip shows.
+  @chip_reason 48
+
+  # The declaration keywords `codeStage()` colours, with a line's trailing `do`.
+  @keyword_do ~r/^(defmodel|deftype|defapp|defroutes|deftest|def)( .* )(do)$/
+  @keyword ~r/^(defmodel|deftype|defapp|defroutes|deftest|def)( .*)$/
 
   @impl true
   def mount(%{"universe" => universe}, _session, socket) do
@@ -31,7 +45,10 @@ defmodule KinokoWeb.Console.UniverseLive do
        socket
        |> assign(universe: universe, page_title: universe, view: :graph, sel: nil)
        |> stream_configure(:nodes, dom_id: & &1.id)
-       |> stream_configure(:edges, dom_id: & &1.id)}
+       |> stream_configure(:edges, dom_id: & &1.id)
+       |> stream_configure(:symbols, dom_id: & &1.id)
+       |> stream_configure(:lines, dom_id: & &1.id)
+       |> stream_configure(:rows, dom_id: & &1.id)}
     else
       {:ok,
        socket
@@ -46,13 +63,27 @@ defmodule KinokoWeb.Console.UniverseLive do
   def handle_params(params, _uri, socket) do
     {:noreply,
      socket
-     |> assign(view: Map.get(@views, params["view"], :graph), sel: params["sel"])
+     |> assign(
+       view: Map.get(@views, params["view"], :graph),
+       sel: params["sel"],
+       sym: params["sym"],
+       store: params["store"],
+       dep: params["dep"]
+     )
      |> load()}
   end
 
   @impl true
   def handle_event("graph:deselect", _params, socket),
     do: {:noreply, push_patch(socket, to: ~p"/_/u/#{socket.assigns.universe}")}
+
+  def handle_event("data:switch", %{"data" => params}, socket) do
+    query =
+      [view: "data", store: params["store"]] ++
+        if(params["dep"], do: [dep: params["dep"]], else: [])
+
+    {:noreply, push_patch(socket, to: ~p"/_/u/#{socket.assigns.universe}?#{query}")}
+  end
 
   @impl true
   def handle_info({:committed, universe, _}, %{assigns: %{universe: universe}} = socket),
@@ -89,9 +120,11 @@ defmodule KinokoWeb.Console.UniverseLive do
         staged_count: length(listed(Universe.staged(u)))
       )
 
-    if socket.assigns.view == :graph,
-      do: load_graph(socket, graph),
-      else: assign(socket, stage: :none, panel: nil)
+    case socket.assigns.view do
+      :graph -> load_graph(socket, graph)
+      :code -> load_code(socket, graph)
+      :data -> load_data(socket, graph)
+    end
   end
 
   defp load_graph(socket, %{apps: _} = graph) do
@@ -141,6 +174,235 @@ defmodule KinokoWeb.Console.UniverseLive do
   # deployment (IMPLEMENTATION-MAP §3: `no data`).
   defp rows(nil), do: nil
   defp rows(deployment), do: Map.new(Data.stats(deployment.name), &{&1.model, &1.rows})
+
+  ## The Code stage (`codeStage()`)
+
+  defp load_code(socket, graph) do
+    %{universe: u, sym: sym} = socket.assigns
+    entries = code_entries(u)
+
+    if entries == [] do
+      assign(socket, stage: :code_empty, panel: nil)
+    else
+      current = Enum.find(entries, hd(entries), &(&1.symbol == sym))
+
+      text =
+        case Universe.read(u, current.symbol) do
+          {:ok, text} -> text
+          _ -> ""
+        end
+
+      lines =
+        text
+        |> String.split("\n")
+        |> Enum.with_index(1)
+        |> Enum.map(fn {line, n} ->
+          Map.put(keyword(line), :id, "line-#{n}") |> Map.put(:n, n)
+        end)
+
+      socket
+      |> assign(
+        stage: :code,
+        panel: nil,
+        code: %{
+          symbol: current.symbol,
+          count: socket.assigns.symbol_count,
+          patch: current.patch,
+          failing: failing(u, current),
+          cid: current.cid,
+          graph_path: graph_path(u, graph, current.symbol)
+        }
+      )
+      |> stream(:symbols, symbol_items(entries, current.symbol, u), reset: true)
+      |> stream(:lines, lines, reset: true)
+    end
+  end
+
+  # Committed symbols, and those only a staged patch defines, by name; each
+  # with the first patch (in `read/2`'s id order) that defines it.
+  defp code_entries(u) do
+    staged = listed(Universe.staged(u)) |> Enum.sort_by(& &1.id)
+
+    patches =
+      for p <- staged, s <- Map.get(p, :defines, []), reduce: %{} do
+        acc -> Map.put_new(acc, s, p)
+      end
+
+    committed =
+      for s <- listed(Universe.symbols(u)),
+          do: %{symbol: s.symbol, cid: s.cid, signature: s.signature, patch: patches[s.symbol]}
+
+    names = MapSet.new(committed, & &1.symbol)
+
+    only_staged =
+      for {s, p} <- patches,
+          not MapSet.member?(names, s),
+          do: %{symbol: s, cid: nil, signature: nil, patch: p}
+
+    Enum.sort_by(committed ++ only_staged, &{group(&1.symbol), &1.symbol})
+  end
+
+  defp group(symbol), do: symbol |> String.split(".", parts: 2) |> hd()
+
+  defp symbol_items(entries, current, u) do
+    entries
+    |> Enum.chunk_by(&group(&1.symbol))
+    |> Enum.flat_map(fn [first | _] = chunk ->
+      g = group(first.symbol)
+
+      [%{id: "symgroup-" <> sanitize(g), kind: :group, label: g}] ++
+        for e <- chunk do
+          %{
+            id: "sym-" <> sanitize(e.symbol),
+            kind: :symbol,
+            symbol: e.symbol,
+            name: if(e.symbol == g, do: g, else: String.replace_prefix(e.symbol, g <> ".", "")),
+            icon: symbol_icon(e.signature),
+            patch: e.patch && e.patch.id,
+            selected: e.symbol == current,
+            path: ~p"/_/u/#{u}?#{[view: "code", sym: e.symbol]}"
+          }
+        end
+    end)
+  end
+
+  defp symbol_icon("model" <> _), do: :cube
+  defp symbol_icon("type " <> _), do: :cube
+  defp symbol_icon("app"), do: :app
+  defp symbol_icon(_), do: :function
+
+  # A source line split as the prototype's `[keyword, rest, "do"]`.
+  defp keyword(line) do
+    case Regex.run(@keyword_do, line) || Regex.run(@keyword, line) do
+      [_, kw, rest, d] -> %{kw: kw, rest: rest, do: d}
+      [_, kw, rest] -> %{kw: kw, rest: rest, do: nil}
+      nil -> %{kw: nil, rest: line, do: nil}
+    end
+  end
+
+  # The health reasons naming `entry`, when the universe is degraded.
+  defp failing(u, %{patch: nil, cid: cid} = entry) when is_binary(cid) do
+    case Universe.health(u) do
+      {:degraded, reasons} -> Enum.filter(reasons, &(&1[:name] == entry.symbol))
+      _ -> []
+    end
+  end
+
+  defp failing(_u, _entry), do: []
+
+  defp graph_path(u, %{apps: apps, stores: stores}, symbol) do
+    if Enum.any?(apps ++ stores, &(&1.symbol == symbol)),
+      do: ~p"/_/u/#{u}?#{[view: "graph", sel: symbol]}",
+      else: ~p"/_/u/#{u}"
+  end
+
+  defp graph_path(u, _graph, _symbol), do: ~p"/_/u/#{u}"
+
+  defp sanitize(s), do: String.replace(s, ~r/[^A-Za-z0-9_-]/, "-")
+
+  defp chip_reason(%{reasons: [%{message: m} | _]}) do
+    if String.length(m) > @chip_reason,
+      do: "staged · " <> String.slice(m, 0, @chip_reason) <> "…",
+      else: "staged · " <> m
+  end
+
+  defp chip_reason(_patch), do: "staged"
+
+  ## The Data stage (`dataStage()`)
+
+  defp load_data(socket, graph) do
+    %{universe: u, head: head} = socket.assigns
+    deployments = Enum.filter(Deployment.list(), &(&1.universe == u))
+
+    cond do
+      deployments == [] -> assign(socket, stage: :data_empty, panel: nil)
+      head == 0 -> assign(socket, stage: :empty, panel: nil)
+      true -> load_store(socket, graph, deployments)
+    end
+  end
+
+  defp load_store(socket, %{stores: stores} = graph, deployments) do
+    %{universe: u, store: store_param, dep: dep_param} = socket.assigns
+    dep = Enum.find(deployments, hd(deployments), &(&1.name == dep_param))
+    counts = rows(dep)
+    store = Enum.find(stores, List.first(stores), &(&1.symbol == store_param))
+
+    {columns, rows, n} =
+      case {store, Universe.models(u)} do
+        {%{symbol: model}, {:ok, models}} ->
+          fields = Map.get(models, model, [])
+          {id, rest} = Enum.split_with(fields, &(elem(&1, 0) == "id"))
+          columns = for {f, type, _} <- id ++ rest, do: %{name: f, numeric: Cell.numeric?(type)}
+          n = Map.get(counts, model, 0)
+          {columns, data_rows(dep, model, models, columns, n), n}
+
+        _ ->
+          {[], [], 0}
+      end
+
+    written_by =
+      case store && for(%{to: t, kind: :writes, from: f} <- graph.edges, t == store.symbol, do: f) do
+        [_ | _] = apps -> Enum.join(apps, ", ")
+        _ -> "none"
+      end
+
+    footer =
+      Enum.join(
+        [count(n, "row")] ++
+          if(n > @shown, do: ["showing #{@shown}"], else: []) ++
+          ["written by " <> written_by],
+        " · "
+      )
+
+    socket
+    |> assign(
+      stage: :data,
+      panel: nil,
+      data: %{
+        store: store && store.symbol,
+        rows: n,
+        stores:
+          for(
+            s <- stores,
+            do: {"#{s.symbol}  ·  #{count(Map.get(counts, s.symbol, 0), "row")}", s.symbol}
+          ),
+        deployments: if(length(deployments) > 1, do: Enum.map(deployments, & &1.name), else: []),
+        deployment: dep.name,
+        columns: columns,
+        footer: footer,
+        form:
+          to_form(
+            %{"store" => store && store.symbol, "dep" => dep.name},
+            as: :data
+          )
+      }
+    )
+    |> stream(:rows, rows, reset: true)
+  end
+
+  defp load_store(socket, graph, _deployments), do: load_graph(socket, graph)
+
+  # The newest `@shown` rows of `model`, read only when the file has some,
+  # so a view never creates a data file.
+  defp data_rows(dep, model, models, columns, n) when n > 0 do
+    with {:ok, repo} <- Data.open(dep.name),
+         {:ok, list} <- Data.list(repo, model, models, order: :desc, limit: @shown) do
+      for {{:rec, _, values}, i} <- Enum.with_index(list) do
+        %{
+          id: row_id(values["id"], i),
+          zebra: rem(i, 2) == 1,
+          cells: for(c <- columns, do: {c, Cell.text(values[c.name], models)})
+        }
+      end
+    else
+      _ -> []
+    end
+  end
+
+  defp data_rows(_dep, _model, _models, _columns, _n), do: []
+
+  defp row_id({:uuid, id}, _i), do: "row-" <> id
+  defp row_id(_, i), do: "row-#{i}"
 
   defp rows_label(nil, _symbol), do: "no data"
   defp rows_label(rows, symbol), do: count(Map.get(rows, symbol, 0), "row")
@@ -282,6 +544,10 @@ defmodule KinokoWeb.Console.UniverseLive do
   defp heading(%{view: :code} = a),
     do: {"Code", "#{count(a.symbol_count, "symbol")} · #{a.staged_count} staged"}
 
+  defp heading(%{view: :data, stage: :data, data: %{store: store, rows: n}})
+       when is_binary(store),
+       do: {"Data", "#{store} · #{count(n, "row")}"}
+
   defp heading(%{view: :data}), do: {"Data", ""}
 
   @impl true
@@ -303,21 +569,31 @@ defmodule KinokoWeb.Console.UniverseLive do
         <% :graph -> %>
           <.graph_stage streams={@streams} world={@world} selected={@panel != nil} />
         <% :empty -> %>
-          <div class="flex-1 min-w-0 overflow-y-auto px-[18px] py-[16px] flex flex-col gap-[8px] bg-(--k-paper)">
-            <div id="graph-empty" class="max-w-[420px] flex flex-col gap-[9px] pt-[50px]">
-              <span class="font-(family-name:--k-display) text-[18px] font-medium">
-                Nothing committed
-              </span>
-              <span class="text-[13px] leading-[1.6] text-(--k-dim) [text-wrap:pretty]">
-                Stage a patch through the MCP or the REPL below.
-              </span>
-            </div>
-          </div>
+          <.list_empty
+            id={if(@view == :graph, do: "graph-empty", else: "data-uncommitted")}
+            title="Nothing committed"
+            body="Stage a patch through the MCP or the REPL below."
+          />
+        <% :code_empty -> %>
+          <.list_empty
+            id="code-empty"
+            title="Nothing committed"
+            body="Stage a patch through the MCP or the REPL below."
+          />
+        <% :code -> %>
+          <.code_stage streams={@streams} code={@code} />
+        <% :data_empty -> %>
+          <.list_empty
+            id="data-empty"
+            title="No data yet"
+            body="Rows live in a deployment. Serve this universe to start storing."
+          />
+        <% :data -> %>
+          <.data_stage streams={@streams} data={@data} />
         <% {:degraded, reasons} -> %>
           <.degraded_stage title="Committed code no longer typechecks" reasons={reasons} />
         <% {:error, text} -> %>
           <.degraded_stage title={text} reasons={[]} />
-        <% :none -> %>
       <% end %>
       <:inspector :if={@panel}>
         <.inspector panel={@panel} universe={@universe} />
@@ -325,6 +601,329 @@ defmodule KinokoWeb.Console.UniverseLive do
     </.shell>
     """
   end
+
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+  attr :body, :string, required: true
+
+  # listStage()'s empty state (IMPLEMENTATION-MAP §3 copy).
+  defp list_empty(assigns) do
+    ~H"""
+    <div class="flex-1 min-w-0 overflow-y-auto px-[18px] py-[16px] flex flex-col gap-[8px] bg-(--k-paper)">
+      <div id={@id} class="max-w-[420px] flex flex-col gap-[9px] pt-[50px]">
+        <span class="font-(family-name:--k-display) text-[18px] font-medium">{@title}</span>
+        <span class="text-[13px] leading-[1.6] text-(--k-dim) [text-wrap:pretty]">{@body}</span>
+      </div>
+    </div>
+    """
+  end
+
+  attr :streams, :any, required: true
+  attr :code, :map, required: true
+
+  # codeStage(): the symbols panel, then the header, source and footer.
+  defp code_stage(assigns) do
+    ~H"""
+    <div class="flex-1 min-w-0 flex">
+      <div
+        id="symbols"
+        class="w-[212px] flex-none border-r border-(--k-line) bg-(--k-tint) flex flex-col overflow-y-auto"
+      >
+        <div class="pt-[12px] px-[13px] pb-[8px] flex items-center">
+          <span class="text-[10.5px] tracking-[.11em] uppercase text-(--k-faint)">Symbols</span>
+          <div class="flex-1"></div>
+          <span id="symbols-count" class="text-[11px] text-(--k-faint)">{@code.count}</span>
+        </div>
+        <div
+          id="symbols-list"
+          phx-update="stream"
+          class="px-[8px] pb-[10px] flex flex-col gap-px"
+        >
+          <.symbol_item :for={{id, item} <- @streams.symbols} id={id} item={item} />
+        </div>
+      </div>
+
+      <div class="flex-1 min-w-0 flex flex-col bg-(--k-card)">
+        <div
+          id="code-header"
+          class="h-[36px] flex-none flex items-center gap-[11px] px-[14px] border-b border-(--k-line) bg-(--k-tint)"
+        >
+          <span id="code-symbol" class="font-(family-name:--k-mono) text-[12.5px] font-medium">
+            {@code.symbol}
+          </span>
+          <span
+            :if={@code.patch}
+            id="code-chip"
+            class="text-[11px] text-(--k-amber) bg-(--k-amber-chip) border border-(--k-amber-chip-border) px-[7px] py-[1.5px] rounded-[4px] whitespace-nowrap overflow-hidden text-ellipsis min-w-0"
+          >
+            {chip_reason(@code.patch)}
+          </span>
+          <span
+            :if={!@code.patch and @code.failing == []}
+            id="code-chip"
+            class="text-[11px] text-(--k-mint) bg-(--k-mint-chip) border border-(--k-mint-chip-border) px-[7px] py-[1.5px] rounded-[4px]"
+          >
+            typechecks
+          </span>
+          <div class="flex-1"></div>
+          <span
+            :if={@code.cid}
+            id="code-cid"
+            class="font-(family-name:--k-mono) text-[11px] text-(--k-faint) whitespace-nowrap"
+          >
+            sha256 {String.slice(@code.cid, 0, 8)}
+          </span>
+        </div>
+        <div
+          id="source"
+          class="flex-1 min-h-0 overflow-y-auto py-[14px] font-(family-name:--k-mono) text-[12.5px] leading-[1.75]"
+        >
+          <div id="source-lines" phx-update="stream">
+            <div :for={{id, l} <- @streams.lines} id={id} class="flex">
+              <span
+                data-n
+                class="w-[44px] flex-none text-right pr-[14px] text-(--k-gutter) select-none"
+              >
+                {l.n}
+              </span>
+              <span class="whitespace-pre" phx-no-format><span :if={l.kw} data-kw class="text-(--k-violet)">{l.kw}</span>{l.rest}<span :if={l.do} class="text-(--k-violet)">{l.do}</span></span>
+            </div>
+          </div>
+          <.reasons_callout
+            :if={@code.patch}
+            id="staged-reasons"
+            title={"#{@code.patch.id} cannot promote"}
+            reasons={@code.patch.reasons}
+          />
+          <.reasons_callout
+            :if={@code.failing != []}
+            id="code-failing"
+            title="Committed code no longer typechecks"
+            reasons={@code.failing}
+          />
+        </div>
+        <div class="flex-none border-t border-(--k-line) bg-(--k-tint) px-[14px] py-[10px] flex items-center gap-[12px]">
+          <span class="text-[12px] text-(--k-dim)">
+            Every symbol is content-addressed; a body edit with the same signature invalidates nothing.
+          </span>
+          <div class="flex-1"></div>
+          <.link
+            id="code-show-graph"
+            patch={@code.graph_path}
+            class="flex-none whitespace-nowrap h-[26px] px-[10px] rounded-[6px] border border-(--k-line) bg-(--k-card) text-(--k-body) text-[12px] cursor-pointer flex items-center"
+          >
+            Show on the graph
+          </.link>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :item, :map, required: true
+
+  defp symbol_item(%{item: %{kind: :group}} = assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class="px-[8px] py-[5px] text-[11px] tracking-[.06em] uppercase text-(--k-faint)"
+    >
+      {@item.label}
+    </div>
+    """
+  end
+
+  defp symbol_item(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :icon_class,
+        cond do
+          assigns.item.patch -> "text-[13px] text-(--k-amber)"
+          assigns.item.selected -> "text-[13px] text-(--k-violet)"
+          true -> "text-[13px] text-(--k-faint)"
+        end
+      )
+
+    ~H"""
+    <.link
+      id={@id}
+      patch={@item.path}
+      data-selected={@item.selected}
+      class={[
+        "flex items-center gap-[8px] px-[8px] py-[5px] rounded-[6px] cursor-pointer",
+        if(@item.selected,
+          do: "bg-(--k-card) shadow-[inset_2px_0_0_#5B4B96,0_1px_2px_rgba(27,26,23,.05)]",
+          else: "bg-transparent"
+        )
+      ]}
+    >
+      <%= case @item.icon do %>
+        <% :cube -> %>
+          <.icon name="ph-cube" class={@icon_class} />
+        <% :app -> %>
+          <.icon name="ph-app-window" class={@icon_class} />
+        <% :function -> %>
+          <.icon name="ph-function" class={@icon_class} />
+      <% end %>
+      <span class={[
+        "font-(family-name:--k-mono) text-[11.5px] min-w-0 overflow-hidden text-ellipsis whitespace-nowrap",
+        if(@item.selected, do: "text-(--k-ink)", else: "text-(--k-body)")
+      ]}>
+        {@item.name}
+      </span>
+      <div class="flex-1"></div>
+      <span
+        :if={@item.patch}
+        data-staged
+        class="flex-none text-[10px] text-(--k-amber) tracking-[.04em] whitespace-nowrap"
+      >
+        STAGED {@item.patch}
+      </span>
+      <span
+        :if={!@item.patch}
+        data-committed
+        class="flex-none w-[6px] h-[6px] rounded-full bg-(--k-mint)"
+      >
+      </span>
+    </.link>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+  attr :reasons, :list, required: true
+
+  # tracesStage()'s red "Invariant violated" callout, below the source.
+  defp reasons_callout(assigns) do
+    ~H"""
+    <div class="px-[14px] pt-[14px] font-(family-name:--k-sans) leading-[normal]">
+      <div
+        id={@id}
+        class="px-[13px] py-[11px] rounded-[9px] bg-(--k-red-chip) border border-(--k-red-chip-border) flex flex-col gap-[4px]"
+      >
+        <span class="text-[12.5px] font-semibold text-(--k-red-text)">{@title}</span>
+        <span
+          :for={r <- @reasons}
+          data-reason
+          class="font-(family-name:--k-mono) text-[12px] text-(--k-red-text) break-words"
+        >
+          {r[:name]} [{r[:code]}] {r[:message]}
+        </span>
+      </div>
+    </div>
+    """
+  end
+
+  attr :streams, :any, required: true
+  attr :data, :map, required: true
+
+  # dataStage() without "Insert a row" and the Query panel: the store
+  # (and deployment) selects, the column header, the rows, the footer row.
+  defp data_stage(assigns) do
+    ~H"""
+    <div id="data" class="flex-1 min-w-0 flex flex-col bg-(--k-card)">
+      <.form
+        for={@data.form}
+        id="data-form"
+        phx-change="data:switch"
+        class="flex-none flex items-center gap-[10px] px-[14px] py-[8px] border-b border-(--k-line) bg-(--k-tint)"
+      >
+        <div :if={@data.stores != []} class="relative flex-none flex items-center">
+          <select
+            id="data-store"
+            name={@data.form[:store].name}
+            class="appearance-none h-[29px] pl-[11px] pr-[30px] rounded-[6px] border border-(--k-line) bg-(--k-card) text-(--k-ink) font-(family-name:--k-mono) text-[12px] cursor-pointer"
+          >
+            {Phoenix.HTML.Form.options_for_select(@data.stores, @data.form[:store].value)}
+          </select>
+          <.icon
+            name="ph-caret-down"
+            class="absolute right-[10px] text-[11px] text-(--k-faint) pointer-events-none"
+          />
+        </div>
+        <div :if={@data.deployments != []} class="relative flex-none flex items-center">
+          <select
+            id="data-dep"
+            name={@data.form[:dep].name}
+            class="appearance-none h-[29px] pl-[11px] pr-[30px] rounded-[6px] border border-(--k-line) bg-(--k-card) text-(--k-ink) font-(family-name:--k-mono) text-[12px] cursor-pointer"
+          >
+            {Phoenix.HTML.Form.options_for_select(@data.deployments, @data.form[:dep].value)}
+          </select>
+          <.icon
+            name="ph-caret-down"
+            class="absolute right-[10px] text-[11px] text-(--k-faint) pointer-events-none"
+          />
+        </div>
+        <div class="flex-1 min-w-[8px]"></div>
+        <span id="data-note" class="flex-none text-[11.5px] text-(--k-faint) whitespace-nowrap">
+          deployment {@data.deployment}
+        </span>
+      </.form>
+      <div
+        :if={@data.store}
+        id="data-cols"
+        class="flex-none flex border-b border-(--k-line) bg-(--k-tint)"
+      >
+        <span
+          :for={c <- @data.columns}
+          data-col={c.name}
+          class={[
+            "py-[9px] px-[18px] font-(family-name:--k-mono) text-[11.5px] text-(--k-dim) min-w-0",
+            col_flex(c),
+            if(c.numeric, do: "text-right", else: "text-left")
+          ]}
+        >
+          {c.name}
+        </span>
+      </div>
+      <div :if={@data.store} id="data-table" class="flex-1 min-h-0 overflow-y-auto">
+        <div id="data-rows" phx-update="stream">
+          <div
+            :for={{id, r} <- @streams.rows}
+            id={id}
+            data-row
+            class={[
+              "flex border-b border-(--k-row-line)",
+              if(r.zebra, do: "bg-(--k-zebra)", else: "bg-(--k-card)")
+            ]}
+          >
+            <span
+              :for={{c, text} <- r.cells}
+              data-cell={c.name}
+              class={[
+                "py-[9px] px-[18px] min-w-0 overflow-hidden text-ellipsis whitespace-nowrap",
+                col_flex(c),
+                cell_class(c)
+              ]}
+            >
+              {text}
+            </span>
+          </div>
+        </div>
+        <div class="flex border-b border-(--k-line) bg-(--k-tint)">
+          <span id="data-footer" class="flex-[6] py-[9px] px-[18px] text-[12px] text-(--k-dim)">
+            {@data.footer}
+          </span>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # The prototype's column weights: `id` and Int columns 1, text 2.
+  defp col_flex(%{name: "id"}), do: "flex-1"
+  defp col_flex(%{numeric: true}), do: "flex-1"
+  defp col_flex(_), do: "flex-[2]"
+
+  defp cell_class(%{name: "id"}),
+    do: "font-(family-name:--k-mono) text-[12px] text-(--k-faint) text-left"
+
+  defp cell_class(%{numeric: true}),
+    do: "font-(family-name:--k-mono) text-[12px] text-(--k-ink) text-right"
+
+  defp cell_class(_), do: "text-[12.5px] text-(--k-ink) text-left"
 
   attr :streams, :any, required: true
   attr :world, :map, required: true

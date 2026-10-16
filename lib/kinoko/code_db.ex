@@ -21,7 +21,7 @@ defmodule Kinoko.CodeDb do
       (never promotes: `Kinoko.Lang.unstage/2` leaves history as it is)
     * `:symbols` → `[%{symbol, cid, signature}]`
     * `{:read, symbol}` → `{:ok, text} | :error`
-    * `:staged` → `[%{id, source, removes, reasons}]`, in staging order
+    * `:staged` → `[%{id, source, defines, removes, reasons}]`, in staging order
     * `:history` → `[commit]`, oldest first
     * `:definers` → `%{symbol => [id]}`: the staged patches defining each
       symbol, in staging order

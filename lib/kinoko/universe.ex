@@ -177,8 +177,9 @@ defmodule Kinoko.Universe do
 
   @doc """
   The staged patches, in the order they were last staged:
-  `[%{id, source, removes, reasons}]`, `source` the canonical text of the
-  declarations the patch defines and `reasons` why it cannot promote now.
+  `[%{id, source, defines, removes, reasons}]`, `source` the canonical text
+  of the declarations the patch defines, `defines` their names and
+  `reasons` why it cannot promote now.
   """
   @spec staged(name) :: [map()] | error
   def staged(universe), do: read_request(universe, :staged)

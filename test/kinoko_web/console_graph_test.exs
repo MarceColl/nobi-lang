@@ -188,14 +188,13 @@ defmodule KinokoWeb.ConsoleGraphTest do
     eventually(view, "#node-Forum-Tag")
   end
 
-  test "the code and data views leave the stage empty", %{conn: conn} do
+  test "the code and data views open no graph and no inspector", %{conn: conn} do
     u = forum_universe()
 
     for v <- ~w(code data) do
       {:ok, view, _} = live(conn, "/_/u/#{u}?view=#{v}&sel=Forum.Topic")
       refute has_element?(view, "#graph-canvas")
       refute has_element?(view, "#inspector")
-      refute has_element?(view, "#console-stage *")
     end
   end
 end

@@ -923,6 +923,17 @@ defmodule Kinoko.DataTest do
 
       assert m =~ "3"
     end
+
+    test "order: :desc and limit: read the newest rows, past the cap", %{dir: dir} do
+      repo = open!(dir)
+      for i <- 1..5, do: {:ok, _} = Data.insert(repo, "Forum.Post", @v1, v1_post("p", i))
+
+      assert {:ok, rows} = Data.list(repo, "Forum.Post", @v1, order: :desc, limit: 2, cap: 3)
+      assert [5, 4] == for({:rec, _, %{"votes" => v}} <- rows, do: v)
+
+      assert {:ok, rows} = Data.list(repo, "Forum.Post", @v1, limit: 2)
+      assert [1, 2] == for({:rec, _, %{"votes" => v}} <- rows, do: v)
+    end
   end
 
   describe "transactions" do
