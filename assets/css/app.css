@@ -184,3 +184,8 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+/* Vellum console: the prototype's global rules (selection, scrollbars), scoped to the shell. */
+.k-console ::selection { background: rgba(91,75,150,.18); }
+.k-console ::-webkit-scrollbar { width: 10px; }
+.k-console ::-webkit-scrollbar-thumb { background: #D6D2C7; border-radius: 5px; border: 3px solid transparent; background-clip: content-box; }

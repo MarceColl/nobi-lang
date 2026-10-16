@@ -29,6 +29,12 @@ defmodule KinokoWeb.Console.UniverseLive do
     end
   end
 
+  @views %{"graph" => :graph, "code" => :code, "data" => :data}
+
+  @impl true
+  def handle_params(params, _uri, socket),
+    do: {:noreply, assign(socket, view: Map.get(@views, params["view"], :graph))}
+
   @impl true
   def handle_info({:committed, universe, _}, %{assigns: %{universe: universe}} = socket),
     do: {:noreply, load(socket, true)}
@@ -85,8 +91,20 @@ defmodule KinokoWeb.Console.UniverseLive do
         }
       end)
 
+    {app_count, store_count} =
+      case Universe.graph(u) do
+        %{apps: apps, stores: stores} -> {length(apps), length(stores)}
+        _ -> {length(apps), 0}
+      end
+
     socket
     |> assign(health: Universe.health(u), head: length(history))
+    |> assign(
+      app_count: app_count,
+      store_count: store_count,
+      symbol_count: length(symbols),
+      staged_count: length(staged)
+    )
     |> stream(:apps, apps, reset: reset?)
     |> stream(:tables, tables, reset: reset?)
     |> stream(:symbols, for(s <- symbols, do: Map.put(s, :id, "symbol-" <> s.symbol)),
@@ -106,152 +124,153 @@ defmodule KinokoWeb.Console.UniverseLive do
     end
   end
 
+  # Until the System, Code and Data stages land, every view shows the
+  # universe's summary in the stage.
+  defp heading(%{view: :graph} = a),
+    do:
+      {"System",
+       "#{count(a.app_count, "app")} · #{count(a.store_count, "store")} · #{a.staged_count} staged"}
+
+  defp heading(%{view: :code} = a),
+    do: {"Code", "#{count(a.symbol_count, "symbol")} · #{a.staged_count} staged"}
+
+  defp heading(%{view: :data}), do: {"Data", ""}
+
   @impl true
   def render(assigns) do
+    {title, subtitle} = heading(assigns)
+    assigns = assign(assigns, title: title, subtitle: subtitle)
+
     ~H"""
-    <.shell flash={@flash} crumbs={[{@universe, nil}]}>
-      <div class="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 id="universe-name" class="font-mono text-2xl font-semibold tracking-tight">
+    <.shell
+      flash={@flash}
+      console={@console}
+      streams={@streams}
+      view={@view}
+      title={@title}
+      subtitle={@subtitle}
+      commit={"##{@head}"}
+    >
+      <.page>
+        <div class="flex items-center gap-[9px]">
+          <span
+            id="universe-name"
+            class="font-(family-name:--k-display) text-[25px] font-medium tracking-normal"
+          >
             {@universe}
-          </h1>
-          <p class="mt-1 text-sm text-zinc-500">{@head} commits</p>
-        </div>
-        <%= case @health do %>
-          <% :ok -> %>
-            <.badge id="health" data-state="ok" tone={:ok}>
-              <.icon name="hero-check-circle" class="size-4" /> healthy
-            </.badge>
-          <% _ -> %>
-            <.badge id="health" data-state="degraded" tone={:warn}>
-              <.icon name="hero-exclamation-triangle" class="size-4" /> degraded
-            </.badge>
-        <% end %>
-      </div>
-
-      <div
-        :if={match?({:degraded, _}, @health)}
-        id="degraded-banner"
-        class="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
-      >
-        <p class="font-semibold">This universe's committed code no longer typechecks.</p>
-        <ul class="mt-2 list-disc space-y-1 pl-5">
-          <li :for={r <- elem(@health, 1)} data-reason>
-            <span class="font-mono">{r[:name]}</span> [{r[:code]}] {r[:message]}
-          </li>
-        </ul>
-      </div>
-
-      <.section title="Apps" id="apps-section">
-        <div id="apps" phx-update="stream" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <div id="empty-1" class="hidden only:block text-sm text-zinc-500">No apps committed.</div>
-          <div
-            :for={{dom_id, a} <- @streams.apps}
-            id={dom_id}
-            class={[card_class(), "p-4 hover:border-rose-300 dark:hover:border-rose-800"]}
-          >
-            <div class="font-mono text-sm font-semibold">{a.symbol}</div>
-            <div class="mt-2 flex flex-wrap gap-1.5">
-              <.link :for={d <- a.serving} navigate={~p"/_/d/#{d}"}>
-                <.badge tone={:ok}>
-                  <.icon name="hero-globe-alt" class="size-3.5" /> {d}
-                </.badge>
-              </.link>
-              <span :if={a.serving == []} class="text-xs text-zinc-400">not served</span>
-            </div>
-          </div>
-        </div>
-      </.section>
-
-      <.section title="Route tables" id="routes-section">
-        <div id="route-tables" phx-update="stream" class="grid gap-3 lg:grid-cols-2">
-          <div id="empty-2" class="hidden only:block text-sm text-zinc-500">No route tables.</div>
-          <div
-            :for={{dom_id, t} <- @streams.tables}
-            id={dom_id}
-            class={[card_class(), "overflow-hidden"]}
-          >
-            <div class="border-b border-zinc-100 px-4 py-2 font-mono text-sm font-semibold dark:border-zinc-800">
-              {t.name}
-            </div>
-            <ul class="divide-y divide-zinc-100 dark:divide-zinc-800">
-              <li
-                :for={e <- t.entries}
-                data-pattern={pattern(e)}
-                class="flex items-center justify-between gap-3 px-4 py-2 text-sm transition hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+          </span>
+          <%= case @health do %>
+            <% :ok -> %>
+              <span
+                id="health"
+                data-state="ok"
+                class="text-[11.5px] text-(--k-mint) bg-(--k-mint-chip) border border-(--k-mint-chip-border) px-[8px] py-[2px] rounded-[5px]"
               >
-                <code class="text-rose-600 dark:text-rose-400">{pattern(e)}</code>
-                <span class="flex items-center gap-1 font-mono text-xs text-zinc-500">
-                  <.icon name="hero-arrow-right" class="size-3" /> {e.app}
-                </span>
-              </li>
-            </ul>
-          </div>
+                healthy
+              </span>
+            <% _ -> %>
+              <span
+                id="health"
+                data-state="degraded"
+                class="text-[11.5px] text-(--k-amber-text) bg-(--k-amber-chip) border border-(--k-amber-chip-border) px-[8px] py-[2px] rounded-[5px]"
+              >
+                degraded
+              </span>
+          <% end %>
         </div>
-      </.section>
 
-      <.section title="Staged patches" id="staged-section">
-        <div id="staged" phx-update="stream" class="space-y-3">
-          <div id="empty-3" class="hidden only:block text-sm text-zinc-500">Nothing staged.</div>
-          <div
-            :for={{dom_id, p} <- @streams.staged}
-            id={dom_id}
-            class="rounded-xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900 dark:bg-amber-950/40"
-          >
-            <div class="font-mono text-sm font-semibold">{p.id}</div>
-            <ul class="mt-2 space-y-1 text-sm text-amber-900 dark:text-amber-200">
-              <li :for={r <- p.reasons} data-reason class="flex gap-2">
-                <.icon name="hero-exclamation-circle" class="mt-0.5 size-4 shrink-0" />
-                <span>
-                  <span :if={r[:name]} class="font-mono">{r[:name]}</span>
-                  <span class="opacity-60">[{r[:code]}]</span>
-                  {r[:message]}
-                </span>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </.section>
-
-      <.section title="Symbols" id="symbols-section">
         <div
-          id="symbols"
-          phx-update="stream"
-          class={[card_class(), "divide-y divide-zinc-100 dark:divide-zinc-800"]}
+          :if={match?({:degraded, _}, @health)}
+          id="degraded-banner"
+          class="rounded-[9px] border border-(--k-amber-chip-border) bg-(--k-amber-chip) px-[12px] py-[9px] text-[12.5px] text-(--k-amber-text) flex flex-col gap-[6px]"
         >
-          <div id="empty-4" class="hidden only:block p-4 text-sm text-zinc-500">
-            No symbols committed.
-          </div>
-          <div
-            :for={{dom_id, s} <- @streams.symbols}
-            id={dom_id}
-            class="flex flex-wrap items-baseline justify-between gap-x-4 px-4 py-2 transition hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-          >
-            <span class="font-mono text-sm font-medium">{s.symbol}</span>
-            <code class="truncate text-xs text-zinc-500">{s.signature}</code>
-          </div>
+          <span class="font-medium">This universe's committed code no longer typechecks.</span>
+          <span :for={r <- elem(@health, 1)} data-reason>
+            <span class="font-(family-name:--k-mono)">{r[:name]}</span> [{r[:code]}] {r[:message]}
+          </span>
         </div>
-      </.section>
 
-      <.section title="History" id="history-section">
-        <ol id="history" phx-update="stream" class="space-y-2">
-          <li id="empty-5" class="hidden only:block text-sm text-zinc-500">No commits yet.</li>
-          <li
-            :for={{dom_id, h} <- @streams.history}
-            id={dom_id}
-            class={[card_class(), "flex flex-wrap items-start gap-3 p-3"]}
-          >
-            <.badge tone={:info}>#{h.n}</.badge>
-            <div class="min-w-0 flex-1 text-sm">
-              <div class="font-medium">{Enum.join(h.patches, ", ")}</div>
-              <div class="mt-1 flex flex-wrap gap-1 font-mono text-xs">
-                <span :for={s <- h.live} class="text-emerald-600 dark:text-emerald-400">+{s}</span>
-                <span :for={s <- h.gone} class="text-rose-600 dark:text-rose-400">-{s}</span>
+        <.section title="Apps" id="apps-section">
+          <div id="apps" phx-update="stream" class={table_class()}>
+            <div id="empty-1" class={empty_class()}>No apps committed.</div>
+            <div :for={{dom_id, a} <- @streams.apps} id={dom_id} class={row_rule_class()}>
+              <span class="font-(family-name:--k-mono) font-medium">{a.symbol}</span>
+              <div class="flex-1"></div>
+              <.link
+                :for={d <- a.serving}
+                navigate={~p"/_/d/#{d}"}
+                class="font-(family-name:--k-mono) text-[11.5px] text-(--k-violet) hover:text-(--k-violet-hover)"
+              >
+                {d}
+              </.link>
+              <span :if={a.serving == []} class="text-[11.5px] text-(--k-faint)">not served</span>
+            </div>
+          </div>
+        </.section>
+
+        <.section title="Route tables" id="routes-section">
+          <div id="route-tables" phx-update="stream" class="flex flex-col gap-[9px]">
+            <div id="empty-2" class={empty_class()}>No route tables.</div>
+            <div :for={{dom_id, t} <- @streams.tables} id={dom_id} class={table_class()}>
+              <div class="px-[12px] py-[7px] bg-(--k-tint) border-b border-(--k-line) font-(family-name:--k-mono) text-[11.5px] font-medium">
+                {t.name}
+              </div>
+              <div :for={e <- t.entries} data-pattern={pattern(e)} class={row_rule_class()}>
+                <span class="font-(family-name:--k-mono) text-(--k-violet)">{pattern(e)}</span>
+                <div class="flex-1"></div>
+                <span class="font-(family-name:--k-mono) text-[11.5px] text-(--k-dim)">
+                  → {e.app}
+                </span>
               </div>
             </div>
-          </li>
-        </ol>
-      </.section>
+          </div>
+        </.section>
+
+        <.section title="Staged patches" id="staged-section">
+          <div id="staged" phx-update="stream" class="flex flex-col gap-[9px]">
+            <div id="empty-3" class={empty_class()}>Nothing staged.</div>
+            <div
+              :for={{dom_id, p} <- @streams.staged}
+              id={dom_id}
+              class="rounded-[9px] border border-(--k-amber-chip-border) bg-(--k-amber-chip) px-[12px] py-[9px] text-[12.5px] flex flex-col gap-[6px]"
+            >
+              <span class="font-(family-name:--k-mono) font-medium">{p.id}</span>
+              <span :for={r <- p.reasons} data-reason class="text-(--k-amber-text)">
+                <span :if={r[:name]} class="font-(family-name:--k-mono)">{r[:name]}</span>
+                [{r[:code]}] {r[:message]}
+              </span>
+            </div>
+          </div>
+        </.section>
+
+        <.section title="Symbols" id="symbols-section">
+          <div id="symbols" phx-update="stream" class={table_class()}>
+            <div id="empty-4" class={empty_class()}>No symbols committed.</div>
+            <div :for={{dom_id, s} <- @streams.symbols} id={dom_id} class={row_rule_class()}>
+              <span class="font-(family-name:--k-mono) font-medium">{s.symbol}</span>
+              <div class="flex-1"></div>
+              <span class="font-(family-name:--k-mono) text-[11.5px] text-(--k-dim) truncate">
+                {s.signature}
+              </span>
+            </div>
+          </div>
+        </.section>
+
+        <.section title="History" id="history-section">
+          <div id="history" phx-update="stream" class={table_class()}>
+            <div id="empty-5" class={empty_class()}>No commits yet.</div>
+            <div :for={{dom_id, h} <- @streams.history} id={dom_id} class={row_rule_class()}>
+              <span class="font-(family-name:--k-mono) text-(--k-faint)">#{h.n}</span>
+              <span class="font-medium">{Enum.join(h.patches, ", ")}</span>
+              <div class="flex-1"></div>
+              <span class="font-(family-name:--k-mono) text-[11.5px] flex flex-wrap gap-[6px]">
+                <span :for={s <- h.live} class="text-(--k-mint)">+{s}</span>
+                <span :for={s <- h.gone} class="text-(--k-red)">-{s}</span>
+              </span>
+            </div>
+          </div>
+        </.section>
+      </.page>
     </.shell>
     """
   end

@@ -78,141 +78,145 @@ defmodule KinokoWeb.Console.DeploymentLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.shell flash={@flash} crumbs={[{@name, nil}]}>
-      <div class="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 id="deployment-name" class="font-mono text-2xl font-semibold tracking-tight">
-            {@deployment.name}
-          </h1>
-          <p class="mt-1 text-sm text-zinc-500">
-            serves routes <span class="font-mono">{@deployment.routes}</span>
-            from universe
-            <.link navigate={~p"/_/u/#{@deployment.universe}"} class={link_class()}>
+    <.shell
+      flash={@flash}
+      console={@console}
+      streams={@streams}
+      title="Deployment"
+      subtitle={@deployment.name}
+    >
+      <.page>
+        <div class="flex flex-col gap-[6px] min-w-0">
+          <div class="flex items-center gap-[9px]">
+            <span
+              id="deployment-name"
+              class="font-(family-name:--k-display) text-[25px] font-medium tracking-normal"
+            >
+              {@deployment.name}
+            </span>
+            <%= if @deployment.commit do %>
+              <span
+                id="deployment-commit"
+                data-mode="pinned"
+                class="text-[11.5px] text-(--k-faint) bg-(--k-sand) border border-(--k-line) px-[8px] py-[2px] rounded-[5px]"
+              >
+                pinned @ #{@deployment.commit}
+              </span>
+            <% else %>
+              <span
+                id="deployment-commit"
+                data-mode="following"
+                class="text-[11.5px] text-(--k-mint) bg-(--k-mint-chip) border border-(--k-mint-chip-border) px-[8px] py-[2px] rounded-[5px]"
+              >
+                following head
+              </span>
+            <% end %>
+          </div>
+          <span class="text-[12.5px] text-(--k-dim)">
+            serving
+            <.link
+              navigate={~p"/_/u/#{@deployment.universe}"}
+              class="text-(--k-violet) hover:text-(--k-violet-hover)"
+            >
               {@deployment.universe}
             </.link>
-          </p>
+            · routes <span class="font-(family-name:--k-mono)">{@deployment.routes}</span>
+          </span>
         </div>
-        <%= if @deployment.commit do %>
-          <.badge id="deployment-commit" data-mode="pinned" tone={:warn}>
-            <.icon name="hero-map-pin" class="size-4" /> pinned @ commit {@deployment.commit}
-          </.badge>
-        <% else %>
-          <.badge id="deployment-commit" data-mode="following" tone={:ok}>
-            <.icon name="hero-arrow-path" class="size-4" /> following head
-          </.badge>
-        <% end %>
-      </div>
 
-      <.section title="Hosts" id="hosts-section">
-        <div id="hosts" phx-update="stream" class="flex flex-wrap gap-2">
-          <div :for={{dom_id, h} <- @streams.hosts} id={dom_id}>
-            <a
-              href={host_url(h.host) <> "/"}
-              target="_blank"
-              rel="noopener"
-              class="group inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 font-mono text-sm shadow-sm transition hover:-translate-y-0.5 hover:border-rose-300 hover:shadow dark:border-zinc-800 dark:bg-zinc-900"
-            >
-              {host_url(h.host)}/
-              <.icon
-                name="hero-arrow-top-right-on-square"
-                class="size-3.5 text-zinc-400 transition group-hover:text-rose-500"
-              />
-            </a>
-          </div>
-        </div>
-      </.section>
-
-      <.section title="Routes" id="routes-section">
-        <div
-          id="routes"
-          phx-update="stream"
-          class={[card_class(), "divide-y divide-zinc-100 overflow-hidden dark:divide-zinc-800"]}
-        >
-          <div id="empty-1" class="hidden only:block p-4 text-sm text-zinc-500">No routes.</div>
-          <div
-            :for={{dom_id, r} <- @streams.routes}
-            id={dom_id}
-            data-pattern={r.pattern}
-            class="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"
-          >
-            <%= if r.path do %>
+        <.section title="Hosts" id="hosts-section">
+          <div id="hosts" phx-update="stream" class={table_class()}>
+            <div :for={{dom_id, h} <- @streams.hosts} id={dom_id} class={row_rule_class()}>
               <a
-                href={@link_base <> r.path}
-                data-path={r.path}
+                href={host_url(h.host) <> "/"}
                 target="_blank"
                 rel="noopener"
-                class="font-mono text-rose-600 underline decoration-rose-200 underline-offset-4 transition hover:decoration-rose-500 dark:text-rose-400"
+                class="font-(family-name:--k-mono) text-(--k-violet) hover:text-(--k-violet-hover)"
               >
-                {r.pattern}
+                {host_url(h.host)}/
               </a>
-            <% else %>
-              <code class="text-zinc-500" title="has params: open it from the app">{r.pattern}</code>
-            <% end %>
-            <span class="flex items-center gap-1 font-mono text-xs text-zinc-500">
-              <.icon name="hero-arrow-right" class="size-3" /> {r.app}
-            </span>
+            </div>
           </div>
-        </div>
-      </.section>
+        </.section>
 
-      <.section title="Models" id="models-section" count={@model_count}>
-        <div id="models" phx-update="stream" class="grid gap-3 lg:grid-cols-2">
-          <div
-            id="models-empty"
-            class={[card_class(), "hidden only:flex items-center gap-3 p-4 text-sm text-zinc-500"]}
-          >
-            <.icon name="hero-circle-stack" class="size-5 text-zinc-300 dark:text-zinc-600" />
-            Nothing stored yet: a table appears with the first
-            <code class="font-mono">Cmd.store</code>
-            call.
-          </div>
-          <article
-            :for={{dom_id, m} <- @streams.models}
-            id={dom_id}
-            class={[card_class(), "overflow-hidden hover:border-zinc-300 dark:hover:border-zinc-700"]}
-          >
-            <header class="flex items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
-              <div class="min-w-0">
-                <h3 class="truncate font-mono text-sm font-semibold">{m.model}</h3>
-                <p class="truncate font-mono text-xs text-zinc-400" data-table={m.table}>
-                  {m.table}
-                </p>
-              </div>
-              <.badge tone={if(m.rows > 0, do: :info, else: :neutral)} data-rows={m.rows}>
-                <.icon name="hero-table-cells" class="size-3.5" />
-                {m.rows} {if(m.rows == 1, do: "row", else: "rows")}
-              </.badge>
-            </header>
-            <table class="w-full text-left text-xs">
-              <thead class="text-[10px] uppercase tracking-wider text-zinc-400">
-                <tr>
-                  <th class="px-4 py-2 font-medium">Column</th>
-                  <th class="px-4 py-2 font-medium">Type</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800">
-                <tr
-                  :for={c <- m.columns}
-                  data-column={c.name}
-                  data-type={c.type}
-                  class={[
-                    "transition hover:bg-zinc-50 dark:hover:bg-zinc-800/50",
-                    c.own? && "text-zinc-400"
-                  ]}
+        <.section title="Routes" id="routes-section">
+          <div id="routes" phx-update="stream" class={table_class()}>
+            <div id="empty-1" class={empty_class()}>No routes.</div>
+            <div
+              :for={{dom_id, r} <- @streams.routes}
+              id={dom_id}
+              data-pattern={r.pattern}
+              class={row_rule_class()}
+            >
+              <%= if r.path do %>
+                <a
+                  href={@link_base <> r.path}
+                  data-path={r.path}
+                  target="_blank"
+                  rel="noopener"
+                  class="font-(family-name:--k-mono) text-(--k-violet) hover:text-(--k-violet-hover)"
                 >
-                  <td class="px-4 py-1.5 font-mono">
-                    {c.name}
-                    <span :if={c.field && c.field != c.name} class="text-zinc-400">
-                      ({c.field})
-                    </span>
-                  </td>
-                  <td class="px-4 py-1.5 font-mono text-zinc-500">{c.type}</td>
-                </tr>
-              </tbody>
-            </table>
-          </article>
-        </div>
-      </.section>
+                  {r.pattern}
+                </a>
+              <% else %>
+                <span
+                  class="font-(family-name:--k-mono) text-(--k-dim)"
+                  title="has params: open it from the app"
+                >
+                  {r.pattern}
+                </span>
+              <% end %>
+              <div class="flex-1"></div>
+              <span class="font-(family-name:--k-mono) text-[11.5px] text-(--k-dim)">
+                → {r.app}
+              </span>
+            </div>
+          </div>
+        </.section>
+
+        <.section title={"Models · #{@model_count}"} id="models-section">
+          <div id="models" phx-update="stream" class="flex flex-col gap-[9px]">
+            <div id="models-empty" class={empty_class()}>
+              Nothing stored yet: a table appears with the first
+              <span class="font-(family-name:--k-mono)">Cmd.store</span>
+              call.
+            </div>
+            <article :for={{dom_id, m} <- @streams.models} id={dom_id} class={table_class()}>
+              <div class="flex items-baseline gap-[10px] px-[12px] py-[7px] bg-(--k-tint) border-b border-(--k-line)">
+                <span class="font-(family-name:--k-mono) text-[12.5px] font-medium">{m.model}</span>
+                <span
+                  class="font-(family-name:--k-mono) text-[11px] text-(--k-faint)"
+                  data-table={m.table}
+                >
+                  {m.table}
+                </span>
+                <div class="flex-1"></div>
+                <span
+                  class="font-(family-name:--k-mono) text-[11.5px] text-(--k-dim)"
+                  data-rows={m.rows}
+                >
+                  {count(m.rows, "row")}
+                </span>
+              </div>
+              <div
+                :for={c <- m.columns}
+                data-column={c.name}
+                data-type={c.type}
+                class={[row_rule_class(), c.own? && "text-(--k-faint)"]}
+              >
+                <span class="font-(family-name:--k-mono)">
+                  {c.name}
+                  <span :if={c.field && c.field != c.name} class="text-(--k-faint)">
+                    ({c.field})
+                  </span>
+                </span>
+                <div class="flex-1"></div>
+                <span class="font-(family-name:--k-mono) text-(--k-dim)">{c.type}</span>
+              </div>
+            </article>
+          </div>
+        </.section>
+      </.page>
     </.shell>
     """
   end

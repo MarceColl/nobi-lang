@@ -47,10 +47,8 @@ defmodule KinokoWeb.ConsoleTest do
       {:ok, view, _} = live(conn, "/_")
 
       assert has_element?(view, "#console-index")
-      assert has_element?(view, id("universes", u))
-      assert has_element?(view, ~s(a#{id("universes", u)}[href="/_/u/#{u}"]))
-      assert has_element?(view, id("deployments", u))
-      assert has_element?(view, ~s(a#{id("deployments", u)}[href="/_/d/#{u}"]))
+      assert has_element?(view, ~s(a#{id("env", u)}[href="/_/u/#{u}"]))
+      assert has_element?(view, ~s(a#{id("dep", u)}[href="/_/d/#{u}"]))
     end
   end
 

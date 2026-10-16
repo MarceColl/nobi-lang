@@ -51,9 +51,11 @@ defmodule KinokoWeb.Router do
     scope "/_", KinokoWeb.Console do
       pipe_through :browser
 
-      live "/", IndexLive
-      live "/u/:universe", UniverseLive
-      live "/d/:name", DeploymentLive
+      live_session :console, on_mount: KinokoWeb.Console.Live do
+        live "/", IndexLive
+        live "/u/:universe", UniverseLive
+        live "/d/:name", DeploymentLive
+      end
     end
   end
 
