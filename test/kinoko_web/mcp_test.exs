@@ -123,7 +123,9 @@ defmodule KinokoWeb.McpTest do
       for line <- String.split(example, "\n", trim: true),
           do: assert(text =~ "  " <> line, "the instructions lack: #{line}")
 
-      for form <- ["defmodel ", "deftype ", " = case ", " if ", "on-click={", "defapp "],
+      for form <-
+            ["defmodel ", "deftype ", "shown = ", " if ", "on-click={", "defapp "] ++
+              ["id : Uuid", "saves : Int = 1", "Cmd.store.insert(", "Cmd.store.tx(", "Store.get("],
           do: assert(example =~ form, "the example lacks #{form}")
 
       assert ok!(conn, "stage_patch", %{"universe" => u, "id" => "ex", "source" => example}) ==
@@ -132,7 +134,7 @@ defmodule KinokoWeb.McpTest do
       assert ok!(conn, "eval", %{
                "universe" => u,
                "expression" =>
-                 "Counter.update(Counter.Msg.Add(5), %Counter.Model{count: 1, label: \"x\"})"
+                 "Counter.update(Counter.Msg.Add(5), %Counter.Model{count: 1, label: \"x\", snapshots: []})"
              }) =~ "count: 6"
     end
   end

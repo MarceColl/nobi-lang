@@ -2,7 +2,8 @@ defmodule Kinoko.Data do
   @moduledoc """
   Per-deployment storage: the rows of a deployment's stored models, in one
   SQLite file per deployment at `<data dir>/data/<deployment>.db` (the data
-  dir is `Kinoko.Repo`'s; `dir:` overrides it, for tests).
+  dir is `Kinoko.Repo`'s; `dir:`, or the application env's
+  `config :kinoko, Kinoko.Data, dir: ...`, overrides it, for tests).
 
   ## Opening
 
@@ -63,11 +64,20 @@ defmodule Kinoko.Data do
 
   # ---------- files ----------
 
-  @doc "The file of `deployment`. Options: `dir:` (default: `Kinoko.Repo`'s directory)."
+  @doc """
+  The file of `deployment`. Options: `dir:` (default: the `:dir` of the
+  `:kinoko, Kinoko.Data` application env when set, which tests use, else
+  `Kinoko.Repo`'s directory).
+  """
   @spec path(String.t(), keyword()) :: String.t()
   def path(deployment, opts \\ []) do
-    dir = Keyword.get_lazy(opts, :dir, fn -> Kinoko.Release.data_dir(Kinoko.Repo) end)
+    dir = Keyword.get_lazy(opts, :dir, &default_dir/0)
     Path.join([dir, "data", deployment <> ".db"])
+  end
+
+  defp default_dir do
+    Application.get_env(:kinoko, __MODULE__, [])[:dir] ||
+      Kinoko.Release.data_dir(Kinoko.Repo)
   end
 
   @doc """

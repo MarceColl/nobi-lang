@@ -1,32 +1,48 @@
 defmodel Forum.Topic do
   id : Uuid
   title : String
-  replies : Int
+  replies : Int = 0
+end
+
+defmodel Forum.Reply do
+  id : Uuid
+  topic : Uuid
+  body : String
 end
 
 defmodel Forum.Threads.Model do
   topics : List<Forum.Topic>
   filter : String
+  title : String
 end
 
 deftype Forum.Threads.Msg do
-  Filter(String) | Open(Uuid) | Settings
+  Loaded(List<Forum.Topic>) | Filter(String) | Title(String) | Create | Created(Uuid) | Open(Uuid) | Settings
 end
 
 def Forum.Threads.init() : (Forum.Threads.Model, Cmd<Forum.Threads.Msg>) do
-  (%Forum.Threads.Model{topics: [], filter: ""}, Cmd.none())
+  (%Forum.Threads.Model{topics: [], filter: "", title: ""}, Cmd.store.list(Forum.Threads.Msg.Loaded))
 end
 
 def Forum.Threads.update(msg : Forum.Threads.Msg, model : Forum.Threads.Model) : (Forum.Threads.Model, Cmd<Forum.Threads.Msg>) do
   case msg do
+    Forum.Threads.Msg.Loaded(topics) -> (%Forum.Threads.Model{model | topics: topics}, Cmd.none())
     Forum.Threads.Msg.Filter(text) -> (%Forum.Threads.Model{model | filter: text}, Cmd.none())
+    Forum.Threads.Msg.Title(text) -> (%Forum.Threads.Model{model | title: text}, Cmd.none())
+    Forum.Threads.Msg.Create ->
+      if model.title == "" do
+        (model, Cmd.none())
+      else
+        (%Forum.Threads.Model{model | title: ""}, Cmd.store.insert(%Forum.Topic{title: model.title, replies: 0}, Forum.Threads.Msg.Created))
+      end
+    Forum.Threads.Msg.Created(id) -> (model, Cmd.navigate(Forum.Post, id))
     Forum.Threads.Msg.Open(id) -> (model, Cmd.navigate(Forum.Post, id))
     Forum.Threads.Msg.Settings -> (model, Cmd.navigate(Forum.Settings))
   end
 end
 
 def Forum.Threads.view_topic(topic : Forum.Topic) : Html<Forum.Threads.Msg> do
-  <li class="flex justify-between py-2">
+  <li class="topic flex justify-between py-2">
     <button class="text-left font-medium hover:underline" on-click={Forum.Threads.Msg.Open(topic.id)}>{topic.title}</button>
     <span class="text-sm text-gray-500">{topic.replies}</span>
   </li>
@@ -39,8 +55,12 @@ def Forum.Threads.view(model : Forum.Threads.Model) : Html<Forum.Threads.Msg> do
       <h1 class="text-2xl font-bold">Threads</h1>
       <button id="open-settings" on-click={Forum.Threads.Msg.Settings}>Settings</button>
     </header>
+    <form id="new-thread" class="flex gap-2 py-4" on-submit={Forum.Threads.Msg.Create}>
+      <input id="title" placeholder="New thread" value={model.title} on-change={Forum.Threads.Msg.Title} />
+      <button id="create" type="submit">Create</button>
+    </form>
     <input id="filter" placeholder="Filter" value={model.filter} on-change={Forum.Threads.Msg.Filter} />
-    <ul>{List.map(shown, Forum.Threads.view_topic)}</ul>
+    <ul id="topics">{List.map(shown, Forum.Threads.view_topic)}</ul>
   </main>
 end
 
@@ -48,38 +68,77 @@ defapp Forum.Threads
 
 defmodel Forum.Post.Model do
   post_id : Uuid
+  topic : Option<Forum.Topic>
+  replies : List<Forum.Reply>
   draft : String
-  replies : List<String>
+  error : String
 end
 
 deftype Forum.Post.Msg do
-  Draft(String) | Reply | Back
+  Loaded(Option<Forum.Topic>) | Replies(List<Forum.Reply>) | Draft(String) | Reply | Posted(Result<(List<Uuid>, Int), String>) | Back
+end
+
+def Forum.Post.load(id : Uuid) : Cmd<Forum.Post.Msg> do
+  Cmd.batch([Cmd.store.get(id, Forum.Post.Msg.Loaded), Cmd.store.list(Forum.Post.Msg.Replies)])
+end
+
+def Forum.Post.reply(topic : Uuid, body : String) : Cmd<Forum.Post.Msg> do
+  Cmd.store.tx(
+    fn (s : Store) ->
+      case Store.get(s, topic) do
+        Option.Some(t) -> ([Tx.insert(%Forum.Reply{topic: topic, body: body}), Tx.update(topic, %Forum.Topic{t | replies: t.replies + 1})], t.replies + 1)
+        Option.None -> ([], 0)
+      end
+    end,
+    Forum.Post.Msg.Posted
+  )
 end
 
 def Forum.Post.init(id : Uuid) : (Forum.Post.Model, Cmd<Forum.Post.Msg>) do
-  (%Forum.Post.Model{post_id: id, draft: "", replies: []}, Cmd.none())
+  (%Forum.Post.Model{post_id: id, topic: Option.None, replies: [], draft: "", error: ""}, Forum.Post.load(id))
 end
 
 def Forum.Post.update(msg : Forum.Post.Msg, model : Forum.Post.Model) : (Forum.Post.Model, Cmd<Forum.Post.Msg>) do
   case msg do
+    Forum.Post.Msg.Loaded(topic) -> (%Forum.Post.Model{model | topic: topic}, Cmd.none())
+    Forum.Post.Msg.Replies(rows) -> (%Forum.Post.Model{model | replies: List.filter(rows, fn (r : Forum.Reply) -> r.topic == model.post_id end)}, Cmd.none())
     Forum.Post.Msg.Draft(text) -> (%Forum.Post.Model{model | draft: text}, Cmd.none())
     Forum.Post.Msg.Reply ->
       if model.draft == "" do
         (model, Cmd.none())
       else
-        (%Forum.Post.Model{model | replies: List.append(model.replies, model.draft), draft: ""}, Cmd.none())
+        (%Forum.Post.Model{model | draft: "", error: ""}, Forum.Post.reply(model.post_id, model.draft))
+      end
+    Forum.Post.Msg.Posted(result) ->
+      case result do
+        Result.Ok(done) -> (model, Forum.Post.load(model.post_id))
+        Result.Err(message) -> (%Forum.Post.Model{model | error: message}, Cmd.none())
       end
     Forum.Post.Msg.Back -> (model, Cmd.navigate(Forum.Threads))
+  end
+end
+
+def Forum.Post.view_topic(topic : Option<Forum.Topic>) : Html<Forum.Post.Msg> do
+  case topic do
+    Option.Some(t) ->
+      <header>
+        <h1 id="post-title" class="text-xl font-bold">{t.title}</h1>
+        <p class="text-sm text-gray-500"><span id="reply-count">{t.replies}</span> replies</p>
+      </header>
+    Option.None -> <h1 id="post-title" class="text-xl font-bold">No such thread</h1>
   end
 end
 
 def Forum.Post.view(model : Forum.Post.Model) : Html<Forum.Post.Msg> do
   <main id="post" data-post={model.post_id} class="mx-auto max-w-xl p-6">
     <button id="back" on-click={Forum.Post.Msg.Back}>All threads</button>
-    <h1 class="text-xl font-bold">Post</h1>
-    <ul>{List.map(model.replies, fn (reply : String) -> <li class="py-1">{reply}</li> end)}</ul>
-    <input id="draft" value={model.draft} on-change={Forum.Post.Msg.Draft} />
-    <button id="reply" on-click={Forum.Post.Msg.Reply}>Reply</button>
+    {Forum.Post.view_topic(model.topic)}
+    <ul id="replies">{List.map(model.replies, fn (reply : Forum.Reply) -> <li class="reply py-1">{reply.body}</li> end)}</ul>
+    <form id="reply-form" class="flex gap-2" on-submit={Forum.Post.Msg.Reply}>
+      <input id="draft" value={model.draft} on-change={Forum.Post.Msg.Draft} />
+      <button id="reply" type="submit">Reply</button>
+    </form>
+    <p id="post-error" class="text-sm text-red-600">{model.error}</p>
   </main>
 end
 

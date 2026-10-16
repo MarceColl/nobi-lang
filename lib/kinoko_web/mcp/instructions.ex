@@ -14,35 +14,63 @@ defmodule KinokoWeb.Mcp.Instructions do
   alias Kinoko.Lang.Types.{Extract, Stdlib}
 
   # Every declaration form in one small app (a cut-down
-  # test/fixtures/yabu/counter.yabu). The MCP tests stage it: it must promote.
+  # test/fixtures/yabu/counter.yabu, plus a stored model, Cmd.store and a
+  # tx closure). The MCP tests stage it: it must promote.
   @example """
+  defmodel Counter.Snapshot do
+    id : Uuid
+    count : Int
+    label : String
+    saves : Int = 1
+  end
+
   defmodel Counter.Model do
     count : Int
     label : String
+    snapshots : List<Counter.Snapshot>
   end
 
   deftype Counter.Msg do
-    Increment | Add(Int) | Rename(String)
+    Increment | Add(Int) | Rename(String) | Save | Saved(Uuid) | Loaded(List<Counter.Snapshot>) | Again(Uuid) | Done(Result<(List<Uuid>, Int), String>)
   end
 
   def Counter.init() : (Counter.Model, Cmd<Counter.Msg>) do
-    (%Counter.Model{count: 0, label: "clicks"}, Cmd.none())
+    (%Counter.Model{count: 0, label: "clicks", snapshots: []}, Cmd.store.list(Counter.Msg.Loaded))
+  end
+
+  def Counter.again(id : Uuid) : Cmd<Counter.Msg> do
+    Cmd.store.tx(
+      fn (s : Store) ->
+        case Store.get(s, id) do
+          Option.Some(snap) -> ([Tx.update(id, %Counter.Snapshot{snap | saves: snap.saves + 1})], snap.saves + 1)
+          Option.None -> ([], 0)
+        end
+      end,
+      Counter.Msg.Done
+    )
   end
 
   def Counter.update(msg : Counter.Msg, model : Counter.Model) : (Counter.Model, Cmd<Counter.Msg>) do
-    next = case msg do
-      Counter.Msg.Increment -> %Counter.Model{model | count: model.count + 1}
-      Counter.Msg.Add(n) -> if model.count + n >= 0 do %Counter.Model{model | count: model.count + n} else model end
-      Counter.Msg.Rename(s) -> %Counter.Model{model | label: s}
+    case msg do
+      Counter.Msg.Increment -> (%Counter.Model{model | count: model.count + 1}, Cmd.none())
+      Counter.Msg.Add(n) -> if model.count + n >= 0 do (%Counter.Model{model | count: model.count + n}, Cmd.none()) else (model, Cmd.none()) end
+      Counter.Msg.Rename(s) -> (%Counter.Model{model | label: s}, Cmd.none())
+      Counter.Msg.Save -> (model, Cmd.store.insert(%Counter.Snapshot{count: model.count, label: model.label, saves: 1}, Counter.Msg.Saved))
+      Counter.Msg.Saved(id) -> (model, Cmd.store.list(Counter.Msg.Loaded))
+      Counter.Msg.Loaded(rows) -> (%Counter.Model{model | snapshots: rows}, Cmd.none())
+      Counter.Msg.Again(id) -> (model, Counter.again(id))
+      Counter.Msg.Done(result) -> (model, Cmd.store.list(Counter.Msg.Loaded))
     end
-    (next, Cmd.none())
   end
 
   def Counter.view(model : Counter.Model) : Html<Counter.Msg> do
-    <div class="flex gap-2 p-4">
-      <span class="font-bold">{model.label}: {String.from_int(model.count)}</span>
+    shown = String.concat(String.concat(model.label, ": "), String.from_int(model.count))
+    <div class="flex flex-col gap-2 p-4">
+      <span class="font-bold">{shown}</span>
       <button class="rounded bg-blue-600 px-3 text-white" on-click={Counter.Msg.Increment}>+</button>
       <button on-click={Counter.Msg.Add(10)}>+10</button>
+      <button on-click={Counter.Msg.Save}>Save</button>
+      <ul>{List.map(model.snapshots, fn (snap : Counter.Snapshot) -> <li><button on-click={Counter.Msg.Again(snap.id)}>{snap.label} {String.from_int(snap.count)} x{String.from_int(snap.saves)}</button></li> end)}</ul>
     </div>
   end
 
@@ -84,8 +112,9 @@ defmodule KinokoWeb.Mcp.Instructions do
   DECLARATIONS: one whole app, every form you need (it promotes as written)
   #{@example |> String.trim_trailing() |> String.split("\n") |> Enum.map_join("\n", &String.trim_trailing("  " <> &1))}
 
-  - defmodel: one `field : Type` per line. deftype: variants separated by `|`,
-    a payload in parentheses, `Counter.Msg.Add(Int)`.
+  - defmodel: one `field : Type` per line, optionally `= <constant>` (a
+    default; see STORED DATA). deftype: variants separated by `|`, a payload
+    in parentheses, `Counter.Msg.Add(Int)`.
   - def: every parameter and the return type annotated; the body's last
     expression is the value. `next = expr` binds a local (no reassignment).
   - case arms are `Pattern -> expr`, one per line, and must cover every
@@ -138,8 +167,49 @@ defmodule KinokoWeb.Mcp.Instructions do
     checker changed under it). `symbols` and `list_universes` say so and
     `health` lists why; eval and test answer `[degraded]` until a patch that
     fixes every listed reason promotes (it must make the whole image check).
-  - Cmd values (effects) are data here: `eval` shows the Cmd a function returns,
-    but nothing runs it yet (no store, no hosting).
+  - Cmd values (effects) are data to `eval`: it shows the Cmd a function
+    returns and runs nothing. A deployment serving the app runs them
+    (Cmd.store.*, Cmd.time.now, Cmd.random.int, Cmd.navigate); Cmd.blob.*
+    and Cmd.ai.* are not available yet.
+
+  STORED DATA (Cmd.store.*): the Model is session state and is gone on reload;
+  durable rows go to the store. Each DEPLOYMENT has its own data (staging and
+  prod never share rows), whatever commit it serves.
+  - A STORED model is a defmodel with `id : Uuid`. Only stored models go
+    through Cmd.store.* or Tx (else `not-stored`). Never write `id`:
+    construction omits it (`%Counter.Snapshot{count: 1, label: "x", saves: 1}`),
+    insert mints it, and every row read back carries a real one.
+  - Cmd.store.insert(row, fn (id : Uuid) -> msg end)
+    Cmd.store.list(fn (rows : List<M>) -> msg end)       insertion order, max 10000
+    Cmd.store.get(id, fn (row : Option<M>) -> msg end)
+    Cmd.store.update(id, row, fn (id : Uuid) -> msg end)  whole-row replace
+    Cmd.store.delete(id, fn (row : Option<M>) -> msg end)
+    The model M comes from the callback's type, so pass a Msg constructor
+    (`Cmd.store.list(Counter.Msg.Loaded)` with `Loaded(List<Counter.Snapshot>)`).
+    A failed operation shows the page's error banner and sends no msg.
+  - Read-modify-write is a TRANSACTION closure, run atomically (concurrent
+    ones never lose an update):
+      Cmd.store.tx(fn (s : Store) -> (List<Tx.Op>, r) end,
+                   fn (result : Result<(List<Uuid>, r), String>) -> msg end)
+    Inside it, read with Store.get(s, id) : Option<M> and Store.list(s) : List<M>
+    (annotate when nothing else fixes M: `(Store.list(s) : List<App.Row>)`),
+    and return the writes as ops: Tx.insert(row), Tx.update(id, row),
+    Tx.delete(App.Row, id). They apply in order after the body returns (the
+    body reads the data as it was before them); the callback gets
+    Ok((inserted ids, r)) or Err(message), and on Err nothing was written.
+    See Counter.again above.
+  - Defaults: `saves : Int = 1`. A default is a constant (literal, list, map,
+    tuple, variant of constants) of the field's type. It only fills in rows
+    stored before the field existed; construction still lists EVERY field.
+    An Option<T> field takes no default (absent reads as Option.None).
+  - Evolution is ADD-ONLY, checked at promotion (`model-evolution`), for a
+    stored model and for every model stored inside one (a field's List,
+    Option, Map, tuple or nested model): a field never changes type and is
+    never removed (leave it, unused), and a new field must be Option<T> or
+    have a default. Changing a default is fine. A deftype stored inside one
+    keeps every variant with exactly its payload and may only gain variants.
+    Old code (a deployment pinned to an older commit) still reads rows newer
+    code wrote; the newer fields are ignored.
   """
 
   @doc "The worked example the DECLARATIONS section shows: Yabu source that promotes."

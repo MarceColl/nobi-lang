@@ -34,7 +34,7 @@ defmodule Kinoko.Universe.RoutesTest do
 
     renamed =
       "def Forum.Post.init(slug : Uuid) : (Forum.Post.Model, Cmd<Forum.Post.Msg>) do\n" <>
-        "  (%Forum.Post.Model{post_id: slug, draft: \"\", replies: []}, Cmd.none())\nend"
+        "  (%Forum.Post.Model{post_id: slug, topic: Option.None, replies: [], draft: \"\", error: \"\"}, Cmd.none())\nend"
 
     assert {:staged, reasons} = Universe.stage(u, "rename", renamed)
     assert [%{name: "Forum", code: "route-mismatch"}] = reasons

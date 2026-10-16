@@ -4,7 +4,11 @@ defmodule KinokoWeb.DeploymentLiveTest do
   import Phoenix.LiveViewTest
   import Kinoko.UniverseHelpers
 
-  alias Kinoko.{Deployment, Universe}
+  alias Kinoko.{Data, Deployment, Universe}
+
+  # Every deployment's data file lands in this test's own directory.
+  @moduletag :tmp_dir
+  setup %{tmp_dir: dir}, do: isolated_data(dir)
 
   @forum File.read!("test/fixtures/yabu/forum.yabu")
   @lab File.read!("test/fixtures/yabu/lab.yabu")
@@ -129,6 +133,20 @@ defmodule KinokoWeb.DeploymentLiveTest do
     settled(view)
   end
 
+  # Submits the Yabu form `selector` (its on-submit id is the hidden
+  # `yabu_submit` field).
+  defp submit(view, selector) do
+    [id] =
+      view
+      |> element(selector <> " input[name=yabu_submit]")
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.attribute("value")
+
+    render_submit(view, "yabu:submit", %{"yabu_submit" => id})
+    settled(view)
+  end
+
   defp settled(view), do: eventually(view, &(&1 =~ ~s(aria-busy="false")))
 
   # The handler id a rendered element carries.
@@ -153,6 +171,28 @@ defmodule KinokoWeb.DeploymentLiveTest do
 
     [_, id] = Regex.run(~r/\Ayabu\[(r\d+\.e\d+)\]\z/, name)
     id
+  end
+
+  # A model's `Kinoko.Data.stats/1` entry in a deployment's file (none: 0 rows).
+  defp stat(deployment, model),
+    do: Enum.find(Data.stats(deployment), %{rows: 0, columns: []}, &(&1.model == model))
+
+  defp replies(view) do
+    view
+    |> render()
+    |> LazyHTML.from_document()
+    |> LazyHTML.query("#replies li")
+    |> Enum.map(&LazyHTML.text/1)
+  end
+
+  defp wait_for(check, ms \\ 5_000) do
+    deadline = System.monotonic_time(:millisecond) + ms
+
+    Stream.repeatedly(fn -> check.() end)
+    |> Enum.find(fn ok ->
+      ok or System.monotonic_time(:millisecond) > deadline or (Process.sleep(5) && false)
+    end)
+    |> assert()
   end
 
   # Steps and commits land asynchronously; poll the render until `check`
@@ -301,6 +341,127 @@ defmodule KinokoWeb.DeploymentLiveTest do
     end
   end
 
+  # ---------- stored data ----------
+
+  describe "stored data" do
+    setup do
+      %{u: deploy(@forum, "Forum")}
+    end
+
+    test "a thread and its replies, created through the UI, survive a remount", %{
+      conn: conn,
+      u: u
+    } do
+      {view, _html} = open(conn, u, "/")
+      refute has_element?(view, "#topics li")
+
+      change(view, change_id(view, "#title"), "Hello")
+      submit(view, "#new-thread")
+      "/post/" <> id = path = assert_patch(view, 5_000)
+      eventually(view, fn _ -> has_element?(view, "#post-title", "Hello") end)
+      assert has_element?(view, ~s(#post[data-post="#{id}"]))
+      assert text(view, "#reply-count") == "0"
+
+      for {body, n} <- [{"first!", "1"}, {"second", "2"}] do
+        change(view, change_id(view, "#draft"), body)
+        submit(view, "#reply-form")
+        eventually(view, &(&1 =~ ~s(<span id="reply-count">#{n}</span>)))
+      end
+
+      assert replies(view) == ["first!", "second"]
+      refute has_element?(view, "#kinoko-error")
+
+      # A new connection reads it all back from storage.
+      {again, _html} = open(conn, u, path)
+      assert text(again, "#post-title") == "Hello"
+      assert text(again, "#reply-count") == "2"
+      assert replies(again) == ["first!", "second"]
+
+      {threads, _html} = open(conn, u, "/")
+      assert text(threads, "#topics li") =~ "Hello"
+      assert text(threads, "#topics li span") == "2"
+    end
+
+    test "two deployments of one universe have separate data", %{conn: conn, u: u} do
+      other = "#{u}-b"
+      :ok = Deployment.create(other, u, "Forum")
+
+      {view, _html} = open(conn, u, "/")
+      change(view, change_id(view, "#title"), "Only here")
+      submit(view, "#new-thread")
+      assert "/post/" <> _ = assert_patch(view, 5_000)
+
+      {mine, _html} = open(conn, u, "/")
+      assert text(mine, "#topics li") =~ "Only here"
+
+      {theirs, _html} = open(conn, other, "/")
+      refute has_element?(theirs, "#topics li")
+      assert stat(u, "Forum.Topic").rows == 1
+      assert stat(other, "Forum.Topic").rows == 0
+    end
+
+    test "a pinned older commit reads rows newer code wrote (Review Focus 3)", %{
+      conn: conn,
+      u: u
+    } do
+      # Commit 2 adds a column to Forum.Topic.
+      v2 =
+        @forum
+        |> String.replace(
+          "  replies : Int = 0\n",
+          "  replies : Int = 0\n  pinned : Bool = false\n"
+        )
+        |> String.replace("replies: 0}", "replies: 0, pinned: true}")
+
+      assert {:promoted, _} = Universe.stage(u, "v2", v2)
+
+      {view, _html} = open(conn, u, "/")
+      change(view, change_id(view, "#title"), "From v2")
+      submit(view, "#new-thread")
+      assert "/post/" <> _ = assert_patch(view, 5_000)
+
+      assert "pinned" in Enum.map(stat(u, "Forum.Topic").columns, & &1.name)
+
+      # Back to commit 1, whose Forum.Topic has no `pinned`: the row reads.
+      :ok = Deployment.pin(u, 1)
+      {old, _html} = open(conn, u, "/")
+      assert text(old, "#topics li") =~ "From v2"
+      refute has_element?(old, "#kinoko-error")
+
+      # And old code still writes: the newer column is left to its default.
+      change(old, change_id(old, "#title"), "From v1")
+      submit(old, "#new-thread")
+      assert "/post/" <> _ = assert_patch(old, 5_000)
+      assert stat(u, "Forum.Topic").rows == 2
+    end
+
+    test "a row storage cannot read: the banner, or tx's Err", %{conn: conn, u: u} do
+      {view, _html} = open(conn, u, "/")
+      change(view, change_id(view, "#title"), "Soon broken")
+      submit(view, "#new-thread")
+      assert "/post/" <> _ = path = assert_patch(view, 5_000)
+
+      {:ok, repo} = Data.open(u)
+      Data.Repo.put_dynamic_repo(repo)
+      Data.Repo.query!("UPDATE forum__topic SET replies = 'many'")
+
+      {broken, _html} = open(conn, u, "/")
+      assert has_element?(broken, "#kinoko-error", "store")
+      assert has_element?(broken, "#kinoko-error", "Forum.Topic")
+      assert has_element?(broken, "#threads")
+
+      # A transaction reports through its callback instead: no banner.
+      {post, _html} = open(conn, u, path)
+      assert has_element?(post, "#kinoko-error", "store")
+      render_click(post, "dismiss", %{})
+      change(post, change_id(post, "#draft"), "hello?")
+      submit(post, "#reply-form")
+      eventually(post, fn _ -> has_element?(post, "#post-error", "Forum.Topic") end)
+      refute has_element?(post, "#kinoko-error")
+      assert stat(u, "Forum.Reply").rows == 0
+    end
+  end
+
   # ---------- the app loop ----------
 
   describe "the lab" do
@@ -324,8 +485,16 @@ defmodule KinokoWeb.DeploymentLiveTest do
 
     test "an unsupported effect shows a notice", %{conn: conn, u: u} do
       {view, _html} = open(conn, u, "/")
+      click(view, click_id(view, "#stash"))
+      assert has_element?(view, "#kinoko-notice", "Cmd.blob.put is not available yet")
+    end
+
+    test "a store effect runs: no notice, and the row is stored", %{conn: conn, u: u} do
+      {view, _html} = open(conn, u, "/")
       click(view, click_id(view, "#save"))
-      assert has_element?(view, "#kinoko-notice", "Cmd.store.insert is not available yet")
+      wait_for(fn -> match?([%{model: "Lab.Note", rows: 1}], Data.stats(u)) end)
+      refute has_element?(view, "#kinoko-notice")
+      refute has_element?(view, "#kinoko-error")
     end
 
     test "a runtime error shows a banner and keeps the view", %{conn: conn, u: u} do
@@ -575,6 +744,16 @@ defmodule KinokoWeb.DeploymentLiveTest do
 
       {m, _} = DeploymentLive.init(%{}, %{"deployment" => %{"not" => "a name"}})
       assert m.name == nil
+    end
+
+    test "a store effect whose model never settled shows a banner, and runs nothing" do
+      {m, _} = DeploymentLive.update({:committed, "x", %{commit: 3}}, following(2))
+      cmd = {:cmd, {:effect, "Cmd.store.list", nil, [fn rows -> rows end]}}
+      {m, fx} = DeploymentLive.update({:stepped, 1, {:ok, %{cmd: cmd}}}, m)
+      assert m.error.code == "host"
+      assert m.error.message =~ "Cmd.store.list"
+      assert m.error.message =~ "never settled"
+      refute Enum.any?(List.flatten([fx]), &match?({:async, {:task, _}, _}, &1))
     end
 
     test "a crashed step shows a generic banner, never the crash" do

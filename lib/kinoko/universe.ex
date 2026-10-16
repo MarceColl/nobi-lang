@@ -394,6 +394,22 @@ defmodule Kinoko.Universe do
   end
 
   @doc """
+  The loaded image that `call/4` and `apply/4` would run for
+  `universe_or_at` (its current commit, or a pinned view): `{:ok, image}`
+  (`Kinoko.Exec`'s), loading it first when it is not loaded yet. For a
+  host that reads the image's own tables (`__yabu__(:models)`) or hands
+  it to `Kinoko.Data.Tx.run/4`. Errors as `apply/4`.
+  """
+  @spec image(name | At.t() | Current.t()) :: {:ok, Exec.image()} | error
+  def image(universe_or_at) do
+    case target(universe_or_at) do
+      {:ok, %{image: image}} -> {:ok, image}
+      {:ok, snapshot} -> Exec.load(snapshot)
+      error -> error
+    end
+  end
+
+  @doc """
   The committed `defapp`s, sorted: `[app_symbol]`. Read from the symbols,
   so a degraded universe lists its apps too.
   """

@@ -1,15 +1,17 @@
 defmodule KinokoWeb.Console.DeploymentLive do
   @moduledoc """
   `/_/d/:name`: a deployment's universe, route table, whether it follows
-  head or is pinned, its hosts (links to where it is served) and its
-  parameter-free paths as links. Refreshes on commits of its universe.
+  head or is pinned, its hosts (links to where it is served), its
+  parameter-free paths as links, and its stored models (`Kinoko.Data.stats/1`:
+  each model's table, row count and columns). Refreshes on commits of its
+  universe.
   """
 
   use KinokoWeb, :live_view
 
   import KinokoWeb.Console.Components
 
-  alias Kinoko.{Deployment, Universe}
+  alias Kinoko.{Data, Deployment, Universe}
 
   @impl true
   def mount(%{"name" => name}, _session, socket) do
@@ -53,15 +55,25 @@ defmodule KinokoWeb.Console.DeploymentLive do
             %{id: "route-#{i}", pattern: pattern(e), app: e.app, path: static_path(e)}
           end
 
+        models =
+          for stat <- Data.stats(d.name) do
+            Map.merge(stat, %{id: stat.model, columns: Enum.map(stat.columns, &column/1)})
+          end
+
         socket
-        |> assign(deployment: d, link_base: host_url(link_host))
+        |> assign(deployment: d, link_base: host_url(link_host), model_count: length(models))
         |> stream(:hosts, hosts, reset: reset?)
         |> stream(:routes, routes, reset: reset?)
+        |> stream(:models, models, reset: reset?)
 
       :error ->
         push_navigate(socket, to: ~p"/_")
     end
   end
+
+  # `id` and `_seq` are the store's own columns (no field).
+  defp column(%{name: name, field: field, type: type}),
+    do: %{name: name, field: field, type: type, own?: field == nil}
 
   @impl true
   def render(assigns) do
@@ -140,6 +152,65 @@ defmodule KinokoWeb.Console.DeploymentLive do
               <.icon name="hero-arrow-right" class="size-3" /> {r.app}
             </span>
           </div>
+        </div>
+      </.section>
+
+      <.section title="Models" id="models-section" count={@model_count}>
+        <div id="models" phx-update="stream" class="grid gap-3 lg:grid-cols-2">
+          <div
+            id="models-empty"
+            class={[card_class(), "hidden only:flex items-center gap-3 p-4 text-sm text-zinc-500"]}
+          >
+            <.icon name="hero-circle-stack" class="size-5 text-zinc-300 dark:text-zinc-600" />
+            Nothing stored yet: a table appears with the first
+            <code class="font-mono">Cmd.store</code>
+            call.
+          </div>
+          <article
+            :for={{dom_id, m} <- @streams.models}
+            id={dom_id}
+            class={[card_class(), "overflow-hidden hover:border-zinc-300 dark:hover:border-zinc-700"]}
+          >
+            <header class="flex items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
+              <div class="min-w-0">
+                <h3 class="truncate font-mono text-sm font-semibold">{m.model}</h3>
+                <p class="truncate font-mono text-xs text-zinc-400" data-table={m.table}>
+                  {m.table}
+                </p>
+              </div>
+              <.badge tone={if(m.rows > 0, do: :info, else: :neutral)} data-rows={m.rows}>
+                <.icon name="hero-table-cells" class="size-3.5" />
+                {m.rows} {if(m.rows == 1, do: "row", else: "rows")}
+              </.badge>
+            </header>
+            <table class="w-full text-left text-xs">
+              <thead class="text-[10px] uppercase tracking-wider text-zinc-400">
+                <tr>
+                  <th class="px-4 py-2 font-medium">Column</th>
+                  <th class="px-4 py-2 font-medium">Type</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800">
+                <tr
+                  :for={c <- m.columns}
+                  data-column={c.name}
+                  data-type={c.type}
+                  class={[
+                    "transition hover:bg-zinc-50 dark:hover:bg-zinc-800/50",
+                    c.own? && "text-zinc-400"
+                  ]}
+                >
+                  <td class="px-4 py-1.5 font-mono">
+                    {c.name}
+                    <span :if={c.field && c.field != c.name} class="text-zinc-400">
+                      ({c.field})
+                    </span>
+                  </td>
+                  <td class="px-4 py-1.5 font-mono text-zinc-500">{c.type}</td>
+                </tr>
+              </tbody>
+            </table>
+          </article>
         </div>
       </.section>
     </.shell>

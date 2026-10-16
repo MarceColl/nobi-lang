@@ -17,6 +17,30 @@ defmodule Kinoko.UniverseHelpers do
   end
 
   @doc """
+  Points `Kinoko.Data` at `dir` (a test's `tmp_dir`) for this test: every
+  deployment's file opened without an explicit `dir:` lands there. On
+  exit the files opened under `dir` are closed and the previous setting
+  restored. For sync tests only (it changes the application env).
+  """
+  def isolated_data(dir) do
+    previous = Application.fetch_env(:kinoko, Kinoko.Data)
+    Application.put_env(:kinoko, Kinoko.Data, dir: dir)
+
+    on_exit(fn ->
+      for path <- Registry.select(Kinoko.Data.Registry, [{{:"$1", :_, :_}, [], [:"$1"]}]),
+          String.starts_with?(path, dir),
+          do: Kinoko.Data.Opener.close(path)
+
+      case previous do
+        {:ok, value} -> Application.put_env(:kinoko, Kinoko.Data, value)
+        :error -> Application.delete_env(:kinoko, Kinoko.Data)
+      end
+    end)
+
+    :ok
+  end
+
+  @doc """
   Stops, when the test exits, every universe's CodeDb running then: any
   key under `"universe:"` in `Kinoko.Elm.Registry`, whoever started it (a
   test that reaches `"main"` through a default argument included). Run for

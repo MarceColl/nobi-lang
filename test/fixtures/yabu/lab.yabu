@@ -11,7 +11,7 @@ defmodel Lab.Model do
 end
 
 deftype Lab.Msg do
-  Inc | Divide | Roll | Rolled(Int) | Clock | Ticked(Int) | Save | Saved(Uuid)
+  Inc | Divide | Roll | Rolled(Int) | Clock | Ticked(Int) | Save | Saved(Uuid) | Stash | Stashed(String)
 end
 
 def Lab.init() : (Lab.Model, Cmd<Lab.Msg>) do
@@ -28,6 +28,8 @@ def Lab.update(msg : Lab.Msg, model : Lab.Model) : (Lab.Model, Cmd<Lab.Msg>) do
     Lab.Msg.Ticked(t) -> (%Lab.Model{model | now: t}, Cmd.none())
     Lab.Msg.Save -> (model, Cmd.store.insert(%Lab.Note{text: "hi"}, Lab.Msg.Saved))
     Lab.Msg.Saved(id) -> (model, Cmd.none())
+    Lab.Msg.Stash -> (model, Cmd.blob.put("k", "v", Lab.Msg.Stashed))
+    Lab.Msg.Stashed(key) -> (model, Cmd.none())
   end
 end
 
@@ -41,6 +43,7 @@ def Lab.view(model : Lab.Model) : Html<Lab.Msg> do
     <button id="roll-dice" on-click={Lab.Msg.Roll}>Roll</button>
     <button id="clock" on-click={Lab.Msg.Clock}>Clock</button>
     <button id="save" on-click={Lab.Msg.Save}>Save</button>
+    <button id="stash" on-click={Lab.Msg.Stash}>Stash</button>
   </main>
 end
 
