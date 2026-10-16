@@ -101,7 +101,10 @@ export const ConsoleKeys = {
 // (#graph-zoom, phx-update="ignore"); LiveView owns everything else inside, so
 // updated() puts the transform back after every patch.
 // - drag on empty canvas pans (4px threshold); a click without a drag pushes
-//   `graph:deselect`;
+//   `graph:deselect` when something is selected; a cancelled pointer ends the
+//   pan as a release does;
+// - #graph-world carries phx-mounted={JS.ignore_attributes(["style"])}, so a
+//   patch never strips the transform; updated() reapplies it as a belt;
 // - wheel pans, ⌘/Ctrl-wheel zooms about the canvas centre;
 // - the zoom strip dispatches `graph:zoom` ({f}) and `graph:fit` here;
 // - fit frames the content extent (data-cw / data-ch) and keeps clear of the
@@ -130,7 +133,8 @@ export const GraphCamera = {
       const p = this.pan
       this.pan = null
       if (this.el.hasPointerCapture?.(e.pointerId)) this.el.releasePointerCapture(e.pointerId)
-      if (p && !p.moved) this.pushEvent("graph:deselect", {})
+      const click = p && !p.moved && e.type === "pointerup"
+      if (click && this.el.dataset.selected === "true") this.pushEvent("graph:deselect", {})
     }
     this.onWheel = (e) => {
       e.preventDefault()
@@ -143,6 +147,7 @@ export const GraphCamera = {
     this.el.addEventListener("pointerdown", this.onDown)
     this.el.addEventListener("pointermove", this.onMove)
     this.el.addEventListener("pointerup", this.onUp)
+    this.el.addEventListener("pointercancel", this.onUp)
     this.el.addEventListener("wheel", this.onWheel, {passive: false})
     this.el.addEventListener("graph:zoom", this.onZoom)
     this.el.addEventListener("graph:fit", this.onFit)

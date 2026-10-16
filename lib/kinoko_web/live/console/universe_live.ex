@@ -193,8 +193,8 @@ defmodule KinokoWeb.Console.UniverseLive do
   defp model_row(app, u) do
     model = app <> ".Model"
 
-    with {:ok, image} <- Universe.image(u),
-         fields when is_list(fields) <- Map.get(image.module.__yabu__(:models), model) do
+    with {:ok, models} <- Universe.models(u),
+         fields when is_list(fields) <- Map.get(models, model) do
       row("model", "#{model} · #{count(length(fields), "field")}")
     else
       _ -> false
@@ -249,8 +249,7 @@ defmodule KinokoWeb.Console.UniverseLive do
   # The newest rows of `model`, at most `@sample`, as the prototype's
   # three cells: the first field, the middle ones, the last one.
   defp sample(deployment, model, n, u) when is_integer(n) and n > 0 do
-    with {:ok, image} <- Universe.image(u),
-         models = image.module.__yabu__(:models),
+    with {:ok, models} <- Universe.models(u),
          {:ok, repo} <- Data.open(deployment.name),
          {:ok, list} <- Data.list(repo, model, models) do
       for {:rec, _, values} <- list |> Enum.reverse() |> Enum.take(@sample) do
@@ -344,7 +343,11 @@ defmodule KinokoWeb.Console.UniverseLive do
         data-ch={@world.ch}
         class="flex-1 min-w-0 min-h-0 relative overflow-hidden cursor-grab bg-(--k-paper) bg-[radial-gradient(var(--k-grid-dots)_1px,transparent_1px)] bg-size-[26px_26px]"
       >
-        <div id="graph-world" class="absolute left-0 top-0 origin-top-left pointer-events-none">
+        <div
+          id="graph-world"
+          phx-mounted={JS.ignore_attributes(["style"])}
+          class="absolute left-0 top-0 origin-top-left pointer-events-none"
+        >
           <svg
             width={@world.w}
             height={@world.h}
@@ -469,10 +472,7 @@ defmodule KinokoWeb.Console.UniverseLive do
       <div :if={@node.body} class="p-[12px] flex flex-col gap-[7px]">
         <div
           :for={item <- elem(@node.body, 1)}
-          class={[
-            "h-[24px] rounded-[4px] border border-(--k-line) flex items-center px-[7px] text-[10.5px] text-[#9B968A]",
-            elem(@node.body, 0) == :routes && "font-(family-name:--k-mono)"
-          ]}
+          class="h-[24px] rounded-[4px] border border-(--k-line) flex items-center px-[7px] text-[10.5px] text-[#9B968A]"
         >
           {item}
         </div>
@@ -529,7 +529,7 @@ defmodule KinokoWeb.Console.UniverseLive do
     <div class="flex-1 min-w-0 overflow-y-auto px-[18px] py-[16px] flex flex-col gap-[8px] bg-(--k-paper)">
       <div
         id="graph-degraded"
-        class="max-w-[620px] px-[13px] py-[11px] rounded-[9px] bg-(--k-red-chip) border border-(--k-red-chip-border) flex flex-col gap-[4px]"
+        class="px-[13px] py-[11px] rounded-[9px] bg-(--k-red-chip) border border-(--k-red-chip-border) flex flex-col gap-[4px]"
       >
         <span class="text-[12.5px] font-semibold text-(--k-red-text)">{@title}</span>
         <span

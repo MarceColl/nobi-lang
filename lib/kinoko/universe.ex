@@ -410,6 +410,17 @@ defmodule Kinoko.Universe do
   end
 
   @doc """
+  The stored and session models of the current commit or a pinned view:
+  `{:ok, %{model => [{field, type, default}]}}`, fields in declaration
+  order. It is the `sig` `Kinoko.Data` takes to read and write rows.
+  Errors as `image/1`.
+  """
+  @spec models(name | At.t() | Current.t()) :: {:ok, map()} | error
+  def models(universe_or_at) do
+    with {:ok, image} <- image(universe_or_at), do: {:ok, image.module.__yabu__(:models)}
+  end
+
+  @doc """
   The committed `defapp`s, sorted: `[app_symbol]`. Read from the symbols,
   so a degraded universe lists its apps too.
   """

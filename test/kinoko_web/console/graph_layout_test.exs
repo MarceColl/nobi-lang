@@ -97,6 +97,55 @@ defmodule KinokoWeb.Console.GraphLayoutTest do
     assert d =~ ~r/^M302 \d+ H\d+ V\d+ H\d+ V\d+$/
   end
 
+  test "an edge to a store under the column runs down a lane left of it" do
+    l = GraphLayout.layout(@forum)
+    assert edge(l, "Forum.Post", "Forum.Reply", :writes).d =~ ~r/^M38 \d+ H\d+ V\d+ H\d+ V\d+$/
+  end
+
+  test "no two edges cross in the forum graph or the prototype's" do
+    # Both are crossing-free by construction: left lanes for stores under
+    # the column, right lanes beyond every port they reach, outer lanes on
+    # deeper bands and outer ports, exits stacked inner-lowest.
+    for graph <- [@forum, @split] do
+      l = GraphLayout.layout(graph)
+
+      for {a, i} <- Enum.with_index(l.edges), {b, j} <- Enum.with_index(l.edges), i < j do
+        refute crosses?(a, b), "#{a.data} crosses #{b.data}"
+      end
+    end
+  end
+
+  test "exits on a header-only app never coincide: the card grows to hold them" do
+    graph = %{
+      apps: [%{symbol: "Reader", routes: []}, %{symbol: "Last", routes: []}],
+      stores: [
+        %{symbol: "S.One", fields: ["id"]},
+        %{symbol: "S.Two", fields: ["id"]},
+        %{symbol: "S.Three", fields: ["id"]}
+      ],
+      edges:
+        for(s <- ~w(S.One S.Two S.Three), do: %{from: "Reader", to: s, kind: :reads}) ++
+          [
+            %{from: "Reader", to: "S.Two", kind: :writes},
+            %{from: "Reader", to: "S.Three", kind: :writes}
+          ]
+    }
+
+    l = GraphLayout.layout(graph)
+    reader = node(l, "Reader")
+    assert reader.body == nil
+
+    exits =
+      for e <- l.edges,
+          {x, y} <- [hd(GraphLayout.points(e)), List.last(GraphLayout.points(e))],
+          x == reader.x or x == reader.x + reader.w,
+          do: {round(x), round(y)}
+
+    assert length(exits) == 5
+    assert length(Enum.uniq(exits)) == 5
+    for {_, y} <- exits, do: assert(y > reader.y and y < reader.y + reader.h)
+  end
+
   test "is deterministic" do
     assert GraphLayout.layout(@forum) == GraphLayout.layout(@forum)
   end
@@ -128,6 +177,25 @@ defmodule KinokoWeb.Console.GraphLayoutTest do
   test "an empty graph lays out nothing" do
     l = GraphLayout.layout(%{apps: [], stores: [], edges: []})
     assert l.nodes == [] and l.edges == []
+  end
+
+  # Whether two edges properly cross, over their sampled polylines.
+  defp crosses?(a, b) do
+    sa = a |> GraphLayout.points() |> Enum.chunk_every(2, 1, :discard)
+    sb = b |> GraphLayout.points() |> Enum.chunk_every(2, 1, :discard)
+    Enum.any?(sa, fn s -> Enum.any?(sb, &segments_cross?(s, &1)) end)
+  end
+
+  defp segments_cross?([{ax, ay}, {bx, by}], [{cx, cy}, {dx, dy}]) do
+    d = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx)
+
+    if d == 0 do
+      false
+    else
+      t = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / d
+      u = ((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) / d
+      t > 0.001 and t < 0.999 and u > 0.001 and u < 0.999
+    end
   end
 
   # Five apps each touching every one of four stores, both ways.

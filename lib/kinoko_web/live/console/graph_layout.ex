@@ -28,15 +28,26 @@ defmodule KinokoWeb.Console.GraphLayout do
     Split → Expense edges; otherwise the prototype's `C` curve from the
     card's bottom to the port. The curve's control points lie between the
     card's bottom and the row's top, so it never leaves that band.
-  * From any app higher up: out of the card's right side, `H` to a lane
-    right of the app column, `V` down into the band between the last app
-    and the store row, `H` over to the port and `V` down to it. Lower
-    apps take the inner lanes and the shallower bands, so a lane's exit
-    never crosses another lane.
+  * From any app higher up, down a lane beside the app column: the left
+    one for a store whose middle lies under the column, the right one
+    otherwise. Out of the card's side, `H` to the lane, `V` down into the
+    band between the last app and the store row, `H` over to the port and
+    `V` down to it. Right lanes start beyond every port they lead to, so
+    every band turns towards the column.
+
+  Lower apps take the inner lanes; outer lanes take the deeper bands and
+  the outer ports (leftmost on the left, rightmost on the right, the last
+  app's edges between them); an app's innermost lane takes its lowest
+  exit, 9px apart, and a card grows to hold its exits. So an exit never
+  crosses a lane and a band never passes over another edge's drop; the
+  forum and prototype graphs have no crossing at all. Crossings remain
+  only where the topology forces them (an upper app reaching a store
+  left of one a lower app reaches, on the same side).
 
   Nothing but the store row lies below the last app, and nothing but app
   cards lies in the column, so no segment passes through a node box. The
-  band grows past 58 only when there are more lanes than fit.
+  band grows past 58 only when there are more lanes than fit, and the
+  column moves right of 38 only when the left lanes need the room.
 
   `cw`/`ch` are the content extent the camera fits (the prototype's
   `cw`/`ch`); `w`/`h` the world, oversized as the prototype's is so there
@@ -63,6 +74,12 @@ defmodule KinokoWeb.Console.GraphLayout do
   @curve_off 46
   @curve_step 14
   @margin 12
+  # the outermost left lane keeps this clear of the world's left edge
+  @lane_clear 8
+  # the exits on an upper app's right side
+  @exit_top 15
+  @exit_step 9
+  @exit_bottom 6
 
   @type point :: {number(), number()}
   @type segment :: {:v, number()} | {:h, number()} | {:c, point(), point(), point()}
@@ -101,53 +118,67 @@ defmodule KinokoWeb.Console.GraphLayout do
   @spec layout(map()) :: t()
   def layout(%{apps: apps, stores: stores, edges: edges}) do
     fields = Map.new(stores, &{&1.symbol, &1.fields})
-    apps = place_apps(apps, edges, fields)
+    order = apps |> Enum.with_index() |> Map.new(fn {a, i} -> {a.symbol, i} end)
+    known = MapSet.new(stores, & &1.symbol)
+    edges = Enum.filter(edges, &(Map.has_key?(order, &1.from) and MapSet.member?(known, &1.to)))
+    last_symbol = apps |> List.last() |> then(&(&1 && &1.symbol))
+    sides = sides(stores)
+
+    # Lane edges leave an app above the last one, lower apps first: a
+    # store mostly under the column is reached down the left, any other
+    # down the right.
+    {left, right} =
+      edges
+      |> Enum.reject(&(&1.from == last_symbol))
+      |> Enum.sort_by(&{-order[&1.from], &1.to, &1.kind})
+      |> Enum.split_with(&(sides[&1.to] == :left))
+
+    lanes = %{left: indexed(left), right: indexed(right)}
+    base = max(@left, @lane_off + (length(left) - 1) * @lane_step + @lane_clear)
+    apps = place_apps(apps, edges, fields, base, left, right)
     last = List.last(apps)
     by_app = Map.new(apps, &{&1.symbol, &1})
-
-    # Lane edges: from an app above the last one, lower apps first.
-    lane_edges =
-      edges
-      |> Enum.filter(&(Map.has_key?(by_app, &1.from) and &1.from != (last && last.symbol)))
-      |> Enum.sort_by(&{-index(apps, &1.from), &1.to, &1.kind})
-
-    lanes = lane_edges |> Enum.with_index() |> Map.new()
+    bands = max(length(left), length(right))
     last_bottom = if last, do: last.y + last.h, else: nil
 
     store_top =
       if last,
-        do: last_bottom + max(@gap, @band_off + length(lane_edges) * @band_step + @band_off),
+        do: last_bottom + max(@gap, @band_off + bands * @band_step + @band_off),
         else: @top
 
-    stores = place_stores(stores, store_top)
+    stores = place_stores(stores, store_top, base)
     by_store = Map.new(stores, &{&1.symbol, &1})
-    ports = ports(edges, apps, by_store)
+    ports = ports(edges, lanes, by_store)
+
+    # The right lanes run beyond every port they lead to, so each one's
+    # band only ever turns left.
+    right_x0 =
+      Enum.max([base + @app_w | for(e <- right, do: ports[e])]) + @lane_off
 
     curved =
       if last do
         edges
         |> Enum.filter(&(&1.from == last.symbol and not under?(last, ports[&1])))
-        |> Enum.with_index()
-        |> Map.new()
+        |> indexed()
       else
         %{}
       end
 
     routed =
-      for e <- edges,
-          app = by_app[e.from],
-          store = by_store[e.to],
-          app != nil and store != nil do
+      for e <- edges do
+        app = by_app[e.from]
+
         geometry = %{
           app: app,
-          store: store,
+          store: by_store[e.to],
           port: ports[e],
-          last?: app == last,
-          lane: lanes[e],
-          exit: exit_y(app, e, lane_edges),
+          side: side(e, app == last, lanes),
+          lane: lanes.left[e] || lanes.right[e],
+          exit: exit_y(app, e, if(lanes.left[e], do: left, else: right)),
           band: last_bottom,
           curve: curved[e],
-          column_right: @left + @app_w
+          left_x0: base - @lane_off,
+          right_x0: right_x0
         }
 
         route(e, geometry)
@@ -180,17 +211,25 @@ defmodule KinokoWeb.Console.GraphLayout do
 
   ## Nodes
 
-  defp place_apps(apps, edges, fields) do
+  defp place_apps(apps, edges, fields, base, left, right) do
     {placed, _} =
       Enum.map_reduce(apps, @top, fn app, top ->
         body = body(app, edges, fields)
-        h = @header + body_height(body)
+        # An app above the last one leaves by its sides, one exit per edge
+        # 9 apart: the card is tall enough for all of them.
+        exits =
+          max(
+            Enum.count(left, &(&1.from == app.symbol)),
+            Enum.count(right, &(&1.from == app.symbol))
+          )
+
+        h = max(@header + body_height(body), exits_height(exits))
 
         node = %{
           id: dom_id(app.symbol),
           symbol: app.symbol,
           kind: :app,
-          x: @left,
+          x: base,
           y: top,
           w: @app_w,
           h: h,
@@ -224,6 +263,9 @@ defmodule KinokoWeb.Console.GraphLayout do
     end
   end
 
+  defp exits_height(0), do: 0
+  defp exits_height(n), do: @exit_top + (n - 1) * @exit_step + @exit_bottom
+
   defp body_height(nil), do: 0
 
   defp body_height({_, items}) do
@@ -231,9 +273,9 @@ defmodule KinokoWeb.Console.GraphLayout do
     2 * @pad + n * @box + (n - 1) * @box_gap
   end
 
-  defp place_stores(stores, top) do
+  defp place_stores(stores, top, base) do
     {placed, _} =
-      Enum.map_reduce(stores, @left, fn store, left ->
+      Enum.map_reduce(stores, base, fn store, left ->
         w = store_width(store.symbol)
 
         node = %{
@@ -259,15 +301,44 @@ defmodule KinokoWeb.Console.GraphLayout do
 
   ## Edges
 
-  # Each store's edges spread evenly over its top side, by app order,
-  # writes first (the prototype's write sits left of its read).
-  defp ports(edges, apps, by_store) do
+  # A store whose middle lies under the app column is reached down the
+  # left; any other down the right. Decided on the row's own geometry.
+  defp sides(stores) do
+    {sides, _} =
+      Enum.map_reduce(stores, 0, fn s, x ->
+        w = store_width(s.symbol)
+        side = if x + w / 2 < @app_w, do: :left, else: :right
+        {{s.symbol, side}, x + w + @store_gap}
+      end)
+
+    Map.new(sides)
+  end
+
+  defp side(_e, true, _lanes), do: :last
+  defp side(e, false, lanes), do: if(Map.has_key?(lanes.left, e), do: :left, else: :right)
+
+  defp indexed(list), do: list |> Enum.with_index() |> Map.new()
+
+  # Each store's edges spread evenly over its top side, so that no band
+  # passes over another edge's drop: the left lanes first, outer ones
+  # (deeper bands) leftmost; then the last app's, writes before reads
+  # (the prototype's write sits left of its read); then the right lanes,
+  # outer ones rightmost.
+  defp ports(edges, lanes, by_store) do
     edges
-    |> Enum.filter(&Map.has_key?(by_store, &1.to))
     |> Enum.group_by(& &1.to)
     |> Enum.flat_map(fn {to, group} ->
       s = by_store[to]
-      sorted = Enum.sort_by(group, &{index(apps, &1.from), &1.kind != :writes})
+
+      sorted =
+        Enum.sort_by(group, fn e ->
+          cond do
+            l = lanes.left[e] -> {0, -l}
+            r = lanes.right[e] -> {2, r}
+            true -> {1, if(e.kind == :writes, do: 0, else: 1)}
+          end
+        end)
+
       m = length(sorted)
 
       for {e, k} <- Enum.with_index(sorted, 1),
@@ -278,15 +349,17 @@ defmodule KinokoWeb.Console.GraphLayout do
 
   defp under?(app, px), do: px >= app.x + @pad and px <= app.x + app.w - @pad
 
-  # Where an edge leaves (or reaches) its app's right side: 15 down from
-  # the top, 9 apart per edge, kept clear of the card's bottom.
+  # Where a lane edge leaves (or reaches) its app's side: 15 down from
+  # the top, 9 apart per edge (the card is tall enough, `place_apps/6`).
+  # The innermost lane takes the lowest exit, so an exit never crosses a
+  # lane of its own side.
   defp exit_y(app, e, lane_edges) do
-    k =
-      lane_edges
-      |> Enum.filter(&(&1.from == app.symbol))
-      |> Enum.find_index(&(&1 == e))
+    own = Enum.filter(lane_edges, &(&1.from == app.symbol))
 
-    if k, do: min(app.y + 15 + k * 9, app.y + app.h - 4)
+    case Enum.find_index(own, &(&1 == e)) do
+      nil -> nil
+      k -> app.y + @exit_top + (length(own) - 1 - k) * @exit_step
+    end
   end
 
   defp route(e, g) do
@@ -311,11 +384,11 @@ defmodule KinokoWeb.Console.GraphLayout do
   end
 
   # The app → store route.
-  defp forward(%{last?: true, curve: nil} = g) do
+  defp forward(%{side: :last, curve: nil} = g) do
     {{g.port, g.app.y + g.app.h}, [{:v, g.store.y}]}
   end
 
-  defp forward(%{last?: true} = g) do
+  defp forward(%{side: :last} = g) do
     app = g.app
     sx = curve_start(app, g.port, g.curve)
     y0 = app.y + app.h
@@ -327,11 +400,18 @@ defmodule KinokoWeb.Console.GraphLayout do
     {{sx, y0}, [{:c, c1, c2, {x1, y1}}]}
   end
 
-  defp forward(g) do
-    lane_x = g.column_right + @lane_off + g.lane * @lane_step
+  defp forward(%{side: :right} = g) do
+    lane_x = g.right_x0 + g.lane * @lane_step
     band_y = g.band + @band_off + g.lane * @band_step
 
     {{g.app.x + g.app.w, g.exit}, [{:h, lane_x}, {:v, band_y}, {:h, g.port}, {:v, g.store.y}]}
+  end
+
+  defp forward(%{side: :left} = g) do
+    lane_x = g.left_x0 - g.lane * @lane_step
+    band_y = g.band + @band_off + g.lane * @band_step
+
+    {{g.app.x, g.exit}, [{:h, lane_x}, {:v, band_y}, {:h, g.port}, {:v, g.store.y}]}
   end
 
   # A port right of the card: from 46 left of its right edge, 14 apart;
@@ -383,8 +463,6 @@ defmodule KinokoWeb.Console.GraphLayout do
     ys = for(n <- nodes, do: n.y + n.h) ++ for(e <- edges, {_, y} <- points(e, 1), do: y)
     {Enum.max(xs, fn -> 0 end) + @margin, Enum.max(ys, fn -> 0 end) + @margin}
   end
-
-  defp index(apps, symbol), do: Enum.find_index(apps, &(&1.symbol == symbol))
 
   defp sanitize(s), do: String.replace(s, ~r/[^A-Za-z0-9_-]/, "-")
 

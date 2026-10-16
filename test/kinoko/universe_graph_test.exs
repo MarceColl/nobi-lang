@@ -229,6 +229,13 @@ defmodule Kinoko.UniverseGraphTest do
     assert graph!(one) == graph!(one)
   end
 
+  test "models/1 gives each model's fields in order, for Kinoko.Data", %{u: u} do
+    assert {:promoted, _} = Universe.stage(u, "base", @forum)
+    assert {:ok, models} = Universe.models(u)
+    assert [{"id", _, _}, {"title", _, _}, {"replies", _, 0}] = models["Forum.Topic"]
+    assert length(models["Forum.Threads.Model"]) == 3
+  end
+
   test "an empty universe has an empty graph", %{u: u} do
     assert Universe.graph(u) == %{apps: [], stores: [], edges: []}
   end
