@@ -63,7 +63,7 @@ Store.get(s, id : Uuid) : Option<M>       -- M from the expected type, like stor
 Store.list(s) : List<M>
 Tx.insert(row : M) : Tx.Op
 Tx.update(id : Uuid, row : M) : Tx.Op
-Tx.delete(id : Uuid) : Tx.Op               -- was Tx.delete(row); now by id, consistent with Cmd.store.delete
+Tx.delete(Model, id : Uuid) : Tx.Op       -- names the stored model (needs a table); was Tx.delete(row)
 ```
 
 - **A failed operation** (store unavailable, schema error) delivers no message and shows the host's error banner. `tx` instead reports through its `Err` result.
