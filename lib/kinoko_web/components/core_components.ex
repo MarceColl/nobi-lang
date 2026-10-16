@@ -405,15 +405,26 @@ defmodule KinokoWeb.CoreComponents do
   Icons are extracted from the `deps/heroicons` directory and bundled within
   your compiled app.css by the plugin in `assets/vendor/heroicons.js`.
 
+  `ph-*` names are Phosphor regular icons, vendored in `assets/vendor/phosphor`
+  and bundled by `assets/vendor/phosphor.js`. They size to `1em`.
+
   ## Examples
 
       <.icon name="hero-x-mark" />
       <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
+      <.icon name="ph-graph" class="text-[13px]" />
   """
   attr :name, :string, required: true
-  attr :class, :string, default: "size-4"
+  attr :class, :string, default: nil
 
   def icon(%{name: "hero-" <> _} = assigns) do
+    ~H"""
+    <span class={[@name, @class || "size-4"]} />
+    """
+  end
+
+  # Phosphor icons size to 1em (font-size) unless the caller passes a size-* class.
+  def icon(%{name: "ph-" <> _} = assigns) do
     ~H"""
     <span class={[@name, @class]} />
     """
