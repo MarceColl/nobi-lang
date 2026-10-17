@@ -31,6 +31,11 @@ kinoko-*.tar
 # Ignore digested assets cache.
 /priv/static/cache_manifest.json
 
+# phx.digest (mix assets.deploy, mix kinoko.dist) also writes digested copies
+# (`name-<32 hex md5>.ext`) and gzipped files next to the tracked sources.
+/priv/static/**/*-????????????????????????????????.*
+/priv/static/**/*.gz
+
 # In case you use Node.js/npm, you want to ignore these.
 npm-debug.log
 /assets/node_modules/
@@ -38,3 +43,7 @@ npm-debug.log
 
 # Local SQLite data (dev and test databases).
 /.kinoko/
+
+# mix kinoko.dist: the Burrito binaries (dist/) and Burrito's own output dir.
+/dist/
+/burrito_out/

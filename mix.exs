@@ -47,12 +47,42 @@ defmodule Kinoko.MixProject do
   # and the MCP are compiled in (`:mcp_enabled`, set in config/prod.exs from
   # KINOKO_BUILD, default local). `bin/kinoko-cli` (rel/overlays) runs the
   # `kinoko` command, Kinoko.CLI.main/1.
+  #
+  # `mix kinoko.dist` sets KINOKO_DIST=1 to wrap that same release with
+  # Burrito into one binary per target (see Mix.Tasks.Kinoko.Dist). The
+  # binary boots the `start` script with `rel/burrito/vm.args.eex`, which
+  # hands argv to Kinoko.CLI.main/1; `kinoko: :load` keeps the boot from
+  # starting Kinoko itself, so `kinoko version` starts and creates nothing.
+  # `rel/burrito` is its own templates dir, so `rel/overlays` (bin/kinoko-cli)
+  # is not in the binary: the binary is the CLI.
   defp releases do
+    base = [
+      include_executables_for: [:unix],
+      steps: [:assemble],
+      burrito: [targets: burrito_targets()]
+    ]
+
+    kinoko =
+      if System.get_env("KINOKO_DIST") == "1",
+        do:
+          Keyword.merge(base,
+            steps: [:assemble, &Burrito.wrap/1],
+            applications: [kinoko: :load],
+            rel_templates_path: "rel/burrito"
+          ),
+        else: base
+
+    [kinoko: kinoko]
+  end
+
+  # The Burrito targets, `<os>_<arch>` (the binary is `kinoko-<os>-<arch>`).
+  # Linux targets are musl (Burrito's precompiled ERTS plus its musl runtime).
+  defp burrito_targets do
     [
-      kinoko: [
-        include_executables_for: [:unix],
-        steps: [:assemble]
-      ]
+      macos_arm64: [os: :darwin, cpu: :aarch64],
+      macos_x86_64: [os: :darwin, cpu: :x86_64],
+      linux_x86_64: [os: :linux, cpu: :x86_64],
+      linux_arm64: [os: :linux, cpu: :aarch64]
     ]
   end
 
@@ -90,7 +120,8 @@ defmodule Kinoko.MixProject do
       {:gettext, "~> 0.26"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:burrito, "~> 1.6", runtime: false}
     ]
   end
 

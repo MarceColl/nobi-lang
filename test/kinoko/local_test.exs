@@ -173,6 +173,14 @@ defmodule Kinoko.LocalTest do
     end
   end
 
+  test "tty?/2: Burrito's _IS_TTY wins over the VM's piped stdout" do
+    assert Local.tty?(%{}, true)
+    refute Local.tty?(%{}, false)
+    assert Local.tty?(%{"__BURRITO" => "1", "_IS_TTY" => "1"}, false)
+    refute Local.tty?(%{"__BURRITO" => "1", "_IS_TTY" => "0"}, true)
+    refute Local.tty?(%{"__BURRITO" => "1"}, true)
+  end
+
   test "opener: open on macOS, xdg-open on Linux" do
     assert Local.opener(:darwin) == "open"
     assert Local.opener(:linux) == "xdg-open"

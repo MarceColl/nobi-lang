@@ -227,5 +227,17 @@ defmodule Kinoko.Local do
     end
   end
 
-  defp stdout_tty?, do: Keyword.get(:io.getopts(:standard_io), :stdout, false) == true
+  defp stdout_tty?,
+    do: tty?(System.get_env(), Keyword.get(:io.getopts(:standard_io), :stdout, false))
+
+  @doc """
+  Whether stdout is a terminal, given the env and what the VM sees
+  (`io_tty?`). Burrito's wrapper pipes the VM's stdout through itself, so
+  the VM never sees a terminal; the wrapper reports its own stdout in
+  `_IS_TTY` (`1` or `0`), and that wins when `__BURRITO` is set.
+  """
+  @spec tty?(env(), boolean()) :: boolean()
+  def tty?(env, io_tty?) do
+    if env["__BURRITO"], do: env["_IS_TTY"] == "1", else: io_tty? == true
+  end
 end

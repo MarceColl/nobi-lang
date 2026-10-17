@@ -1,0 +1,19 @@
+## vm.args of the Burrito-wrapped `kinoko` binary (mix kinoko.dist).
+## The plain release keeps Mix's default vm.args.
+
+## Ctrl-C stops `kinoko start` (the VM halts) instead of opening the BEAM's
+## BREAK menu. SQLite keeps every committed write across a halt.
++Bd
+
+## Burrito's wrapper runs
+##   erlexec -s elixir start_cli -boot start ... -args_file vm.args ... -extra <argv>
+## and erlexec puts the plain arguments after `-extra` in this file BEFORE the
+## command line's. Elixir's CLI then sees
+##   -e Kinoko.CLI.main(System.argv()) -- <argv>
+## so it evaluates the one CLI entry with System.argv() = <argv>. The `--`
+## keeps Elixir from reading <argv> itself (`--version`, `-h`, or a word it
+## would run as a script file). The release boots Kinoko with `:load` only;
+## Kinoko.CLI.main/1 starts it through Kinoko.Release.start/0 for `start`.
+## The expression must contain no whitespace (args files split on it).
+## Everything after `-extra` is a plain argument, so it stays the last line.
+-extra -e Kinoko.CLI.main(System.argv()) --
