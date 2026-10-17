@@ -135,6 +135,7 @@ defmodule KinokoWeb.Mcp.Instructions do
     case msg do App.Msg.Add(n) -> ... end    match (`do`, never `of`)
     if c do a else b end              an expression; else is required
     fn (x : Int) -> x + 1 end         lambda
+    not a / a and b / a or b          booleans; no `!`, `&&` or `||`
     x = e                             binds ONE name; no `(a, b) = e`
     case t do (m, cmd) -> m end       take a tuple apart; there is no `t.0`
     Option.Some(x) / Option.None      variants are qualified too
@@ -233,7 +234,8 @@ defmodule KinokoWeb.Mcp.Instructions do
     fixes every listed reason promotes (it must make the whole image check).
   - Cmd values (effects) are data to `eval`: it shows the Cmd a function
     returns and runs nothing. A deployment serving the app runs them
-    (Cmd.store.*, Cmd.time.now, Cmd.random.int, Cmd.navigate); Cmd.blob.*
+    (Cmd.store.*, Cmd.time.now in Unix milliseconds, Cmd.random.int,
+    Cmd.navigate); Cmd.blob.*
     and Cmd.ai.* are not available yet.
 
   STORED DATA (Cmd.store.*): the Model is session state and is gone on reload;

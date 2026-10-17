@@ -350,7 +350,8 @@ defmodule KinokoWeb.McpTest do
               "SERVING YOUR APP",
               "ONE expression",
               "never a type\nvariable",
-              "trimmed at both ends"
+              "trimmed at both ends",
+              "no `!`, `&&` or `||`"
             ],
           do: assert(head =~ fact, "the head lacks #{fact}")
     end
@@ -445,6 +446,13 @@ defmodule KinokoWeb.McpTest do
       # JSX text is trimmed at both ends.
       assert ok!(conn, "eval", %{"universe" => u, "expression" => "<span>by {\"x\"}</span>"}) =~
                ~s|<span>by{"x"}</span>|
+
+      # Boolean operators are words.
+      assert err!(conn, "eval", %{"universe" => u, "expression" => "!true"}) =~ "[parse]"
+      assert err!(conn, "eval", %{"universe" => u, "expression" => "true && true"}) =~ "[parse]"
+
+      assert ok!(conn, "eval", %{"universe" => u, "expression" => "not true or false and true"}) ==
+               "false : Bool"
 
       # List.find.
       assert err!(conn, "eval", %{
