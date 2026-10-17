@@ -46,7 +46,7 @@
     <div class="mt-4 flex flex-wrap items-center gap-2 text-[13px]">
       <span class="chip chip-violet">v<%= @version %></span>
       <span class="chip chip-plain">macOS · Linux</span>
-      <span class="text-dim">arm64 and x86_64. <code class="inline">kinoko</code> creates its database, serves on localhost:4000 and opens the console.</span>
+      <span class="text-dim">arm64 and x86_64. <code class="inline">kinoko</code> creates its database, serves on localhost:4000 and opens the console. If <code class="inline">~/.local/bin</code> is not on your PATH, the installer prints the line to add.</span>
     </div>
     <p class="lede mt-10 lg:mt-12">Kinoko is a code database and runtime for Yabu, a small typed language for web apps: Elm's architecture, Elixir's syntax, running on the BEAM. You or your agent stage a patch. It is promoted only when the whole program still typechecks; otherwise you get the exact reasons.</p>
   </div>

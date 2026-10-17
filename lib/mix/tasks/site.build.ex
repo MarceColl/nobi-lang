@@ -25,8 +25,8 @@ defmodule Mix.Tasks.Site.Build do
   @site "site"
   @fonts "priv/static/fonts"
 
-  # The GitHub repository the page links to and installs from: set it before
-  # publishing. The install line fetches install.sh from the latest release,
+  # The GitHub repository the page links to and installs from: `KINOKO_REPO`
+  # (CI sets it from `github.repository`), else this placeholder locally. The install line fetches install.sh from the latest release,
   # where the release workflow has stamped this repository into it (the copy
   # on the main branch keeps the OWNER/kinoko default and refuses to run).
   @repo "OWNER/kinoko"
@@ -71,9 +71,9 @@ defmodule Mix.Tasks.Site.Build do
       assigns: [
         version: Mix.Project.config()[:version],
         install_url: install_url(),
-        source_url: "https://github.com/#{@repo}",
-        releases_url: "https://github.com/#{@repo}/releases",
-        glossary_url: "https://github.com/#{@repo}/blob/main/docs/GLOSSARY.md",
+        source_url: "https://github.com/#{repo()}",
+        releases_url: "https://github.com/#{repo()}/releases",
+        glossary_url: "https://github.com/#{repo()}/blob/main/docs/GLOSSARY.md",
         counter: code(sample.("counter.yabu")),
         store: code(sample.("store.yabu")),
         mistake: code(sample.("mistake.yabu")),
@@ -89,7 +89,14 @@ defmodule Mix.Tasks.Site.Build do
 
   @doc "The install script's URL: the latest release's stamped `install.sh`."
   @spec install_url() :: String.t()
-  def install_url, do: "https://github.com/#{@repo}/releases/latest/download/install.sh"
+  def install_url, do: "https://github.com/#{repo()}/releases/latest/download/install.sh"
+
+  defp repo do
+    case System.get_env("KINOKO_REPO") do
+      repo when repo in [nil, ""] -> @repo
+      repo -> repo
+    end
+  end
 
   defp read(site, parts),
     do: [site | parts] |> Path.join() |> File.read!() |> String.trim_trailing()

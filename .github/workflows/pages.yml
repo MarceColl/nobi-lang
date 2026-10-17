@@ -8,13 +8,16 @@ on:
       - "lib/mix/tasks/site.*"
       - "priv/static/fonts/**"
       - "assets/css/app.css"
+      - "mix.exs"
+      - "mix.lock"
+      - "config/config.exs"
+      - "lib/kinoko/lang/**"
+      - "test/site/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -24,7 +27,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -39,24 +42,44 @@ jobs:
           path: |
             deps
             _build
-          key: pages-${{ runner.os }}-${{ hashFiles('mix.lock') }}
-          restore-keys: pages-${{ runner.os }}-
+          key: pages-${{ runner.os }}-otp28.1.1-ex1.19.3-${{ hashFiles('mix.lock') }}
+          restore-keys: pages-${{ runner.os }}-otp28.1.1-ex1.19.3-
 
       - run: mix deps.get
 
-      - run: mix tailwind.install --if-missing
+      # A sample that stops compiling must block the deploy. Needs no services:
+      # the test alias creates and migrates the SQLite file at .kinoko/test.db.
+      # test/site also fetches the Tailwind binary on first use.
+      - name: Test the samples
+        run: mix test test/site
+        env:
+          MIX_ENV: test
 
-      - run: mix site.build
+      - name: Build the site
+        run: mix site.build
+        env:
+          KINOKO_REPO: ${{ github.repository }}
+
+      # Same guard as release.yml: never publish the placeholder repository.
+      - name: Refuse the OWNER/kinoko placeholder
+        run: |
+          if grep -q 'OWNER/' site/dist/index.html; then
+            echo "site/dist/index.html still contains OWNER/" >&2
+            exit 1
+          fi
 
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
 
-      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site/dist
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

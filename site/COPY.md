@@ -9,6 +9,7 @@ Every sentence on the page (`site/src/index.html.eex`), with the feature that ba
 | Hero | You or your agent stage a patch. | `stage_patch` in `lib/kinoko_web/mcp/tools.ex`; the console (`lib/kinoko_web/live/console/universe_live.ex`) |
 | Hero | It is promoted only when the whole program still typechecks; otherwise you get the exact reasons. | `stage_patch` description and `staged_text/2` in `lib/kinoko_web/mcp/tools.ex`; `site/samples/verdicts/mistake.txt` |
 | Hero | arm64 and x86_64. | `dist/kinoko-{macos,linux}-{arm64,x86_64}`; platform detection in `install.sh` |
+| Hero | If `~/.local/bin` is not on your PATH, the installer prints the line to add. | `install.sh` (`install_dir` default `$HOME/.local/bin`; the PATH hint after "Installed kinoko") |
 | Hero | `kinoko` creates its database, serves on localhost:4000 and opens the console. | `Kinoko.CLI` usage (`start`: create and migrate, start, open the console) and `port/1` (default 4000), `lib/kinoko/cli.ex` |
 | Hero | Install line: `curl -fsSL https://github.com/<repo>/releases/latest/download/install.sh \| sh`. | `Mix.Tasks.Site.Build.install_url/0` (`@repo`); `.github/workflows/release.yml` stamps the repository into the release's `install.sh` (main's copy keeps `OWNER/kinoko` and refuses to run); `test/site/site_build_test.exs` |
 | Hero | Badges: version, macOS · Linux. | `mix.exs` `@version`; `install.sh` supported OSes |
@@ -42,7 +43,7 @@ Every sentence on the page (`site/src/index.html.eex`), with the feature that ba
 | Persists | The model is session state. | `KinokoWeb.Mcp.Instructions` (STORED DATA: "the Model is session state and is gone on reload") |
 | Persists | Durable data goes through `Cmd.store`. | `KinokoWeb.Mcp.Instructions`; `site/samples/store.yabu` |
 | Persists | A model that declares `id : Uuid` is stored, and the store mints the id, so you never write it. | `KinokoWeb.Mcp.Instructions` ("A STORED model is a defmodel with `id : Uuid` ... Never write `id`"); `Kinoko.Data.insert/4` mints a v4 Uuid |
-| Persists | `update` returns effects as data. The runtime runs them and sends the result back as a message. | `KinokoWeb.Mcp.Instructions` ("Cmd values (effects) are data ... A deployment serving the app runs them"); `lib/kinoko/elm_genserver.ex` |
+| Persists | `update` returns effects as data. The runtime runs them and sends the result back as a message. | `KinokoWeb.Mcp.Instructions` ("Cmd values (effects) are data ... A deployment serving the app runs them"); `lib/kinoko_web/live/deployment_live.ex` ("Steps" moduledoc) |
 | Persists | Models grow by adding fields. | `KinokoWeb.Mcp.Instructions` (evolution); `samples_test.exs` (store over store_v1 promotes) |
 | Persists | A new field needs a default (or is an `Option`), which rows stored before it read back as; a new field without one is refused. | `test/kinoko/data_test.exs` "rows written under v1 read under v2 with defaults", "Option round-trips; NULL is None for an Option"; `KinokoWeb.Mcp.Instructions` ("An Option<T> field takes no default (absent reads as Option.None)"); `samples_test.exs` "a new field without a default is refused" (`model-evolution`) |
 | Persists | Construction still lists every field. | `KinokoWeb.Mcp.Instructions`; `store.yabu` writes `replies: 0` |
