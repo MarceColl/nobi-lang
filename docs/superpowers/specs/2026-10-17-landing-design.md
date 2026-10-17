@@ -2,7 +2,7 @@
 
 ## Goal
 
-A static homepage for Kinoko in the style of a programming-language site, like Gleam, Unison and Elm. It says what Yabu and Kinoko are, shows real code, and makes the install line the main call to action.
+A short, plain static homepage for Kinoko: what it is, who it is for, and how to get from nothing to an app an agent built, in five steps.
 
 ## Decisions (Marce, 2026-10-17)
 
@@ -18,38 +18,38 @@ A static homepage for Kinoko in the style of a programming-language site, like G
   - Every terminal transcript must come from a real run.
 - **Hosting:** GitHub Pages from `site/` in the same repo, deployed by a workflow. The workflow is written but not run until Marce publishes.
 
+## Audience and tone (Marce, 2026-10-17, second version)
+
+The first landing (eight sections: hero, "See it run", the Elm architecture, code as a database, the compiler's verdicts, the BEAM, agents, get started) was rejected. It mixed marketing copy with technical detail and never said who it was for.
+
+- **Audience:** developers who already build with coding agents (Claude Code, Cursor).
+- **Tone:** a plain project page, not a product page. No slogans and no persuasion.
+- **No internals on the landing.** Staged patches, CIDs, verdicts, the BEAM and how changes work belong in the docs.
+- **Copy:** approved by Marce and used verbatim; `site/COPY.md` lists each sentence with the feature behind it.
+
 ## Structure
 
-The structure comes from `docs/design/kinoko-marketing/LANGUAGE-SITES-RESEARCH.md`.
+1. **Title.** "Kinoko" in Newsreader, the one-line description, and one paragraph.
+2. **Getting started.** Five numbered steps: install (`curl -fsSL …/install.sh | sh`, with a copy button), start (`kinoko`), connect the agent (`claude mcp add …`, with a copy button; `kinoko mcp` for other clients), ask for an app (the forum prompt), open it (`forum.localhost:4000`, the console at `localhost:4000/_`).
+   - Under step 4, a short terminal block lists the Kinoko tool calls of a real recorded run of that prompt, each with its one-line result, and the agent's first summary sentence. It is built from `site/samples/agent-run.jsonl` at build time. If it grows past about 15 lines, it is collapsed in a `<details>`.
+   - Under step 5, a screenshot of the forum that run built (`site/src/forum.webp`).
+3. **An example app.** `site/samples/counter.yabu`, shown as code.
+4. **Status.** The version (major.minor from `mix.exs`), macOS and Linux, local and single-user, no hosting yet.
+5. **Links.** Source and Releases.
 
-1. **Hero.**
-   - A one-line promise in Newsreader, and a subhead.
-   - The install block: `curl -fsSL …/install.sh | sh` (install.sh is POSIX sh; stock Alpine has no bash) in Plex Mono with a copy button, then `kinoko` on the next line.
-   - The version and target badges: `macOS · Linux`, plus the version from `mix.exs`.
-2. **See it run.** A terminal window (Vellum card, with the console's title-bar style) showing a real session: install, `kinoko`, the banner, `kinoko mcp`, and the agent's first patch promoted.
-3. **The Elm architecture, Elixir syntax.** An annotated Yabu counter or todo `defapp`, with `init`, `update` and `view`, beside a rendered result styled like a Vellum app card.
-4. **Code is a database.** Declarations are content-addressed, with a CID shown. A patch either promotes or stays staged with exact reasons. This uses the console's staged/Blocked callout and the `typechecks` chip.
-5. **A compiler that explains itself.** A real checker verdict for a small mistake, shown as Kinoko prints it.
-6. **The BEAM, with data that persists.** Covers:
-   - `defmodel` with `id : Uuid`;
-   - `Cmd.store`;
-   - add-only evolution (`replies : Int = 0`);
-   - one SQLite file per deployment, with no setup.
-7. **Agents drive it.** The MCP loop: look → stage → read the verdict → prove (`eval`/`test`, the tools this server has; see `lib/kinoko_web/mcp/tools.ex`), with `claude mcp add …`.
-8. **Get started.** The install block again, then links to the source, releases and the guide. Until guides exist, the guide link points to `docs/GLOSSARY.md`.
-
-The footer has the source and releases. The licence line waits on a LICENSE file in the repository; until then the footer names only the fonts' licence (OFL).
+The footer has the version and the fonts' licence (OFL).
 
 ## Constraints
 
-- **Static output:** `site/index.html` plus one CSS file built by the Tailwind CLI that is already in the project (a new `site` profile), and the vendored fonts copied into `site/fonts/`. No JS framework. The only JS is a tiny copy-to-clipboard script. There are no CDN links.
-- **Responsive:** down to 360px, with the code blocks scrolling horizontally inside their frames.
+- **Static output:** `site/dist/index.html` plus one CSS file built by the Tailwind CLI that is already in the project (a new `site` profile), and the vendored fonts copied into `site/dist/fonts/`. No JS framework. The only JS is a tiny copy-to-clipboard script. There are no CDN links.
+- **Responsive:** down to 360px with no horizontal page scroll; code blocks scroll horizontally inside their frames.
+- **Short:** one narrow column with lots of whitespace.
 - **Accessible:**
   - semantic headings;
   - the copy button has a label;
   - contrast is at least 4.5:1 for body text.
-- **Real code:** the code samples live as `.yabu` files under `site/samples/`. A test loads each one into a fresh universe and asserts the expected verdict: promotes, or a specific reason for the mistake sample. The page includes them at build time, so a sample that stops compiling fails CI.
-- **Real transcript:** the terminal transcript comes from an actual run of the distribution binary. It is captured into `site/samples/session.txt` and lightly trimmed. Nothing is invented.
+- **Real code:** the counter sample lives at `site/samples/counter.yabu`. A test stages it into a fresh universe and asserts it promotes. The page includes it at build time, so a sample that stops compiling fails CI.
+- **Real run:** the agent-run block comes from a real headless Claude Code run against the distribution binary (on port 4123, with fresh data). Its events are kept in `site/samples/agent-run.jsonl`, and a test checks that the block lists every Kinoko call in it, in order. Nothing is invented; `site/COPY.md` records how the run was made.
 - **Build:** `mix site.build` writes `site/dist/`. `mix site.serve` previews it on port 4124.
 
 ## Out of scope

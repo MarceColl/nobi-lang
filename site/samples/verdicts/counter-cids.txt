@@ -1,6 +1,0 @@
-sha256 d764c6b6  Counter
-sha256 21a55f47  Counter.Model
-sha256 4b5a7bb6  Counter.Msg
-sha256 a9b1e13d  Counter.init
-sha256 38875eb2  Counter.update
-sha256 296847e7  Counter.view

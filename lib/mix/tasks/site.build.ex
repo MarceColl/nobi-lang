@@ -8,11 +8,12 @@ defmodule Mix.Tasks.Site.Build do
 
   Writes `site/dist/`:
 
-    * `index.html`: `site/src/index.html.eex` rendered with, read verbatim
-      and HTML-escaped: the code samples `site/samples/*.yabu`, their printed
-      verdicts and the counter's CIDs (`site/samples/verdicts/*.txt`, kept
-      true by `test/site/samples_test.exs`), and the terminal session
-      `site/samples/session.txt` (recorded from the release binary);
+    * `index.html`: `site/src/index.html.eex` rendered with, HTML-escaped:
+      the counter sample `site/samples/counter.yabu` verbatim (kept
+      compiling by `test/site/samples_test.exs`), and the Kinoko tool calls
+      of a recorded agent run, `site/samples/agent-run.jsonl` (see
+      `agent_run/1`);
+    * `forum.webp`: the forum that run built, from `site/src/forum.webp`;
     * `site.css`: the Tailwind `site` profile (input `site/src/site.css`);
     * `fonts/*`: the Vellum fonts and their licences from `priv/static/fonts`;
     * `copy.js`: the copy-to-clipboard script, from `site/src/copy.js`.
@@ -26,8 +27,8 @@ defmodule Mix.Tasks.Site.Build do
   @fonts "priv/static/fonts"
 
   # The GitHub repository the page links to and installs from: `KINOKO_REPO`
-  # (CI sets it from `github.repository`), else this placeholder locally. The install line fetches install.sh from the latest release,
-  # where the release workflow has stamped this repository into it (the copy
+  # (CI sets it from `github.repository`), else this placeholder locally. The install line fetches install.sh from
+  # the latest release, where the release workflow has stamped this repository into it (the copy
   # on the main branch keeps the OWNER/kinoko default and refuses to run).
   @repo "OWNER/kinoko"
 
@@ -43,7 +44,7 @@ defmodule Mix.Tasks.Site.Build do
 
   @doc """
   Builds the page from `site` into `dist` (emptied first): the HTML, the
-  copy script, the fonts, and the stylesheet (Tailwind's `site` profile).
+  copy script, the screenshot, the fonts, and the stylesheet (Tailwind's `site` profile).
   """
   @spec build(Path.t(), Path.t()) :: :ok
   def build(site, dist) do
@@ -51,7 +52,9 @@ defmodule Mix.Tasks.Site.Build do
     File.mkdir_p!(Path.join(dist, "fonts"))
 
     File.write!(Path.join(dist, "index.html"), render(site))
-    File.cp!(Path.join([site, "src", "copy.js"]), Path.join(dist, "copy.js"))
+
+    for file <- ~w(copy.js forum.webp),
+        do: File.cp!(Path.join([site, "src", file]), Path.join(dist, file))
 
     for font <- File.ls!(@fonts),
         do: File.cp!(Path.join(@fonts, font), Path.join([dist, "fonts", font]))
@@ -64,25 +67,15 @@ defmodule Mix.Tasks.Site.Build do
   @doc "The homepage's HTML, from the template and samples under `site`."
   @spec render(Path.t()) :: String.t()
   def render(site) do
-    sample = &read(site, ["samples", &1])
-    verdict = &read(site, ["samples", "verdicts", &1])
-
     EEx.eval_file(Path.join([site, "src", "index.html.eex"]),
       assigns: [
         version: Mix.Project.config()[:version],
+        release: release(Mix.Project.config()[:version]),
         install_url: install_url(),
         source_url: "https://github.com/#{repo()}",
         releases_url: "https://github.com/#{repo()}/releases",
-        glossary_url: "https://github.com/#{repo()}/blob/main/docs/GLOSSARY.md",
-        counter: code(sample.("counter.yabu")),
-        store: code(sample.("store.yabu")),
-        mistake: code(sample.("mistake.yabu")),
-        counter_verdict: escape(verdict.("counter.txt")),
-        store_verdict: escape(verdict.("store.txt")),
-        mistake_verdict: verdict_lines(verdict.("mistake.txt")),
-        mistake_reasons: reasons(verdict.("mistake.txt")),
-        cids: cids(verdict.("counter-cids.txt")),
-        session: session(sample.("session.txt"))
+        counter: code(read(site, ["samples", "counter.yabu"])),
+        agent_run: agent_run(read(site, ["samples", "agent-run.jsonl"]))
       ]
     )
   end
@@ -133,40 +126,91 @@ defmodule Mix.Tasks.Site.Build do
     end
   end
 
-  # The printed verdict, one `{class, escaped line}` per line: the head line
-  # (`staged: ...`) and each `- symbol [code] message` reason.
-  defp verdict_lines(text) do
-    for line <- String.split(text, "\n") do
-      {if(String.starts_with?(line, "- "), do: "tok-reason", else: "tok-staged"), escape(line)}
-    end
-  end
+  # "0.1.0" -> "0.1": the release line the Status section names.
+  defp release(version), do: version |> String.split(".") |> Enum.take(2) |> Enum.join(".")
 
-  # The reasons of a printed verdict, `- Symbol [code] message`, as
-  # `%{name, code, message}` (escaped) for the console's Blocked callout.
-  defp reasons(text) do
-    for line <- String.split(text, "\n"),
-        [_, name, code, message] <- [Regex.run(~r/^- (\S+) \[([^\]]+)\] (.*)$/, line)] do
-      %{name: escape(name), code: escape(code), message: escape(message)}
-    end
-  end
+  @doc """
+  The recorded agent run (`site/samples/agent-run.jsonl`, Claude Code's
+  `stream-json` events) as the page shows it: `calls`, one per Kinoko tool
+  call in order, `%{name, label, result}` (the tool without its
+  `mcp__kinoko__` prefix, the name with its key argument, and the result's
+  one line), and `summary`, the agent's closing sentence.
+  """
+  @spec agent_run(String.t()) :: %{calls: [map()], summary: String.t()}
+  def agent_run(jsonl) do
+    events = for line <- String.split(jsonl, "\n", trim: true), do: Jason.decode!(line)
 
-  # `sha256 <8 hex>  <symbol>` lines, as `{cid, symbol}`.
-  defp cids(text) do
-    for line <- String.split(text, "\n"),
-        [_, cid, symbol] <- [Regex.run(~r/^sha256 ([0-9a-f]+)  (\S+)$/, line)] do
-      {cid, escape(symbol)}
-    end
-  end
+    uses =
+      for %{"type" => "assistant", "message" => %{"content" => content}} <- events,
+          %{"type" => "tool_use", "name" => "mcp__kinoko__" <> name} = use <- content,
+          do: {use["id"], name, use["input"]}
 
-  # The recorded session, one line each: `{:cmd, command}` for `$ ...`,
-  # `{:ok, text}` for a promotion, `{:out, text}` otherwise (all escaped).
-  defp session(text) do
-    for line <- String.split(text, "\n") do
-      cond do
-        String.starts_with?(line, "$ ") -> {:cmd, escape(String.slice(line, 2..-1//1))}
-        String.starts_with?(line, "promoted: ") -> {:ok, escape(line)}
-        true -> {:out, escape(line)}
+    results =
+      Map.new(
+        for %{"type" => "user", "message" => %{"content" => content}} <- events,
+            is_list(content),
+            %{"type" => "tool_result"} = r <- content,
+            do: {r["tool_use_id"], result_text(r["content"])}
+      )
+
+    calls =
+      for {id, name, input} <- uses do
+        result = summarize(Map.fetch!(results, id))
+        %{name: name, label: label(name, input), result: result, class: result_class(result)}
       end
-    end
+
+    width = calls |> Enum.map(&String.length(&1.label)) |> Enum.max(fn -> 0 end)
+
+    %{
+      calls:
+        for call <- calls do
+          pad = String.duplicate(" ", width - String.length(call.label))
+          %{call | label: escape(call.label), result: escape(call.result)} |> Map.put(:pad, pad)
+        end,
+      summary:
+        events
+        |> Enum.find(&(&1["type"] == "result"))
+        |> Map.fetch!("result")
+        |> first_sentence()
+        |> escape()
+    }
+  end
+
+  defp result_text(text) when is_binary(text), do: text
+  defp result_text(parts), do: Enum.map_join(parts, "\n", &(&1["text"] || ""))
+
+  # The tool with its key argument: a patch id, a deployment name, a test, or
+  # the start of an expression.
+  defp label(name, input) do
+    arg = input["id"] || input["name"] || input["symbol"] || input["expression"]
+    if arg, do: "#{name} #{clip(arg, 28)}", else: name
+  end
+
+  # A result's one line: the URL a deployment serves at, else the first line.
+  defp summarize(text) do
+    lines = String.split(text, "\n", trim: true)
+    line = Enum.find_value(lines, &url_line/1) || List.first(lines, "")
+    clip(line, 44)
+  end
+
+  defp url_line("URL: " <> url), do: url
+  defp url_line(_), do: nil
+
+  defp result_class(result) do
+    if result =~ ~r/^(promoted|https?:)|: ok$/, do: "tok-ok", else: "tok-out"
+  end
+
+  defp clip(text, max) do
+    if String.length(text) > max, do: String.slice(text, 0, max - 1) <> "…", else: text
+  end
+
+  # The first sentence of the agent's closing message, without its Markdown.
+  defp first_sentence(text) do
+    text
+    |> String.split("\n", trim: true)
+    |> List.first("")
+    |> String.replace(~r/[*`]/, "")
+    |> String.split(~r/(?<=\.) /, parts: 2)
+    |> List.first()
   end
 end

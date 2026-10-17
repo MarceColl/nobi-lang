@@ -1,4 +1,0 @@
-defmodel Board.Topic do
-  id : Uuid
-  title : String
-end

@@ -1,3 +1,0 @@
-def Counter.label(count : Int) : String do
-  String.concat("Clicks: ", count)
-end

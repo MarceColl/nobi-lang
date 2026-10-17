@@ -5,35 +5,33 @@ defmodule Kinoko.Site.BuildTest do
 
   alias Mix.Tasks.Site.Build
 
-  @samples ~w(counter.yabu store.yabu mistake.yabu session.txt)
-  @verdicts ~w(counter.txt store.txt mistake.txt)
+  @run "site/samples/agent-run.jsonl"
 
   # The page's text with its markup removed: the samples are highlighted
   # with spans, which must not change a character of them.
-  defp visible(html), do: Regex.replace(~r/<[^>]*>/, html, "")
+  defp visible(html), do: html |> then(&Regex.replace(~r/<[^>]*>/, &1, "")) |> unescape()
 
-  defp read(path), do: path |> File.read!() |> String.trim_trailing()
+  defp unescape(text) do
+    Enum.reduce(
+      [{"&quot;", ~s(")}, {"&#39;", "'"}, {"&lt;", "<"}, {"&gt;", ">"}, {"&amp;", "&"}],
+      text,
+      fn {e, c}, t ->
+        String.replace(t, e, c)
+      end
+    )
+  end
 
-  test "the page includes every sample, the session and each printed verdict verbatim" do
+  defp events do
+    for line <- @run |> File.read!() |> String.split("\n", trim: true), do: Jason.decode!(line)
+  end
+
+  test "the page shows the counter sample verbatim and the install line from the release" do
     html = Build.render("site")
     text = visible(html)
 
-    for file <- @samples do
-      sample = read("site/samples/#{file}")
-      assert text =~ Plug.HTML.html_escape(sample), "the page lacks #{file}"
-    end
-
-    for file <- @verdicts, line <- String.split(read("site/samples/verdicts/#{file}"), "\n") do
-      assert text =~ Plug.HTML.html_escape(line), "the page lacks #{file}: #{line}"
-    end
-
-    for line <- String.split(read("site/samples/verdicts/counter-cids.txt"), "\n") do
-      [_, cid, symbol] = Regex.run(~r/^sha256 (\S+)  (\S+)$/, line)
-      assert text =~ symbol
-      assert text =~ "sha256 #{cid}"
-    end
-
+    assert text =~ String.trim_trailing(File.read!("site/samples/counter.yabu"))
     assert html =~ ~s(data-copy="#install")
+    assert html =~ ~s(data-copy="#mcp-add")
 
     # The release asset, which the release workflow stamps with the
     # repository; main's install.sh refuses to run.
@@ -43,6 +41,42 @@ defmodule Kinoko.Site.BuildTest do
     assert html =~ "curl -fsSL #{Build.install_url()} | sh"
     refute html =~ "raw.githubusercontent.com"
     assert html =~ Mix.Project.config()[:version]
+
+    [major, minor | _] = String.split(Mix.Project.config()[:version], ".")
+    assert text =~ "v#{major}.#{minor}. macOS and Linux."
+  end
+
+  test "the agent-run block is every Kinoko tool call of the recorded run, in order" do
+    events = events()
+
+    # A finished, successful run that refused nothing.
+    assert %{"is_error" => false, "permission_denials" => []} =
+             Enum.find(events, &(&1["type"] == "result"))
+
+    recorded =
+      for %{"type" => "assistant", "message" => %{"content" => content}} <- events,
+          %{"type" => "tool_use", "name" => "mcp__kinoko__" <> name} <- content,
+          do: name
+
+    assert recorded != []
+    %{calls: calls, summary: summary} = Build.agent_run(File.read!(@run))
+    assert Enum.map(calls, & &1.name) == recorded
+
+    text = "site" |> Build.render() |> visible()
+    [block] = Regex.run(~r/What the agent did.*?The agent's summary/s, text)
+
+    shown =
+      for line <- String.split(block, "\n"),
+          [_, label] <- [Regex.run(~r/^\s*(\S.*?)\s+→ /, line)],
+          do: label |> String.split(" ") |> hd()
+
+    assert shown == recorded
+    assert block =~ "promoted: "
+    assert text =~ unescape(summary)
+
+    # The deployment the agent created, and the URL the page says it serves at.
+    assert "create_deployment" in recorded
+    assert block =~ "http://forum.localhost:4123/"
   end
 
   test "the page loads nothing from another origin" do
@@ -67,6 +101,7 @@ defmodule Kinoko.Site.BuildTest do
 
     assert File.exists?(Path.join(dist, "index.html"))
     assert File.read!(Path.join(dist, "copy.js")) == File.read!("site/src/copy.js")
+    assert File.read!(Path.join(dist, "forum.webp")) == File.read!("site/src/forum.webp")
 
     fonts = File.ls!("priv/static/fonts")
     assert Enum.any?(fonts, &String.ends_with?(&1, ".woff2"))

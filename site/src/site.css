@@ -116,10 +116,10 @@ html { background: var(--k-paper); color: var(--k-ink); color-scheme: light; }
 ::selection { background: rgba(91,75,150,.18); }
 
 /* ---- Page ---------------------------------------------------------------
-   Vellum values from the console (lib/kinoko_web/live/console) and the
-   prototype: white cards on paper with a 1px line and 9-12px radii, tint
-   title bars, mono code with a gutter, mint/amber chips, the red Blocked
-   callout. Plain CSS (no @apply); utilities in the template override it. */
+   Vellum values from the console (lib/kinoko_web/live/console): white cards
+   on paper with a 1px line and 11px radii, tint title bars, mono code with a
+   gutter. One narrow column with plenty of air. Plain CSS (no @apply);
+   utilities in the template override it. */
 
 @layer components {
 body { font-size: 17px; line-height: 1.65; }
@@ -129,6 +129,10 @@ code, pre { font-family: var(--k-mono); }
 @media (min-width: 640px) { .wrap { padding-inline: 32px; } }
 @media (min-width: 1024px) { .wrap { padding-inline: 48px; } }
 
+/* The reading column. */
+.page { width: 100%; max-width: 760px; margin-inline: auto; padding-inline: 16px; }
+@media (min-width: 640px) { .page { padding-inline: 32px; } }
+
 .skip { position: absolute; left: 16px; top: -48px; padding: 8px 12px; border-radius: 6px; background: var(--k-ink); color: #fff; font-size: 14px; z-index: 10; }
 .skip:focus { top: 12px; }
 
@@ -136,34 +140,34 @@ code, pre { font-family: var(--k-mono); }
 
 .navlink { color: var(--k-body); text-decoration: none; transition: color .15s; }
 .navlink:hover { color: var(--k-violet); }
+.link { color: var(--k-violet); text-decoration: underline; text-decoration-color: var(--k-violet-btn-border); text-underline-offset: 3px; transition: color .15s, text-decoration-color .15s; }
+.link:hover { color: var(--k-violet-hover); text-decoration-color: currentColor; }
 
-/* Display type: Newsreader, large and tight, the page's one loud thing. */
-.hero-title {
-  font-size: clamp(2.6rem, 7vw, 6rem);
-  line-height: .98;
-  letter-spacing: -.028em;
+/* The title: Newsreader, the page's one large thing. */
+.intro { padding-block: 72px 56px; }
+@media (min-width: 1024px) { .intro { padding-block: 112px 80px; } }
+.title {
+  font-size: clamp(3.4rem, 9vw, 5.5rem);
+  line-height: 1;
+  letter-spacing: -.03em;
   font-weight: 400;
-  text-wrap: balance;
 }
-.lede { font-size: 19px; line-height: 1.6; color: var(--k-body); max-width: 40rem; }
-@media (min-width: 1024px) { .lede { font-size: 20px; } }
+.tagline { margin-top: 18px; font-size: 21px; line-height: 1.45; color: var(--k-ink); }
+@media (min-width: 640px) { .tagline { font-size: 23px; } }
+.lede { margin-top: 20px; font-size: 17px; line-height: 1.65; color: var(--k-body); max-width: 36rem; }
+
+.block { border-top: 1px solid var(--k-line); padding-block: 48px; }
+@media (min-width: 1024px) { .block { padding-block: 64px; } }
+.block > p { margin-top: 16px; }
 .h2 {
   font-family: var(--k-display);
   font-weight: 400;
   color: var(--k-ink);
-  font-size: clamp(2rem, 3.6vw, 2.85rem);
-  line-height: 1.05;
-  letter-spacing: -.02em;
-  text-wrap: balance;
+  font-size: clamp(1.75rem, 3.2vw, 2.25rem);
+  line-height: 1.1;
+  letter-spacing: -.015em;
 }
-
-.band { border-top: 1px solid var(--k-line); padding-block: 64px; }
-@media (min-width: 1024px) { .band { padding-block: 104px; } }
-
-.prose p { margin-top: 1.1rem; max-width: 36rem; }
-.prose .h2 + p { margin-top: 1.5rem; }
-.note, .figcap { font-size: 14px; line-height: 1.55; color: var(--k-dim); }
-.prose .note { margin-top: 1.5rem; }
+.block > figure { margin-top: 24px; }
 
 code.inline {
   font-size: .84em;
@@ -175,24 +179,33 @@ code.inline {
   overflow-wrap: anywhere;
 }
 
-/* Margin notes: a term and what it means, beside the code. */
-.notes { margin-top: 1.75rem; display: flex; flex-direction: column; gap: 1rem; max-width: 36rem; }
-.notes > div { display: grid; gap: .3rem; padding-top: 1rem; border-top: 1px solid var(--k-row-line); }
-.notes dt { font-size: 14px; font-weight: 700; color: var(--k-ink); }
-.notes dd { font-size: 15.5px; line-height: 1.55; }
+/* Getting started: numbered steps, the number in a violet disc. */
+.steps { list-style: none; margin: 28px 0 0; padding: 0; counter-reset: step; display: flex; flex-direction: column; gap: 36px; }
+.steps > li { counter-increment: step; position: relative; padding-left: 42px; min-width: 0; }
+.steps > li::before {
+  content: counter(step);
+  position: absolute; left: 0; top: 1px;
+  width: 26px; height: 26px; border-radius: 999px; display: grid; place-items: center;
+  font-family: var(--k-mono); font-size: 12px; color: var(--k-violet);
+  background: var(--k-violet-chip); border: 1px solid var(--k-violet-chip-border);
+}
+.steps h3 { font-size: 17px; line-height: 1.55; font-weight: 400; color: var(--k-body); }
+.steps h3 strong { color: var(--k-ink); font-weight: 700; }
+.steps h3 + * { margin-top: 12px; }
+.aside { margin-top: 10px; font-size: 15px; color: var(--k-dim); }
+
+/* The prompt, as you would type it to the agent. */
+.ask { margin: 12px 0 0; padding: 4px 0 4px 16px; border-left: 3px solid var(--k-violet-btn-border); font-size: 17px; color: var(--k-ink); }
 
 /* Cards and their title bars (the console's #console-titlebar). */
 .card { background: var(--k-card); border: 1px solid var(--k-line); border-radius: 11px; box-shadow: 0 1px 2px rgba(27,26,23,.04); min-width: 0; }
 figure.card, figure { margin: 0; min-width: 0; }
-/* Grid and flex columns may shrink below their code's width: code scrolls inside its frame. */
-.grid > *, .flex-col > * { min-width: 0; }
 .titlebar { display: flex; align-items: center; gap: 12px; min-height: 42px; padding: 0 14px; background: var(--k-tint); border-bottom: 1px solid var(--k-line); min-width: 0; }
 
-.chip { flex: none; white-space: nowrap; font-size: 11.5px; line-height: 1.5; border: 1px solid; padding: 2px 8px; border-radius: 5px; }
-.chip-mint { color: var(--k-mint); background: var(--k-mint-chip); border-color: var(--k-mint-chip-border); }
-.chip-amber { color: var(--k-amber-text); background: var(--k-amber-chip); border-color: var(--k-amber-chip-border); }
-.chip-violet { color: var(--k-violet); background: var(--k-violet-chip); border-color: var(--k-violet-chip-border); font-family: var(--k-mono); }
-.chip-plain { color: var(--k-body); background: var(--k-card); border-color: var(--k-line); }
+/* The recorded run: a terminal card. */
+.run { margin-top: 16px; overflow: hidden; }
+.run .term { white-space: pre; }
+.run-note { padding: 12px 18px 14px; border-top: 1px solid var(--k-row-line); font-size: 14px; line-height: 1.55; color: var(--k-dim); }
 
 /* Code with the console's line-number gutter (#source). */
 .code { display: flex; font-size: 13px; line-height: 1.75; padding-block: 14px; }
@@ -201,18 +214,14 @@ figure.card, figure { margin: 0; min-width: 0; }
 .src { flex: 1; min-width: 0; overflow-x: auto; padding-right: 18px; color: var(--k-ink); }
 .tok-kw { color: var(--k-violet); }
 
-/* The terminal: a Vellum card, mono, the REPL bar's violet prompt. */
-.term { margin: 0; padding: 16px 18px; overflow-x: auto; font-size: 12.5px; line-height: 1.7; color: var(--k-body); }
-.tok-prompt { color: var(--k-violet); }
+/* The terminal: mono, the REPL bar's colours. */
+.term { margin: 0; padding: 14px 18px; overflow-x: auto; font-size: 12.5px; line-height: 1.75; color: var(--k-body); }
 .tok-cmd { color: var(--k-ink); font-weight: 500; }
-.tok-ok { color: var(--k-mint); font-weight: 500; }
-.tok-staged { color: var(--k-amber-text); }
-.tok-reason { color: var(--k-red-text); }
+.tok-ok { color: var(--k-mint); }
+.tok-out { color: var(--k-dim); }
 
-/* The install line (the REPL bar's input row). */
+/* A command line (the REPL bar's input row). */
 .install { overflow: hidden; }
-.install-hero { max-width: 60rem; }
-@media (min-width: 1024px) { .install-hero .install-cmd { font-size: 15px; } .install-hero .install-row { min-height: 58px; } }
 .install-row { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 6px 8px 6px 16px; min-width: 0; }
 .prompt { font-family: var(--k-mono); color: var(--k-violet); flex: none; }
 .install-cmd { flex: 1; min-width: 0; overflow-x: auto; white-space: pre; font-size: 14px; color: var(--k-ink); padding-block: 6px; scrollbar-width: thin; }
@@ -225,40 +234,9 @@ figure.card, figure { margin: 0; min-width: 0; }
 .copy:hover { background: #ECE7F8; border-color: #B6AADB; }
 .copy:active { transform: translateY(1px); }
 
-/* The rendered app, framed like the console's app preview. */
-.app-frame { background: var(--k-card); border: 1px solid var(--k-line); border-radius: 11px; overflow: hidden; }
-.app-frame .figcap { padding: 10px 14px; border-top: 1px solid var(--k-line); background: var(--k-card); }
-
-/* Committed symbols (the console's symbol list). */
-.symbols { list-style: none; margin: 0; padding: 6px; }
-.symbols li { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; min-width: 0; }
-.symbols li + li { border-top: 1px solid var(--k-row-line-2); border-radius: 0; }
-.symbols .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--k-mint); flex: none; }
-
-/* The console's red "Blocked" callout (reasons_callout). */
-.blocked { display: flex; flex-direction: column; gap: 4px; padding: 11px 13px; border-radius: 9px; background: var(--k-red-chip); border: 1px solid var(--k-red-chip-border); overflow-wrap: anywhere; }
-
-/* The agent loop: a real sequence, so it is numbered. */
-.loop { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
-@media (min-width: 640px) { .loop { grid-template-columns: 1fr 1fr; } }
-.loop li { display: flex; gap: 14px; padding: 18px; background: var(--k-card); border: 1px solid var(--k-line); border-radius: 11px; min-width: 0; }
-.loop h3 { font-family: var(--k-display); font-size: 22px; line-height: 1.2; color: var(--k-ink); font-weight: 500; }
-.loop p { margin-top: 6px; font-size: 15.5px; line-height: 1.55; }
-.step { flex: none; width: 26px; height: 26px; border-radius: 999px; display: grid; place-items: center; font-family: var(--k-mono); font-size: 12px; color: var(--k-violet); background: var(--k-violet-chip); border: 1px solid var(--k-violet-chip-border); margin-top: 2px; }
-
-/* The closing panel. */
-.closing { background: var(--k-sand); border: 1px solid var(--k-line); border-radius: 14px; padding: 32px 20px; }
-@media (min-width: 640px) { .closing { padding: 56px 56px; } }
-.closing .h2 { font-size: clamp(2.25rem, 4.6vw, 3.6rem); }
-
-.btn {
-  display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border-radius: 7px;
-  border: 1px solid var(--k-line); background: var(--k-card); color: var(--k-ink);
-  font-size: 14.5px; text-decoration: none; transition: border-color .15s, background-color .15s;
-}
-.btn:hover { border-color: #C4BEAE; }
-.btn-primary { background: var(--k-violet); border-color: var(--k-violet); color: #fff; font-weight: 500; }
-.btn-primary:hover { background: var(--k-violet-hover); border-color: var(--k-violet-hover); }
+/* A screenshot of a real page, framed like the console's app preview. */
+.shot { margin-top: 16px; border: 1px solid var(--k-line); border-radius: 11px; overflow: hidden; background: var(--k-card); box-shadow: 0 1px 2px rgba(27,26,23,.04); }
+.shot img { display: block; width: 100%; height: auto; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 }
