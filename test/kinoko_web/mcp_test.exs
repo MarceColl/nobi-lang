@@ -8,7 +8,7 @@ defmodule KinokoWeb.McpTest do
   @g "def A.g() : Int do\n  1\nend"
   @f "def A.f() : Int do\n  A.g()\nend"
 
-  @tool_names ~w(list_universes create_universe stage_patch unstage list_staged read symbols eval test history health list_deployments create_deployment)
+  @tool_names ~w(list_universes create_universe stage_patch unstage list_staged read symbols eval test history health list_deployments create_deployment guide)
 
   # ---------- helpers ----------
 
@@ -325,6 +325,40 @@ defmodule KinokoWeb.McpTest do
       assert text =~ "http://localhost:#{KinokoWeb.Endpoint.config(:http)[:port]}/"
     end
 
+    # Claude Code shows a server's instructions only up to about 4096
+    # characters: what prevents the run's errors must come before that.
+    test "the facts that prevent the run's errors fit in the first 4000 characters", %{
+      conn: conn
+    } do
+      head = KinokoWeb.Mcp.Instructions.head()
+      assert String.length(head) <= 4000, "head is #{String.length(head)} characters"
+      assert String.starts_with?(instructions(conn), head)
+
+      for fact <-
+            [
+              "`guide`",
+              "NO list patterns",
+              "there is no `t.0`",
+              "no List.find",
+              "List.head(List.filter(",
+              "bare declaration",
+              "There is no on-input",
+              "on-change={",
+              "no `(a, b) = e`",
+              "create_deployment",
+              "Counter.Routes",
+              "SERVING YOUR APP"
+            ],
+          do: assert(head =~ fact, "the head lacks #{fact}")
+    end
+
+    test "guide answers the whole instructions", %{conn: conn} do
+      text = ok!(conn, "guide", %{})
+      assert text == instructions(conn)
+      assert text =~ "THE WHOLE STDLIB"
+      assert text =~ "DECLARATIONS"
+    end
+
     test "every code example promotes, in order, in a fresh universe", %{conn: conn, u: u} do
       text = instructions(conn)
 
@@ -376,7 +410,7 @@ defmodule KinokoWeb.McpTest do
                "expected a pattern, got '['"
 
       # Tuple element access.
-      assert text =~ "No `t.0`"
+      assert text =~ "there is no `t.0`"
 
       assert err!(conn, "eval", %{"universe" => u, "expression" => "Counter.init().0"}) =~
                "[parse]"

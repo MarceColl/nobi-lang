@@ -10,6 +10,11 @@ defmodule KinokoWeb.Mcp.Instructions do
   in order into a fresh universe (each must promote), so they cannot drift
   either. The "there is no ..." facts are each asserted against the parser
   and checker by the MCP tests.
+
+  Claude Code shows only the first ~4096 characters of a server's
+  instructions, so the text opens with `head/0` (kept under 4000 by a
+  test): the facts that cost the most in a real agent run, and a pointer to
+  the `guide` tool, which answers the whole text.
   """
 
   alias Kinoko.Lang.Format
@@ -101,35 +106,71 @@ defmodule KinokoWeb.Mcp.Instructions do
   end
   """
 
+  # What an agent must see first. Claude Code shows a server's instructions
+  # only up to about 4096 characters, so this part (with the "serving at"
+  # line before it) must fit in 4000 (a test checks): the facts whose
+  # absence cost the most in a real agent run, and the pointer to `guide`.
   @head """
-  Kinoko is a code database, not a filesystem with a compiler. Every declaration
-  is stored by content; you change the code by staging a patch that either
-  PROMOTES (the whole committed image still typechecks) or stays staged carrying
-  the exact reasons it cannot. You get a precise verdict on every attempt, so
-  small patches read for their reasons are the fast path, not writing a lot and
-  hoping.
+  Kinoko is a code database. You change code by staging a patch that either
+  PROMOTES (the whole committed image still typechecks) or stays staged with
+  the exact reasons it cannot. Small patches read for their reasons are the
+  fast path.
 
-  The code lives in UNIVERSES: independent, named code databases. Every tool
-  but `list_universes`, `create_universe` and `list_deployments` takes an
-  optional `universe` (default "main", which is shared). To experiment
-  without touching main, `create_universe` and pass its name everywhere;
-  `list_universes` shows what exists.
+  CALL `guide` BEFORE YOUR FIRST PATCH: your client may cut these
+  instructions short, and it holds the rest: a whole app with every
+  declaration form, events and forms, stored data, and the whole stdlib.
 
-  The language is Yabu: defmodel / deftype / def / deftest / defapp. An app is one
-  Elm-style loop: init() -> (Model, Cmd<Msg>), update(msg, model) -> (Model,
-  Cmd<Msg>), view(model) -> Html<Msg>, with JSX styled by Tailwind classes.
+  Code lives in UNIVERSES (named code databases). Every tool but
+  `list_universes`, `create_universe`, `list_deployments` and `guide` takes an
+  optional `universe` (default "main", which is shared).
 
-  THE SYNTAX YOU CANNOT GUESS (it is Elixir-flavoured, not ML- or JS-flavoured)
-    %App.Model{count: 1, name: "x"}   construct; there is NO Model(...), .new or .create
+  The language is Yabu: defmodel / deftype / def / deftest / defapp / defroutes.
+  An app is one Elm-style loop: init() -> (Model, Cmd<Msg>), update(msg, model)
+  -> (Model, Cmd<Msg>), view(model) -> Html<Msg>, JSX styled by Tailwind.
+
+  THE SYNTAX YOU CANNOT GUESS (Elixir-flavoured, not ML or JS)
+    %App.Model{count: 1, name: "x"}   construct; NO Model(...), .new or .create
     %App.Model{row | count: 2}        update a copy; there is no assignment
-    %{"k" => v}                       map literal        [1, 2]  list literal
-    case msg do App.Msg.Add(n) -> ... end                match (`do`, never `of`)
-    if c do a else b end                                 if is an expression
-    fn (x : Int) -> x + 1 end                            lambda
-    Option.Some(x) / Option.None                         variants are qualified too
-    deftest App.adds do always(App.add(1, 2) == 3) end   a test asserts with always
+    %{"k" => v}   [1, 2]              map and list literals
+    case msg do App.Msg.Add(n) -> ... end    match (`do`, never `of`)
+    if c do a else b end              an expression; else is required
+    fn (x : Int) -> x + 1 end         lambda
+    x = e                             binds ONE name; no `(a, b) = e`
+    case t do (m, cmd) -> m end       take a tuple apart; there is no `t.0`
+    Option.Some(x) / Option.None      variants are qualified too
+    deftest App.adds do always(App.add(1, 2) == 3) end
   Every name is fully qualified everywhere: `App.helper(x)`, never `helper(x)`.
+  A pattern is `_`, a lowercase name, an Int, String, true or false, a tuple
+  or a variant. NO list patterns (`[]`, `[x | rest]`): use
+  `case List.head(xs) do Option.Some(x) -> ... Option.None -> ... end`.
+  There is no List.find: `List.head(List.filter(xs, fn (x : T) -> ... end))`.
+  `defapp App` is a bare declaration: no `do` block, no options. It needs
+  App.Model, App.Msg, App.init, App.update and App.view.
+  Events: on-click, on-blur, on-focus, on-keydown, on-keyup and on-submit (on
+  a <form>) take a message VALUE. Text comes in only through on-change on an
+  input, textarea or select: an unapplied constructor of one String
+  (`on-change={App.Msg.SetTitle}`), sent with the text on every edit.
+  There is no on-input.
 
+  THE LOOP
+  1. Look first: `symbols`, then `read` what you will touch.
+  2. `stage_patch` with a patch id and source (`remove` deletes symbols).
+  3. `promoted: ids` is committed. `staged: id` is NOT success: fix each
+     `- symbol [code] message` reason and restage THE SAME id.
+  4. Prove it: `eval` an expression (`value : type`), `test` a deftest.
+
+  SERVING YOUR APP
+  `defroutes Main` is served at http://localhost:<port>/ by the built-in
+  `local` deployment. To give an app its own address, give it a route table:
+  #{@routes_example |> String.trim_trailing() |> String.split("\n") |> Enum.map_join("\n", &String.trim_trailing("  " <> &1))}
+  and call `create_deployment` (name "counter", routes "Counter.Routes"): it
+  serves at http://counter.localhost:<port>/ and follows the universe's head,
+  so every promotion is live at once. `list_deployments` shows them all.
+  There is no other way to make a deployment.
+  """
+
+  # The rest: `guide` answers the whole text.
+  @body """
   DECLARATIONS: one whole app, every form you need (it promotes as written)
   #{@example |> String.trim_trailing() |> String.split("\n") |> Enum.map_join("\n", &String.trim_trailing("  " <> &1))}
 
@@ -139,27 +180,18 @@ defmodule KinokoWeb.Mcp.Instructions do
   - def: every parameter and the return type annotated; the body's last
     expression is the value. `next = expr` binds a local (no reassignment).
   - case arms are `Pattern -> expr`, one per line, and must cover every
-    variant; `if c do a else b end` is an expression. A pattern is `_`, a
-    lowercase name (binds), an Int, String, true or false, a tuple `(a, b)`
-    or a variant `Counter.Msg.Add(n)`. NO list patterns (`[]`, `[x | rest]`):
-    `case List.head(xs) do Option.Some(x) -> ... Option.None -> ... end`.
-    No `t.0` either: take a tuple apart with `case t do (m, cmd) -> m end`.
+    variant.
   - JSX: attributes are strings or `{expr}`; `{expr}` in a body renders its
-    value. on-click, on-blur, on-focus, on-keydown, on-keyup and on-submit
-    (on a <form>) take a message VALUE and send it to update. Text comes in
-    only through on-change on an input, textarea or select: an unapplied
-    constructor of one String (`on-change={Counter.Msg.Rename}`), sent with
-    the text on every edit. There is no on-input; any other on-* does
-    nothing. A text input and a submit button:
+    value. Any on-* other than the events above does nothing. A text input
+    and a submit button:
   #{@form_example |> String.trim_trailing() |> String.split("\n") |> Enum.map_join("\n", &String.trim_trailing("    " <> &1))}
-  - `defapp Counter` is a bare declaration: no `do` block, no options. Its
-    name ends in a capitalized segment, and it needs Counter.Model (a
-    defmodel), Counter.Msg (a deftype) and exactly
-    `Counter.init() : (Counter.Model, Cmd<Counter.Msg>)`,
+  - `defapp Counter` names an app; its name ends in a capitalized segment,
+    and it needs Counter.Model (a defmodel), Counter.Msg (a deftype) and
+    exactly `Counter.init() : (Counter.Model, Cmd<Counter.Msg>)`,
     `Counter.update(msg : Counter.Msg, model : Counter.Model) : (Counter.Model, Cmd<Counter.Msg>)`,
     `Counter.view(model : Counter.Model) : Html<Counter.Msg>`.
-  - defroutes Main maps URL paths to apps; a deployment serves one route table
-    (`Main` is what the local deployment serves). `:name` captures a segment
+  - defroutes maps URL paths to apps; a deployment serves one route table.
+    `:name` captures a segment
     and is passed to the app's `init` as a parameter, typed Int, String or
     Uuid: `"/post/:id" -> Forum.Post` needs
     `def Forum.Post.init(id : Uuid) : (Forum.Post.Model, Cmd<Forum.Post.Msg>)`
@@ -171,28 +203,8 @@ defmodule KinokoWeb.Mcp.Instructions do
     when it takes none. Promotion checks that the target is an app and the
     args fit its init; whether a route reaches it is checked at run time, by
     the deployment serving the page (with none, the page shows an error).
-
-  THE LOOP
-  1. Look first: `symbols` (every committed signature), then `read` the
-     declarations you will touch. `history` shows what promoted, and when.
-  2. `stage_patch` with a patch id and source (and `remove` to delete symbols).
-  3. Read the verdict. `promoted: ids` means it is committed. `staged: id` is NOT
-     success: the patch is inert, and each `- symbol [code] message` line says
-     why. Fix the reasons and restage THE SAME id (`list_staged` shows every
-     staged patch, its reasons and source; `unstage` drops one).
-  4. Prove it: `eval` an expression against the committed code (it answers
-     `value : type`), and `test` a deftest.
-
-  SERVING YOUR APP
-  - `defroutes Main` is served at http://localhost:<port>/ by the built-in
-    `local` deployment.
-  - To give an app its own address, give it a route table:
-  #{@routes_example |> String.trim_trailing() |> String.split("\n") |> Enum.map_join("\n", &String.trim_trailing("    " <> &1))}
-    and call `create_deployment` with name "counter" and routes
-    "Counter.Routes": it serves at http://counter.localhost:<port>/ (the
-    answer gives the exact URL). It follows the universe's head, so every
-    promotion is live at once. `list_deployments` shows each deployment and
-    its URLs. There is no other way to make one.
+  - `list_staged` shows every staged patch, its reasons and source;
+    `unstage` drops one. `history` shows what promoted, and when.
 
   WHAT COSTS THE MOST REWORK
   - A patch replaces the declarations it names WHOLE. `read` before modifying,
@@ -263,6 +275,18 @@ defmodule KinokoWeb.Mcp.Instructions do
     code wrote; the newer fields are ignored.
   """
 
+  @doc """
+  The part every client shows: `text/0` up to the end of SERVING YOUR APP.
+  Claude Code cuts a server's instructions at about 4096 characters.
+  """
+  @spec head() :: String.t()
+  def head do
+    port = Integer.to_string(KinokoWeb.Mcp.Tools.port())
+    String.replace(serving(port) <> @head, "<port>", port)
+  end
+
+  defp serving(port), do: "Kinoko is serving at http://localhost:#{port}/.\n\n"
+
   @doc "The worked example the DECLARATIONS section shows: Yabu source that promotes."
   @spec example() :: String.t()
   def example, do: @example
@@ -282,8 +306,7 @@ defmodule KinokoWeb.Mcp.Instructions do
   def text do
     port = Integer.to_string(KinokoWeb.Mcp.Tools.port())
 
-    "Kinoko is serving at http://localhost:#{port}/.\n\n" <>
-      String.replace(@head, "<port>", port) <> "\n" <> stdlib()
+    String.replace(serving(port) <> @head <> "\n" <> @body, "<port>", port) <> "\n" <> stdlib()
   end
 
   defp stdlib do

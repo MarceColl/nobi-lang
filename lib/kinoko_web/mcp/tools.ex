@@ -3,8 +3,8 @@ defmodule KinokoWeb.Mcp.Tools do
   The MCP tools: each maps its arguments onto one `Kinoko.Universe`
   function and answers agent-readable text.
 
-  Every tool but `list_universes`, `create_universe` and `list_deployments`
-  takes an optional `universe` (default `"main"`). `create_deployment` takes
+  Every tool but `guide`, `list_universes`, `create_universe` and
+  `list_deployments` takes an optional `universe` (default `"main"`). `create_deployment` takes
   one too: a deployment serves one universe, and like every other tool it
   acts on main unless told otherwise. `list_deployments` lists them all,
   whatever universe each serves. The deployment tools go through
@@ -31,6 +31,10 @@ defmodule KinokoWeb.Mcp.Tools do
   }
 
   @tools [
+    {"guide",
+     "The whole instructions: a worked app with every declaration form, events and forms, " <>
+       "serving, stored data and the whole stdlib. Read it before your first patch: clients " <>
+       "often show the server instructions cut short.", %{}, []},
     {"list_universes", "List every universe by name. Start here.", %{}, []},
     {"create_universe",
      "Create an empty universe to work in without touching \"main\". Names match #{@name_rule}.",
@@ -102,7 +106,7 @@ defmodule KinokoWeb.Mcp.Tools do
      }, ["name", "routes"]}
   ]
 
-  @no_universe ["list_universes", "create_universe", "list_deployments"]
+  @no_universe ["guide", "list_universes", "create_universe", "list_deployments"]
 
   @doc "Every tool, as `tools/list` gives it."
   @spec list() :: [map()]
@@ -138,6 +142,8 @@ defmodule KinokoWeb.Mcp.Tools do
   defp text_result(text, error?), do: %{content: [%{type: "text", text: text}], isError: error?}
 
   ## The tools
+
+  defp run("guide", _args), do: {:ok, KinokoWeb.Mcp.Instructions.text()}
 
   defp run("list_universes", _args) do
     case Universe.list() do
