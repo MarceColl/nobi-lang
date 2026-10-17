@@ -347,7 +347,10 @@ defmodule KinokoWeb.McpTest do
               "no `(a, b) = e`",
               "create_deployment",
               "Counter.Routes",
-              "SERVING YOUR APP"
+              "SERVING YOUR APP",
+              "ONE expression",
+              "never a type\nvariable",
+              "trimmed at both ends"
             ],
           do: assert(head =~ fact, "the head lacks #{fact}")
     end
@@ -429,6 +432,19 @@ defmodule KinokoWeb.McpTest do
 
       assert stage.(view.("on-input")) =~ "[bad-event] on-input needs a message value"
       assert stage.(view.("on-change")) == "promoted: p"
+
+      # A binding in a case arm.
+      assert stage.(
+               "def A.f(n : Int) : Int do\n  case n do\n    1 ->\n      m = n + 1\n      m\n    _ -> 0\n  end\nend"
+             ) =~
+               "expected a pattern, got '='"
+
+      # A type variable in an annotation.
+      assert stage.("def A.header() : Html<a> do\n  <h1>Hi</h1>\nend") =~ "unknown type `a`"
+
+      # JSX text is trimmed at both ends.
+      assert ok!(conn, "eval", %{"universe" => u, "expression" => "<span>by {\"x\"}</span>"}) =~
+               ~s|<span>by{"x"}</span>|
 
       # List.find.
       assert err!(conn, "eval", %{

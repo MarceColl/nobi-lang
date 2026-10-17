@@ -151,6 +151,11 @@ defmodule KinokoWeb.Mcp.Instructions do
   input, textarea or select: an unapplied constructor of one String
   (`on-change={App.Msg.SetTitle}`), sent with the text on every edit.
   There is no on-input.
+  A case arm's body is ONE expression: no `x = e` in it (bind before the
+  case, or call a helper). Annotations name concrete types, never a type
+  variable: a shared view helper returns `Html<App.Msg>`, not `Html<a>`.
+  JSX text is trimmed at both ends: `by {name}` shows "byname"; write
+  `{String.concat("by ", name)}`.
 
   THE LOOP
   1. Look first: `symbols`, then `read` what you will touch.
