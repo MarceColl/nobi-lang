@@ -5,8 +5,11 @@ defmodule KinokoWeb.Mcp.Instructions do
   the syntax you cannot guess, the stage loop, what costs rework), keeping
   only what this server has. The stdlib list is generated from the
   stdlib's own table (`Kinoko.Lang.Rt.Stdlib` / `Kinoko.Lang.Types.Stdlib`),
-  so it cannot drift; the DECLARATIONS example is `example/0`, which a test
-  stages into a fresh universe (it must promote), so it cannot drift either.
+  so it cannot drift; the code examples are `examples/0` (the DECLARATIONS
+  app, then the form and the route table built on it), which a test stages
+  in order into a fresh universe (each must promote), so they cannot drift
+  either. The "there is no ..." facts are each asserted against the parser
+  and checker by the MCP tests.
   """
 
   alias Kinoko.Lang.Format
@@ -81,6 +84,23 @@ defmodule KinokoWeb.Mcp.Instructions do
   end
   """
 
+  # A text input and a submit button, on the example's Counter.
+  @form_example """
+  def Counter.form(model : Counter.Model) : Html<Counter.Msg> do
+    <form on-submit={Counter.Msg.Save}>
+      <input value={model.label} on-change={Counter.Msg.Rename} />
+      <button type="submit">Save</button>
+    </form>
+  end
+  """
+
+  # A route table of the app's own, for `create_deployment`.
+  @routes_example """
+  defroutes Counter.Routes do
+    "/" -> Counter
+  end
+  """
+
   @head """
   Kinoko is a code database, not a filesystem with a compiler. Every declaration
   is stored by content; you change the code by staging a patch that either
@@ -90,7 +110,8 @@ defmodule KinokoWeb.Mcp.Instructions do
   hoping.
 
   The code lives in UNIVERSES: independent, named code databases. Every tool
-  takes an optional `universe` (default "main", which is shared). To experiment
+  but `list_universes`, `create_universe` and `list_deployments` takes an
+  optional `universe` (default "main", which is shared). To experiment
   without touching main, `create_universe` and pass its name everywhere;
   `list_universes` shows what exists.
 
@@ -118,10 +139,25 @@ defmodule KinokoWeb.Mcp.Instructions do
   - def: every parameter and the return type annotated; the body's last
     expression is the value. `next = expr` binds a local (no reassignment).
   - case arms are `Pattern -> expr`, one per line, and must cover every
-    variant; `if c do a else b end` is an expression.
-  - JSX: attributes are strings or `{expr}`; `on-click={Msg}` sends that
-    message to update; `{expr}` in a body renders its value.
-  - defapp Counter wires Counter.init / Counter.update / Counter.view.
+    variant; `if c do a else b end` is an expression. A pattern is `_`, a
+    lowercase name (binds), an Int, String, true or false, a tuple `(a, b)`
+    or a variant `Counter.Msg.Add(n)`. NO list patterns (`[]`, `[x | rest]`):
+    `case List.head(xs) do Option.Some(x) -> ... Option.None -> ... end`.
+    No `t.0` either: take a tuple apart with `case t do (m, cmd) -> m end`.
+  - JSX: attributes are strings or `{expr}`; `{expr}` in a body renders its
+    value. on-click, on-blur, on-focus, on-keydown, on-keyup and on-submit
+    (on a <form>) take a message VALUE and send it to update. Text comes in
+    only through on-change on an input, textarea or select: an unapplied
+    constructor of one String (`on-change={Counter.Msg.Rename}`), sent with
+    the text on every edit. There is no on-input; any other on-* does
+    nothing. A text input and a submit button:
+  #{@form_example |> String.trim_trailing() |> String.split("\n") |> Enum.map_join("\n", &String.trim_trailing("    " <> &1))}
+  - `defapp Counter` is a bare declaration: no `do` block, no options. Its
+    name ends in a capitalized segment, and it needs Counter.Model (a
+    defmodel), Counter.Msg (a deftype) and exactly
+    `Counter.init() : (Counter.Model, Cmd<Counter.Msg>)`,
+    `Counter.update(msg : Counter.Msg, model : Counter.Model) : (Counter.Model, Cmd<Counter.Msg>)`,
+    `Counter.view(model : Counter.Model) : Html<Counter.Msg>`.
   - defroutes Main maps URL paths to apps; a deployment serves one route table
     (`Main` is what the local deployment serves). `:name` captures a segment
     and is passed to the app's `init` as a parameter, typed Int, String or
@@ -146,6 +182,17 @@ defmodule KinokoWeb.Mcp.Instructions do
      staged patch, its reasons and source; `unstage` drops one).
   4. Prove it: `eval` an expression against the committed code (it answers
      `value : type`), and `test` a deftest.
+
+  SERVING YOUR APP
+  - `defroutes Main` is served at http://localhost:<port>/ by the built-in
+    `local` deployment.
+  - To give an app its own address, give it a route table:
+  #{@routes_example |> String.trim_trailing() |> String.split("\n") |> Enum.map_join("\n", &String.trim_trailing("    " <> &1))}
+    and call `create_deployment` with name "counter" and routes
+    "Counter.Routes": it serves at http://counter.localhost:<port>/ (the
+    answer gives the exact URL). It follows the universe's head, so every
+    promotion is live at once. `list_deployments` shows each deployment and
+    its URLs. There is no other way to make one.
 
   WHAT COSTS THE MOST REWORK
   - A patch replaces the declarations it names WHOLE. `read` before modifying,
@@ -220,10 +267,23 @@ defmodule KinokoWeb.Mcp.Instructions do
   @spec example() :: String.t()
   def example, do: @example
 
-  @doc "The instructions text, with the stdlib generated from its table."
+  @doc """
+  Every code example the instructions show, in order: each promotes when
+  staged after the ones before it.
+  """
+  @spec examples() :: [String.t()]
+  def examples, do: [@example, @form_example, @routes_example]
+
+  @doc """
+  The instructions text, with the stdlib generated from its table and
+  `<port>` the port the endpoint listens on.
+  """
   @spec text() :: String.t()
   def text do
-    @head <> "\n" <> stdlib()
+    port = Integer.to_string(KinokoWeb.Mcp.Tools.port())
+
+    "Kinoko is serving at http://localhost:#{port}/.\n\n" <>
+      String.replace(@head, "<port>", port) <> "\n" <> stdlib()
   end
 
   defp stdlib do
@@ -244,6 +304,8 @@ defmodule KinokoWeb.Mcp.Instructions do
     Cmd<msg>, Html<msg>. Stdlib types: #{Enum.join(types, "; ")}.
     #{Enum.join(defs, "\n")}
     Map.keys/values/to_list come out in key order; there is no `m[k]`, use Map.get.
+    There is no List.find: `List.head(List.filter(xs, fn (x : T) -> ... end))`
+    gives an Option<T>.
     That is all of it. If what you need is not listed, write it as your own def
     (fully qualified, in your patch) and say so rather than inventing a function.
     """

@@ -297,6 +297,116 @@ defmodule KinokoWeb.McpTest do
     end
   end
 
+  describe "instructions: facts from a real agent run" do
+    defp instructions(conn) do
+      {200, %{"result" => %{"instructions" => text}}} = rpc(conn, "initialize", %{})
+      text
+    end
+
+    test "every tool the instructions name exists, and the deployment tools are named", %{
+      conn: conn
+    } do
+      text = instructions(conn)
+      tools = Enum.map(KinokoWeb.Mcp.Tools.list(), & &1.name)
+
+      for tool <- tools, do: assert(text =~ "`#{tool}`" or text =~ tool, "unmentioned: #{tool}")
+
+      named =
+        Regex.scan(~r/`([a-z]+_[a-z_]+)`/, text, capture: :all_but_first)
+        |> List.flatten()
+        |> Enum.uniq()
+
+      for name <- named,
+          String.contains?(name, ["deploy", "stage", "universe"]),
+          do: assert(name in tools, "the instructions name a tool that does not exist: #{name}")
+
+      assert text =~ "create_deployment"
+      assert text =~ "list_deployments"
+      assert text =~ "http://localhost:#{KinokoWeb.Endpoint.config(:http)[:port]}/"
+    end
+
+    test "every code example promotes, in order, in a fresh universe", %{conn: conn, u: u} do
+      text = instructions(conn)
+
+      for {source, i} <- Enum.with_index(KinokoWeb.Mcp.Instructions.examples()) do
+        for line <- String.split(source, "\n", trim: true),
+            do: assert(text =~ String.trim(line), "the instructions lack: #{line}")
+
+        assert ok!(conn, "stage_patch", %{"universe" => u, "id" => "ex#{i}", "source" => source}) ==
+                 "promoted: ex#{i}"
+      end
+    end
+
+    test "the documented idioms work: List.head of List.filter, a tuple taken apart by case",
+         %{conn: conn, u: u} do
+      text = instructions(conn)
+      assert text =~ "no List.find"
+      assert text =~ "List.head(List.filter("
+
+      assert ok!(conn, "eval", %{
+               "universe" => u,
+               "expression" => "List.head(List.filter([1, 2, 3], fn (x : Int) -> x > 1 end))"
+             }) == "Option.Some(2) : Option<Int>"
+
+      assert ok!(conn, "eval", %{
+               "universe" => u,
+               "expression" => "case (1, \"a\") do\n  (n, s) -> n\nend"
+             }) == "1 : Int"
+    end
+
+    # Each "there is no X" the instructions state is still true: if the
+    # language gains one, this fails and the instructions must change.
+    test "what the instructions say does not exist, does not", %{conn: conn, u: u} do
+      text = instructions(conn)
+      [example | _] = KinokoWeb.Mcp.Instructions.examples()
+
+      "promoted: ex" =
+        ok!(conn, "stage_patch", %{"universe" => u, "id" => "ex", "source" => example})
+
+      stage = fn source ->
+        ok!(conn, "stage_patch", %{"universe" => u, "id" => "p", "source" => source})
+      end
+
+      # List patterns.
+      assert text =~ "NO list patterns"
+
+      assert stage.(
+               "def A.first(xs : List<Int>) : Int do\n  case xs do\n    [x | _] -> x\n    [] -> 0\n  end\nend"
+             ) =~
+               "expected a pattern, got '['"
+
+      # Tuple element access.
+      assert text =~ "No `t.0`"
+
+      assert err!(conn, "eval", %{"universe" => u, "expression" => "Counter.init().0"}) =~
+               "[parse]"
+
+      # defapp takes no block.
+      assert text =~ "bare declaration"
+      assert stage.("defapp Counter do\n  init: Counter.init\nend") =~ "[parse]"
+      assert stage.("defapp counter") =~ "must end in a capitalized segment"
+
+      # on-input does not take a String constructor; on-change does.
+      assert text =~ "There is no on-input"
+
+      view = fn attr ->
+        "def Counter.box(model : Counter.Model) : Html<Counter.Msg> do\n  <input value={model.label} #{attr}={Counter.Msg.Rename} />\nend"
+      end
+
+      assert stage.(view.("on-input")) =~ "[bad-event] on-input needs a message value"
+      assert stage.(view.("on-change")) == "promoted: p"
+
+      # List.find.
+      assert err!(conn, "eval", %{
+               "universe" => u,
+               "expression" => "List.find([1], fn (x : Int) -> true end)"
+             }) =~
+               "no `List.find`"
+    end
+  end
+
+  # ---------- tools ----------
+
   # ---------- tools ----------
 
   describe "tools/list" do

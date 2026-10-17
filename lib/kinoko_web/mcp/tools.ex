@@ -360,8 +360,9 @@ defmodule KinokoWeb.Mcp.Tools do
 
   defp host_url(host), do: "http://#{host}:#{port()}/"
 
-  # The port the endpoint really listens on.
-  defp port do
+  @doc "The port the endpoint listens on, as the deployment URLs give it."
+  @spec port() :: :inet.port_number()
+  def port do
     case KinokoWeb.Endpoint.config(:http)[:port] do
       port when is_integer(port) -> port
       _ -> URI.parse(KinokoWeb.Endpoint.url()).port
