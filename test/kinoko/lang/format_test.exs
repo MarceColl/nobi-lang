@@ -54,6 +54,80 @@ defmodule Kinoko.Lang.FormatTest do
     end
   end
 
+  describe "JSX text round trips (React's whitespace rule)" do
+    defp jsx_round_trips(src) do
+      program = parse!("def X.f() : Html<X.Msg> do\n  #{src}\nend")
+      text = Format.program(program)
+      again = parse!(text)
+      assert strip(again) == strip(program), "#{src}\n--- formatted ---\n#{text}"
+      assert Format.program(again) == text, src
+      text
+    end
+
+    test "in-line spaces survive, inline and one child per line" do
+      for src <- [
+            "<span>by {name}</span>",
+            "<span>{a} {b}</span>",
+            "<p> hi </p>",
+            "<p>{a} x{b} and <b>c</b> d </p>",
+            "<li><span>x</span> <span>y</span></li>",
+            "<div class=\"#{String.duplicate("x", 90)}\"> lead {a} {b} <i>e</i> trail </div>",
+            "<div><h1>T</h1> by {a}, {b}<p>x</p></div>"
+          ],
+          do: jsx_round_trips(src)
+    end
+
+    test "inline output keeps the spaces as written" do
+      assert jsx_round_trips("<span>by {name}</span>") =~ "<span>by {name}</span>"
+    end
+
+    # Random children: texts with and without edge spaces, exprs and
+    # elements, at random depth. parse(format(parse(s))) == parse(s).
+    test "generated children round trip" do
+      :rand.seed(:exsss, {7, 11, 13})
+
+      for _ <- 1..300, do: jsx_round_trips(gen_el(3))
+    end
+
+    defp gen_el(0), do: "<i>{z}</i>"
+
+    defp gen_el(depth) do
+      n = :rand.uniform(5) - 1
+      kids = for _ <- 1..n//1, do: gen_kid(depth - 1)
+      tag = Enum.random(~w(div span p))
+
+      cls =
+        if :rand.uniform(3) == 1,
+          do: " class=\"#{String.duplicate("c", :rand.uniform(100))}\"",
+          else: ""
+
+      "<#{tag}#{cls}>#{merge_texts(kids)}</#{tag}>"
+    end
+
+    defp gen_kid(depth) do
+      case :rand.uniform(3) do
+        1 ->
+          {:text,
+           Enum.random(["", " "]) <>
+             Enum.random(["a", "b c", "d  e"]) <> Enum.random(["", " ", "  "])}
+
+        2 ->
+          "{#{Enum.random(~w(a b c))}}"
+
+        3 ->
+          gen_el(depth)
+      end
+    end
+
+    # Adjacent texts are one text in the tree, so the generator joins them.
+    defp merge_texts(kids) do
+      Enum.map_join(kids, "", fn
+        {:text, t} -> t
+        s -> s
+      end)
+    end
+  end
+
   describe "expression edge cases survive formatting" do
     test "precedence and associativity" do
       for src <- [

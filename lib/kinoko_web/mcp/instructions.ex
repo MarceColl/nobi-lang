@@ -156,8 +156,6 @@ defmodule KinokoWeb.Mcp.Instructions do
   A case arm's body is ONE expression: no `x = e` in it (bind before the
   case, or call a helper). Annotations name concrete types, never a type
   variable: a shared view helper returns `Html<App.Msg>`, not `Html<a>`.
-  JSX text is trimmed at both ends: `by {name}` shows "byname"; write
-  `{String.concat("by ", name)}`.
 
   THE LOOP
   1. Look first: `symbols`, then `read` what you will touch.

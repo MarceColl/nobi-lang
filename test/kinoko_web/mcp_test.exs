@@ -350,7 +350,6 @@ defmodule KinokoWeb.McpTest do
               "SERVING YOUR APP",
               "ONE expression",
               "never a type\nvariable",
-              "trimmed at both ends",
               "no `!`, `&&` or `||`",
               "Construction lists EVERY field"
             ],
@@ -452,9 +451,9 @@ defmodule KinokoWeb.McpTest do
       # A type variable in an annotation.
       assert stage.("def A.header() : Html<a> do\n  <h1>Hi</h1>\nend") =~ "unknown type `a`"
 
-      # JSX text is trimmed at both ends.
+      # JSX text keeps its in-line spaces (React's rule).
       assert ok!(conn, "eval", %{"universe" => u, "expression" => "<span>by {\"x\"}</span>"}) =~
-               ~s|<span>by{"x"}</span>|
+               ~s|<span>by {"x"}</span>|
 
       # Boolean operators are words.
       assert err!(conn, "eval", %{"universe" => u, "expression" => "!true"}) =~ "[parse]"

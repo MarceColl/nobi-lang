@@ -124,7 +124,9 @@ defmodule Kinoko.Exec.ShowTest do
          text("Some text that runs on for quite a while"),
          text(" more")
        ])},
-      {"<p>one\ntwo</p>", element("p", [], [text("one\ntwo")])}
+      {~S(<p>{"one\ntwo"}</p>), element("p", [], [text("one\ntwo")])},
+      {"<p>by <b>x</b></p>", element("p", [], [text("by "), element("b", [], [text("x")])])},
+      {"<p> a  b </p>", element("p", [], [text(" a  b ")])}
     ]
 
     for {src, value} <- cases do

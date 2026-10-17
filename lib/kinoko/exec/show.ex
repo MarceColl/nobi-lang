@@ -325,9 +325,10 @@ defmodule Kinoko.Exec.Show do
   defp html_text(_), do: nil
 
   # Whether `text`, written as a JSX text child, reads back as itself: the
-  # parser ends a text run at `<` or `{` and trims it.
+  # parser ends a text run at `<` or `{`, and drops whitespace that holds a
+  # newline (spaces within a line stay).
   defp reads_back_as_text?(text),
-    do: text != "" and String.trim(text) == text and not String.contains?(text, ["<", "{"])
+    do: text != "" and not String.contains?(text, ["<", "{", "\n", "\r"])
 
   # A function's name, as far as its term tells it.
   defp fun_name(f) do

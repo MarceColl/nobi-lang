@@ -408,6 +408,25 @@ defmodule Kinoko.Lang.ParserTest do
                ])
     end
 
+    # React's rule: whitespace runs that hold a newline are layout and go;
+    # spaces within a line are content and stay.
+    test "JSX text keeps in-line spaces and drops layout whitespace" do
+      texts = fn src ->
+        {:jsx, [_, _, children]} = expr!(src)
+        for {:text, t} <- children, do: t
+      end
+
+      assert texts.("<span>by {name}</span>") == ["by "]
+      assert texts.("<span>{a} {b}</span>") == [" "]
+      assert texts.("<span>{a} x{b}</span>") == [" x"]
+      assert texts.("<p> hi </p>") == [" hi "]
+      assert texts.("<p>  two  spaces  </p>") == ["  two  spaces  "]
+      assert texts.("<p>\n  {a}\n  {b}\n</p>") == []
+      assert texts.("<p>\n  one\n    two  \n  three\n</p>") == ["one two three"]
+      assert texts.("<p>by \n  {a}</p>") == ["by"]
+      assert texts.("<p>{a}\n  , then</p>") == [", then"]
+    end
+
     test "text child with internal spaces" do
       assert {:jsx, [_, [], [{:text, "Clear done"}]]} = expr!("<button>Clear done</button>")
     end

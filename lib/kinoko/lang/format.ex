@@ -316,8 +316,37 @@ defmodule Kinoko.Lang.Format do
           if inline?(s, ind), do: s
         end
 
-      inline ||
-        "<#{tag}#{attrs_s}>\n#{Enum.map_join(cs, "\n", &(inner <> &1))}\n#{ind}</#{tag}>"
+      inline || "<#{tag}#{attrs_s}>#{block(children, cs, inner, ind)}</#{tag}>"
     end
   end
+
+  # One child per line, except where a line break would change the tree:
+  # the parser drops whitespace that holds a newline, so a text's leading
+  # space keeps it on the line before, and its trailing space keeps the
+  # next child on its line.
+  defp block(children, cs, inner, ind) do
+    edges = [nil | children] |> Enum.zip(children ++ [nil])
+    breaks = Enum.map(edges, fn {left, right} -> breakable?(left, right) end)
+    {first_break, between} = {hd(breaks), tl(breaks)}
+
+    body =
+      cs
+      |> Enum.zip(between)
+      |> Enum.map_join(fn
+        {c, true} -> c <> "\n" <> inner
+        {c, false} -> c
+      end)
+
+    # The last break closes on the element's own indent, not the children's.
+    body = if List.last(breaks), do: String.replace_suffix(body, inner, ind), else: body
+    if(first_break, do: "\n" <> inner, else: "") <> body
+  end
+
+  defp breakable?(left, right), do: not ends_in_space?(left) and not starts_with_space?(right)
+
+  defp ends_in_space?({:text, t}), do: String.trim_trailing(t) != t
+  defp ends_in_space?(_), do: false
+
+  defp starts_with_space?({:text, t}), do: String.trim_leading(t) != t
+  defp starts_with_space?(_), do: false
 end

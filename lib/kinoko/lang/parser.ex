@@ -1194,6 +1194,29 @@ defmodule Kinoko.Lang.Parser do
     end
   end
 
+  # React's rule for JSX text: a whitespace run that holds a newline is
+  # layout and goes (each line is trimmed where it meets a newline, empty
+  # lines dropped, the rest joined by one space); spaces within a line are
+  # content and stay, so `by {name}` keeps its space.
+  defp jsx_whitespace(text) do
+    case String.split(text, "\n") do
+      [one] ->
+        one
+
+      lines ->
+        last = length(lines) - 1
+
+        lines
+        |> Enum.with_index()
+        |> Enum.map(fn {line, i} ->
+          line = if i > 0, do: String.trim_leading(line), else: line
+          if i < last, do: String.trim_trailing(line), else: line
+        end)
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.join(" ")
+    end
+  end
+
   # `{e}`: one expression in normal mode, through its `}`; the caller resumes
   # raw mode (the `}` is checked, not advanced past).
   defp interpolation(p) do
@@ -1224,7 +1247,7 @@ defmodule Kinoko.Lang.Parser do
           )
       end
 
-    text = String.trim(text)
+    text = jsx_whitespace(text)
     acc = if text == "", do: acc, else: [{:text, text} | acc]
 
     case {Lexer.raw_peek(p.lx), Lexer.raw_peek2(p.lx)} do
