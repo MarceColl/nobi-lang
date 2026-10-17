@@ -1168,6 +1168,41 @@ defmodule Kinoko.Lang.CheckTest do
     assert first_error(src).code == "bad-event"
   end
 
+  @msg_e "deftype E.Msg do Set(String) | Go end\n"
+
+  test "an event the renderer does not wire is refused, naming the ones it does" do
+    for event <- ~w(dblclick mouseover hover x) do
+      src = @msg_e <> "def E.v() : Html<E.Msg> do <button on-#{event}={E.Msg.Go}>x</button> end"
+      assert [{"bad-event", message}] = found(src)
+      assert message =~ "on-#{event} is not an event Kinoko wires"
+      assert message =~ "on-click, on-blur, on-focus, on-keydown, on-keyup"
+    end
+  end
+
+  test "on-input is refused and points to on-change" do
+    for handler <- ["E.Msg.Set", "E.Msg.Go"] do
+      src = @msg_e <> "def E.v() : Html<E.Msg> do <input on-input={#{handler}} /> end"
+      assert [{"bad-event", message}] = found(src)
+      assert message =~ "use on-change={#{handler}}"
+    end
+  end
+
+  test "on-submit only on a form, on-change only on an input, textarea or select" do
+    all_ok(@msg_e <> "def E.v() : Html<E.Msg> do <form on-submit={E.Msg.Go}></form> end")
+
+    for tag <- ~w(input textarea select),
+        do:
+          all_ok(
+            @msg_e <> "def E.v() : Html<E.Msg> do <#{tag} on-change={E.Msg.Set}></#{tag}> end"
+          )
+
+    assert [{"bad-event", "on-submit works only on a <form>, not a <div>"}] =
+             found(@msg_e <> "def E.v() : Html<E.Msg> do <div on-submit={E.Msg.Go}></div> end")
+
+    assert [{"bad-event", "on-change works only on an input, textarea or select, not a <div>"}] =
+             found(@msg_e <> "def E.v() : Html<E.Msg> do <div on-change={E.Msg.Set}></div> end")
+  end
+
   test "on-change requires a 1-arity String constructor" do
     all_ok(
       "deftype E.Msg do Set(String) end\ndef E.v() : Html<E.Msg> do <input on-change={E.Msg.Set} /> end"

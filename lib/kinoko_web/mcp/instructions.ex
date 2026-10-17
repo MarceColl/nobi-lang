@@ -152,7 +152,7 @@ defmodule KinokoWeb.Mcp.Instructions do
   a <form>) take a message VALUE. Text comes in only through on-change on an
   input, textarea or select: an unapplied constructor of one String
   (`on-change={App.Msg.SetTitle}`), sent with the text on every edit.
-  There is no on-input.
+  Any other on-* (on-input too) is refused.
   A case arm's body is ONE expression: no `x = e` in it (bind before the
   case, or call a helper). Annotations name concrete types, never a type
   variable: a shared view helper returns `Html<App.Msg>`, not `Html<a>`.
@@ -189,7 +189,7 @@ defmodule KinokoWeb.Mcp.Instructions do
   - case arms are `Pattern -> expr`, one per line, and must cover every
     variant.
   - JSX: attributes are strings or `{expr}`; `{expr}` in a body renders its
-    value. Any on-* other than the events above does nothing. A text input
+    value. Any on-* other than the events above is refused. A text input
     and a submit button:
   #{@form_example |> String.trim_trailing() |> String.split("\n") |> Enum.map_join("\n", &String.trim_trailing("    " <> &1))}
   - `defapp Counter` names an app; its name ends in a capitalized segment,

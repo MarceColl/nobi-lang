@@ -111,6 +111,25 @@ defmodule KinokoWeb.YabuHtmlTest do
     assert attr(doc, "input", "maxlength") == []
   end
 
+  # The checker (Kinoko.Lang.Types.JsxApp.events/0) accepts exactly the
+  # events this renderer wires, on exactly the tags it wires them on.
+  test "every event the checker accepts is wired here, on its tags; no other is" do
+    msg = {:var, "T.Msg", "Go", []}
+    fun = fn s -> {:var, "T.Msg", "Set", [s]} end
+    all_tags = ~w(div button form input textarea select a)
+
+    for {event, tags} <- Kinoko.Lang.Types.JsxApp.events(), tag <- all_tags do
+      value = if event == "change", do: fun, else: msg
+      {_doc, handlers} = render(el(tag, [{"on-" <> event, value}]))
+      wired? = handlers != %{}
+      expected = tags == :any or tag in tags
+      assert wired? == expected, "on-#{event} on <#{tag}>: wired #{wired?}, checker #{expected}"
+    end
+
+    for event <- ~w(input dblclick mouseover change2),
+        do: assert(elem(render(el("input", [{"on-" <> event, msg}])), 1) == %{})
+  end
+
   test "on-click becomes phx-click=yabu:click with phx-value-click" do
     msg = {:var, "Todo.Msg", "Toggle", [{:uuid, "u1"}]}
     {doc, handlers} = render(el("button", [{"on-click", msg}], [txt("go")]))

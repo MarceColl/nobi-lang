@@ -13,6 +13,27 @@ defmodule Kinoko.Lang.Types.JsxApp do
 
   import Kinoko.Lang.Types.Check.Tree, only: [ty: 1, res: 1, put_ann: 3]
 
+  # The events the renderer (`KinokoWeb.YabuHtml`) wires, and the tags it
+  # wires each on (`:any` for every tag). `change` takes a String
+  # constructor; every other event a message value.
+  @events %{
+    "click" => :any,
+    "blur" => :any,
+    "focus" => :any,
+    "keydown" => :any,
+    "keyup" => :any,
+    "submit" => ["form"],
+    "change" => ["input", "textarea", "select"]
+  }
+
+  @doc """
+  The JSX events, `%{event => :any | [tag]}`: the only `on-<event>`
+  attributes that check, each only on its tags. `KinokoWeb.YabuHtml`
+  wires exactly these (a test holds the two together).
+  """
+  @spec events() :: %{String.t() => :any | [String.t()]}
+  def events, do: @events
+
   @doc "`Html<sends>`: what sends messages of type `sends`."
   def html(sends), do: {:applied, "Html", [sends]}
 
@@ -28,25 +49,35 @@ defmodule Kinoko.Lang.Types.JsxApp do
 
   defp element(ctx, {:jsx, m, [tag, attrs, children]}) do
     {sends, ctx} = Ctx.fresh(ctx)
-    {attrs, ctx} = Enum.map_reduce(attrs, ctx, &attr(&2, &1, sends))
+    {attrs, ctx} = Enum.map_reduce(attrs, ctx, &attr(&2, &1, tag, sends))
     {children, ctx} = Enum.map_reduce(children, ctx, &child(&2, &1, sends))
     {{:jsx, m, [tag, attrs, children]}, sends, ctx}
   end
 
-  defp attr(ctx, {:text, _, _} = a, _sends), do: {a, ctx}
+  defp attr(ctx, {:text, _, _} = a, _tag, _sends), do: {a, ctx}
 
-  defp attr(ctx, {:event, event, x}, sends) do
+  defp attr(ctx, {:event, event, x}, tag, sends) do
     {s, ctx} = Check.synth(ctx, x)
 
     ctx =
-      if event == "change",
-        do: check_change_handler(ctx, x, s, sends),
-        else: check_message(ctx, event, x, s, sends)
+      cond do
+        not Map.has_key?(@events, event) ->
+          Ctx.error(ctx, "bad-event", unknown_event(event, x))
+
+        @events[event] != :any and tag not in @events[event] ->
+          Ctx.error(ctx, "bad-event", wrong_tag(event, tag))
+
+        event == "change" ->
+          check_change_handler(ctx, x, s, sends)
+
+        true ->
+          check_message(ctx, event, x, s, sends)
+      end
 
     {{:event, event, s}, ctx}
   end
 
-  defp attr(ctx, {:expr, name, x}, _sends) do
+  defp attr(ctx, {:expr, name, x}, _tag, _sends) do
     {s, ctx} = Check.synth(ctx, x)
     {resolved, ctx} = Ctx.resolve_deep(ctx, ty(s), fn -> Quote.expr(x) end)
 
@@ -61,6 +92,23 @@ defmodule Kinoko.Lang.Types.JsxApp do
 
     {{:expr, name, s}, ctx}
   end
+
+  defp unknown_event("input", x) do
+    "on-input is not an event Kinoko wires: text comes in through on-change; use " <>
+      "on-change={#{Quote.expr(x)}} with an unapplied constructor of one String, which is " <>
+      "sent with the text on every edit"
+  end
+
+  defp unknown_event(event, _x) do
+    "on-#{event} is not an event Kinoko wires; the events are on-click, on-blur, on-focus, " <>
+      "on-keydown, on-keyup (a message value), on-submit (on a <form>, a message value) and " <>
+      "on-change (on an input, textarea or select, an unapplied String constructor)"
+  end
+
+  defp wrong_tag("submit", tag), do: "on-submit works only on a <form>, not a <#{tag}>"
+
+  defp wrong_tag("change", tag),
+    do: "on-change works only on an input, textarea or select, not a <#{tag}>"
 
   defp not_scalar(ctx, name, x, s) do
     shown = Ctx.format(ctx, ty(s))

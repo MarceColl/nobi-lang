@@ -342,7 +342,7 @@ defmodule KinokoWeb.McpTest do
               "no List.find",
               "List.head(List.filter(",
               "bare declaration",
-              "There is no on-input",
+              "Any other on-* (on-input too) is refused",
               "on-change={",
               "no `(a, b) = e`",
               "create_deployment",
@@ -425,14 +425,18 @@ defmodule KinokoWeb.McpTest do
       assert stage.("defapp Counter do\n  init: Counter.init\nend") =~ "[parse]"
       assert stage.("defapp counter") =~ "must end in a capitalized segment"
 
-      # on-input does not take a String constructor; on-change does.
-      assert text =~ "There is no on-input"
+      # on-input, like any event the renderer does not wire, is refused; on-change takes the constructor.
+      assert text =~ "Any other on-* (on-input too) is refused"
 
       view = fn attr ->
         "def Counter.box(model : Counter.Model) : Html<Counter.Msg> do\n  <input value={model.label} #{attr}={Counter.Msg.Rename} />\nend"
       end
 
-      assert stage.(view.("on-input")) =~ "[bad-event] on-input needs a message value"
+      assert stage.(view.("on-input")) =~ "[bad-event] on-input is not an event Kinoko wires"
+
+      assert stage.(view.("on-dblclick")) =~
+               "[bad-event] on-dblclick is not an event Kinoko wires"
+
       assert stage.(view.("on-change")) == "promoted: p"
 
       # A binding names one value.
