@@ -66,14 +66,30 @@ defmodule Kinoko.InstallShTest do
     stub(stubs, "uname", "case \"$1\" in -s) echo #{os};; -m) echo #{arch};; esac\n")
   end
 
-  defp install(env, stubs \\ nil) do
+  # Shells install.sh must work under; dash is skipped where it is absent.
+  @shells Enum.filter(["sh", "dash"], &System.find_executable/1)
+
+  defp install(env, stubs \\ nil, shell \\ "sh") do
     path = if stubs, do: stubs <> ":" <> System.get_env("PATH"), else: System.get_env("PATH")
-    System.cmd("sh", [@install], env: [{"PATH", path} | env], stderr_to_stdout: true)
+    System.cmd(shell, [@install], env: [{"PATH", path} | env], stderr_to_stdout: true)
   end
 
-  @tag :tmp_dir
-  test "clean install: executable, runs, hints about PATH, names the next step", ctx do
-    {out, 0} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}])
+  for shell <- @shells do
+    @shell shell
+    @tag :tmp_dir
+    test "clean install under #{shell}: executable, runs, hints about PATH, next step", ctx do
+      clean_install(ctx, @shell)
+    end
+
+    @tag :tmp_dir
+    test "checksum mismatch under #{shell} is refused and nothing is installed", ctx do
+      mismatch(ctx, @shell)
+    end
+  end
+
+  defp clean_install(ctx, shell) do
+    {out, 0} =
+      install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}], nil, shell)
 
     bin = Path.join(ctx.dir, "kinoko")
     assert File.regular?(bin)
@@ -82,7 +98,19 @@ defmodule Kinoko.InstallShTest do
     assert out =~ "is not on your PATH"
     assert out =~ ~s(export PATH="#{ctx.dir}:$PATH")
     assert out =~ "Next: run  kinoko"
-    assert Path.wildcard(Path.join(ctx.dir, ".kinoko.*")) == []
+    assert Path.wildcard(Path.join(ctx.dir, ".kinoko.*"), match_dot: true) == []
+  end
+
+  defp mismatch(ctx, shell) do
+    for t <- @targets, do: File.write!(Path.join(ctx.dist, "kinoko-#{t}"), "tampered\n")
+
+    {out, status} =
+      install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}], nil, shell)
+
+    assert status != 0
+    assert out =~ "checksum mismatch"
+    refute File.exists?(Path.join(ctx.dir, "kinoko"))
+    assert (File.ls(ctx.dir) |> elem(1)) in [[], :enoent]
   end
 
   @tag :tmp_dir
@@ -96,20 +124,6 @@ defmodule Kinoko.InstallShTest do
       )
 
     refute out =~ "not on your PATH"
-  end
-
-  @tag :tmp_dir
-  test "checksum mismatch is refused and nothing is installed", ctx do
-    target = Path.join(ctx.dist, "kinoko-macos-arm64")
-    File.write!(target, "tampered\n")
-    for t <- @targets, do: File.write!(Path.join(ctx.dist, "kinoko-#{t}"), "tampered\n")
-
-    {out, status} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}])
-
-    assert status != 0
-    assert out =~ "checksum mismatch"
-    refute File.exists?(Path.join(ctx.dir, "kinoko"))
-    assert (File.ls(ctx.dir) |> elem(1)) in [[], :enoent]
   end
 
   @tag :tmp_dir
@@ -163,6 +177,7 @@ defmodule Kinoko.InstallShTest do
           {"Linux", "amd64", "linux-x86_64"}
         ] do
       uname(ctx.stubs, "#{os}", "#{arch}")
+      stub(ctx.stubs, "sysctl", "echo 0\n")
       {_, 0} = install(env, ctx.stubs)
       assert {out, 0} = System.cmd(Path.join(ctx.dir, "kinoko"), [])
       assert out =~ "fake-kinoko #{target}"
@@ -240,5 +255,145 @@ defmodule Kinoko.InstallShTest do
     assert status == 0, out
     assert File.read!(wget) =~ "-q -O"
     assert File.exists?(Path.join(ctx.dir, "kinoko"))
+  end
+
+  @tag :tmp_dir
+  test "a failure after staging leaves no staged file and no temp dir", ctx do
+    tmpdir = Path.join(ctx.stubs, "tmp")
+    File.mkdir_p!(tmpdir)
+    stub(ctx.stubs, "mv", "exit 1\n")
+
+    {out, status} =
+      install(
+        [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}, {"TMPDIR", tmpdir}],
+        ctx.stubs
+      )
+
+    assert status != 0
+    assert out =~ "cannot install"
+    assert Path.wildcard(Path.join(ctx.dir, ".kinoko.*"), match_dot: true) == []
+    refute File.exists?(Path.join(ctx.dir, "kinoko"))
+    assert File.ls!(tmpdir) == []
+  end
+
+  @tag :tmp_dir
+  test "a signal after staging exits 130 and leaves nothing behind", ctx do
+    tmpdir = Path.join(ctx.stubs, "tmp")
+    File.mkdir_p!(tmpdir)
+    # mv signals its parent (the installer), then outlives the signal briefly.
+    stub(ctx.stubs, "mv", "kill -TERM $PPID\nsleep 1\nexit 1\n")
+
+    {_, status} =
+      install(
+        [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}, {"TMPDIR", tmpdir}],
+        ctx.stubs
+      )
+
+    assert status == 130
+    assert Path.wildcard(Path.join(ctx.dir, ".kinoko.*"), match_dot: true) == []
+    assert File.ls!(tmpdir) == []
+  end
+
+  @tag :tmp_dir
+  test "a truncated script runs nothing and downloads nothing", ctx do
+    log = Path.join(ctx.stubs, "urls")
+    stub(ctx.stubs, "curl", ~s(echo "$@" >> "#{log}"; exit 22\n))
+    lines = @install |> File.read!() |> String.split("\n") |> length()
+    path = ctx.stubs <> ":" <> System.get_env("PATH")
+
+    System.cmd(
+      "sh",
+      [
+        "-c",
+        "n=1; while [ \"$n\" -le \"$1\" ]; do head -n \"$n\" \"$2\" | sh; n=$((n + 1)); done",
+        "x",
+        "#{lines - 3}",
+        @install
+      ],
+      env: [{"PATH", path}, {"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}],
+      stderr_to_stdout: true
+    )
+
+    refute File.exists?(log)
+    refute File.exists?(ctx.dir)
+  end
+
+  @tag :tmp_dir
+  test "without KINOKO_INSTALL_DIR or HOME it refuses before downloading", ctx do
+    log = Path.join(ctx.stubs, "urls")
+    stub(ctx.stubs, "curl", ~s(echo "$@" >> "#{log}"; exit 22\n))
+
+    {out, status} =
+      System.cmd("sh", [@install],
+        env: [
+          {"PATH", ctx.stubs <> ":" <> System.get_env("PATH")},
+          {"HOME", nil},
+          {"KINOKO_BASE_URL", ctx.base}
+        ],
+        stderr_to_stdout: true
+      )
+
+    assert status != 0
+    assert out =~ "KINOKO_INSTALL_DIR"
+    refute File.exists?(log)
+  end
+
+  @tag :tmp_dir
+  test "https bases force https and TLS 1.2; http bases do not", ctx do
+    log = Path.join(ctx.stubs, "args")
+    uname(ctx.stubs, "Linux", "x86_64")
+    stub(ctx.stubs, "curl", ~s(echo "$@" >> "#{log}"; exit 22\n))
+
+    install(
+      [{"KINOKO_BASE_URL", "https://example.test"}, {"KINOKO_INSTALL_DIR", ctx.dir}],
+      ctx.stubs
+    )
+
+    assert File.read!(log) =~ "--proto =https --tlsv1.2"
+    File.rm!(log)
+
+    install(
+      [{"KINOKO_BASE_URL", "http://example.test"}, {"KINOKO_INSTALL_DIR", ctx.dir}],
+      ctx.stubs
+    )
+
+    refute File.read!(log) =~ "--proto"
+  end
+
+  @tag :tmp_dir
+  test "an arm64 Mac under Rosetta gets the arm64 binary", ctx do
+    uname(ctx.stubs, "Darwin", "x86_64")
+    stub(ctx.stubs, "sysctl", "echo 1\n")
+    {_, 0} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}], ctx.stubs)
+    assert {out, 0} = System.cmd(Path.join(ctx.dir, "kinoko"), [])
+    assert out =~ "macos-arm64"
+  end
+
+  @tag :tmp_dir
+  test "trailing slash on the install dir is stripped for the PATH check", ctx do
+    path = ctx.dir <> ":" <> System.get_env("PATH")
+
+    {out, 0} =
+      System.cmd("sh", [@install],
+        env: [
+          {"PATH", path},
+          {"KINOKO_BASE_URL", ctx.base},
+          {"KINOKO_INSTALL_DIR", ctx.dir <> "/"}
+        ],
+        stderr_to_stdout: true
+      )
+
+    refute out =~ "not on your PATH"
+    assert File.exists?(Path.join(ctx.dir, "kinoko"))
+  end
+
+  @tag :tmp_dir
+  test "the PATH hint is fish_add_path for fish and export otherwise", ctx do
+    env = [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}]
+    {out, 0} = install([{"SHELL", "/usr/local/bin/fish"} | env])
+    assert out =~ "fish_add_path #{ctx.dir}"
+    refute out =~ "export PATH"
+    {out, 0} = install([{"SHELL", "/bin/zsh"} | env])
+    assert out =~ "export PATH"
   end
 end
