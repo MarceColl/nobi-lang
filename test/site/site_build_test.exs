@@ -66,7 +66,8 @@ defmodule Kinoko.Site.BuildTest do
     [block] = Regex.run(~r/What the agent did.*?The agent's summary/s, text)
 
     # One table row per call, the tool name first.
-    [tbody] = Regex.run(~r{<tbody>(.*?)</tbody>}s, Build.render("site"), capture: :all_but_first)
+    [tbody] =
+      Regex.run(~r{<tbody[^>]*>(.*?)</tbody>}s, Build.render("site"), capture: :all_but_first)
 
     shown =
       for line <- String.split(tbody, "\n"),
@@ -123,15 +124,5 @@ defmodule Kinoko.Site.BuildTest do
 
       assert File.exists?(Path.join(dist, url)), "site.css loads #{url}, which dist lacks"
     end
-  end
-
-  test "site.css carries the console's --k-* tokens unchanged" do
-    tokens = fn path ->
-      Regex.scan(~r/--k-[a-z0-9-]+:\s*[^;]+;/, File.read!(path)) |> List.flatten()
-    end
-
-    app = tokens.("assets/css/app.css")
-    assert length(app) > 30
-    assert tokens.("site/src/site.css") == app
   end
 end

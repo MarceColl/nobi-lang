@@ -66,11 +66,11 @@
       <blockquote class="t-body ask">Build me a forum with threads and replies, served at forum.localhost.</blockquote>
       <figure id="agent-run" class="run">
         <div class="run-scroll" tabindex="0" role="region" aria-labelledby="agent-run-caption">
-          <table class="run-table">
+          <table class="run-table" role="table">
             <caption id="agent-run-caption" class="t-label"><span class="run-title">What the agent did</span> <span class="run-sub">Kinoko tool calls, from a recorded run</span></caption>
-            <thead><tr><th scope="col">Tool</th><th scope="col">Argument</th><th scope="col">Result</th></tr></thead>
-            <tbody>
-<%= for call <- @agent_run.calls do %>              <tr><th scope="row"><code><%= call.name %></code></th> <td><code><%= call.arg %></code></td> <td class="<%= call.class %>"><code><%= call.result %></code></td></tr>
+            <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Tool</th><th scope="col" role="columnheader">Argument</th><th scope="col" role="columnheader">Result</th></tr></thead>
+            <tbody role="rowgroup">
+<%= for call <- @agent_run.calls do %>              <tr role="row"><th scope="row" role="rowheader"><code><%= call.name %></code></th> <td role="cell"><%= if call.arg != "" do %><code><%= call.arg %></code><% end %></td> <td role="cell" class="<%= call.class %>"><code><%= call.result %></code></td></tr>
 <% end %>            </tbody>
           </table>
         </div>

@@ -13,7 +13,8 @@ A short, plain static homepage for Kinoko: what it is, who it is for, and how to
   - **Spacing:** a 4px token scale (1 to 16); each section owns the gap above it.
   - **Header and footer:** the wordmark and two metadata items (version, "macOS · Linux") on one baseline; the footer is the glyph and the font licence line.
   - **Code and the run:** commands on a quiet secondary surface with a small radius and a copy button only where the command is meant to be copied; the recorded run is a semantic table (tool, argument, result) with a caption.
-  - The console's `--k-*` tokens stay in `site/src/site.css` verbatim (a test keeps them equal to `assets/css/app.css`), but the page does not use them. The console keeps Vellum.
+  - The site has its own tokens; it no longer carries the console's `--k-*` tokens. The console keeps Vellum.
+  - Below 640px each run-table row stacks (tool and argument, then the result), so nothing scrolls sideways; explicit ARIA table roles keep its semantics.
 
   The first look was Vellum light, the console's own system (Newsreader, Chivo, IBM Plex Mono, paper and violet); the restyle replaced it on the site only.
 - **Copy:** Claude drafts it from what is actually built, and Marce edits it.

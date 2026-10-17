@@ -24,51 +24,6 @@
   src: url("fonts/geist-mono-variable.woff2") format("woff2");
 }
 
-/* The console's Vellum tokens, kept verbatim so the console and the site
-   share one source (test/site/site_build_test.exs keeps them equal). The
-   page itself draws only from the site tokens below. */
-/* Vellum tokens, verbatim from assets/css/app.css (test/site/site_build_test.exs keeps them equal). */
-:root {
-  --k-ink: #1B1A17;
-  --k-body: #3A362E;
-  --k-dim: #6E6A61;
-  --k-faint: #8A8579;
-  --k-line: #DDDAD1;
-  --k-paper: #F2F1EC;
-  --k-card: #FFFFFF;
-  --k-tint: #F7F6F2;
-  --k-sand: #EDEBE4;
-  --k-violet: #5B4B96;
-  --k-violet-hover: #48397C;
-  --k-mint: #0F7A66;
-  --k-amber: #A9740B;
-  --k-red: #C0453F;
-  --k-placeholder: #B6B1A5;
-  --k-row-line: #EAE7DE;
-  --k-row-line-2: #EFECE4;
-  --k-sel-row: #E2DFD5;
-  --k-segmented: #E7E4DB;
-  --k-grid-dots: #D7D3C8;
-  --k-gutter: #C0BCB0;
-  --k-zebra: #FCFBF8;
-
-  --k-violet-chip: #F3F0FB;
-  --k-violet-btn-border: #C9C0E4;
-  --k-violet-chip-border: #D9D2EE;
-  --k-mint-chip: #E3F1EC;
-  --k-mint-chip-border: #BFDDD3;
-  --k-amber-chip: #FBF2DF;
-  --k-amber-chip-border: #E8D3A4;
-  --k-amber-text: #7A5406;
-  --k-red-chip: #FBECEB;
-  --k-red-chip-border: #EFCFCD;
-  --k-red-text: #8E332E;
-
-  --k-sans: "Chivo", system-ui, sans-serif;
-  --k-mono: "IBM Plex Mono", monospace;
-  --k-display: "Newsreader", Georgia, serif;
-}
-
 /* ---- Site tokens --------------------------------------------------------
    Surfaces, text, border, focus and state, in two themes of equal
    hierarchy. Every text pair is WCAG AA (4.5:1) on both surfaces. */
@@ -219,6 +174,19 @@ figure { margin: 0; min-width: 0; }
 .run-table td code { color: var(--text-secondary); }
 .run-table td.tok-ok code { color: var(--ok); }
 .run-note { margin-top: var(--space-3); }
+/* Below 640px each row stacks: the tool and its argument on one line, the
+   result under them, so nothing scrolls. The header row is kept for screen
+   readers only; the explicit ARIA roles keep the table semantics that a
+   display change would otherwise drop. */
+@media (max-width: 639px) {
+  .run-table, .run-table tbody, .run-table caption { display: block; }
+  .run-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .run-table tbody tr { display: flex; flex-wrap: wrap; column-gap: var(--space-2); padding-block: var(--space-2); border-bottom: 1px solid var(--border); }
+  .run-table tbody tr:last-child { border-bottom: 0; }
+  .run-table tbody th, .run-table td { display: block; padding: 0; border: 0; line-height: 22px; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+  .run-table td:empty { display: none; }
+  .run-table td:last-child { flex-basis: 100%; }
+}
 
 /* ---- The screenshot: evidence, captioned. ------------------------------ */
 .shot img { display: block; width: 100%; height: auto; border-radius: var(--radius); outline: 1px solid var(--border); outline-offset: -1px; }
