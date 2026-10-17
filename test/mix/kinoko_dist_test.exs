@@ -33,4 +33,38 @@ defmodule Mix.Tasks.Kinoko.DistTest do
     assert Dist.binary_name(:macos_x86_64) == "kinoko-macos-x86_64"
     assert Dist.binary_name(:linux_arm64) == "kinoko-linux-arm64"
   end
+
+  test "check_commit!/1 refuses a build with no commit id" do
+    assert Dist.check_commit!("01d4483c0ffe") == "01d4483c0ffe"
+    assert_raise Mix.Error, ~r/cannot tell which commit/, fn -> Dist.check_commit!("unknown") end
+    assert_raise Mix.Error, ~r/KINOKO_COMMIT/, fn -> Dist.check_commit!("") end
+  end
+
+  @tag :tmp_dir
+  test "patch_burrito!/1 patches the upstream wrapper once, and refuses any other", %{
+    tmp_dir: dir
+  } do
+    src = Path.join(dir, "src")
+    File.mkdir_p!(src)
+    wrapper = Path.join(src, "wrapper.zig")
+    File.cp!(Path.join(Mix.Project.deps_paths().burrito, "src/wrapper.zig"), wrapper)
+    patch = Path.expand("../../patches/burrito-musl-runtime.patch", __DIR__)
+
+    # Start from upstream, whichever state deps/burrito is in.
+    System.cmd("patch", ["-p1", "-R", "-N", "-s", "-d", dir, "-i", patch])
+    upstream = File.read!(wrapper)
+    refute upstream =~ "Kinoko patch"
+
+    ExUnit.CaptureIO.capture_io(fn -> assert Dist.patch_burrito!(dir) == :ok end)
+    patched = File.read!(wrapper)
+    assert patched =~ "Kinoko patch"
+    assert patched =~ "fn musl_state("
+
+    # Applied already: left as is.
+    assert Dist.patch_burrito!(dir) == :ok
+    assert File.read!(wrapper) == patched
+
+    File.write!(wrapper, upstream <> "// changed\n")
+    assert_raise Mix.Error, ~r/neither Burrito 1.6.0's/, fn -> Dist.patch_burrito!(dir) end
+  end
 end

@@ -11,7 +11,8 @@ defmodule Kinoko.Dist.PinnedRuntime do
       the task verified too. Burrito's own musl step only runs for its
       download-it-yourself ERTS, so with `custom_erts` this one does its job
       the same way: the runtime is embedded in the wrapper, which writes it
-      to `/tmp/libc-musl-<sha256>.so` on first run.
+      to `/tmp/libc-musl-<sha256>.so` on first run and verifies it before
+      every use (Kinoko's Burrito patch, see `mix help kinoko.dist`).
 
   The context is Burrito's `%Burrito.Builder.Context{}`; it is used as a
   map so Kinoko does not depend on Burrito at compile time.

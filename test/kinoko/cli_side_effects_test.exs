@@ -41,9 +41,39 @@ defmodule Kinoko.CLISideEffectsTest do
     refute File.exists?(data)
   end
 
-  test "start_error_message/1 names a taken port" do
+  test "start_error_message/2 names a taken port" do
     reason = {:kinoko, {:bad_return, {:shutdown, {:failed_to_start_child, :ranch, :eaddrinuse}}}}
-    assert CLI.start_error_message(reason, 4123) =~ "port 4123 is in use"
-    assert CLI.start_error_message(:other, 4123) =~ "could not start"
+    assert CLI.start_error_message({:error, reason}, 4123) =~ "port 4123 is in use"
+    assert CLI.start_error_message({:error, :other}, 4123) =~ "could not start: :other"
+  end
+
+  test "a raise in the start is one line; the details only carry the stack" do
+    failure =
+      try do
+        raise "no case clause matching:\n\n    {:error, :enotdir}\n"
+      rescue
+        e -> {:exception, e, __STACKTRACE__}
+      end
+
+    line = CLI.start_error_message(failure, 4123)
+
+    assert line ==
+             "kinoko: could not start: no case clause matching: {:error, :enotdir} " <>
+               "(KINOKO_DEBUG=1 prints the full error)"
+
+    refute line =~ "\n"
+    assert CLI.start_error_details(failure) =~ "cli_side_effects_test.exs"
+
+    assert CLI.start_error_message({:caught, :exit, :boom, []}, 4123) =~
+             "could not start: exit :boom"
+
+    huge = {:error, {:shutdown, Enum.to_list(1..10_000)}}
+    assert String.length(CLI.start_error_message(huge, 4123)) < 400
+  end
+
+  test "debug?/1 is KINOKO_DEBUG=1" do
+    assert CLI.debug?(%{"KINOKO_DEBUG" => "1"})
+    refute CLI.debug?(%{"KINOKO_DEBUG" => "0"})
+    refute CLI.debug?(%{})
   end
 end

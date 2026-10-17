@@ -52,6 +52,15 @@ defmodule Kinoko.LocalTest do
       assert String.trim(File.read!(path)) == secret
     end
 
+    test "an unreadable data dir is a one-line error naming the file", %{tmp_dir: tmp} do
+      File.write!(Path.join(tmp, "file"), "")
+      dir = Path.join([tmp, "file", "data"])
+
+      assert_raise RuntimeError, ~r/^cannot read .*secret_key_base: not a directory$/, fn ->
+        Local.secret_key_base(dir, %{})
+      end
+    end
+
     test "concurrent first runs all get the same secret, at 0600", %{tmp_dir: tmp} do
       dir = Path.join(tmp, "data")
 
@@ -193,5 +202,28 @@ defmodule Kinoko.LocalTest do
     refute Local.port_free?({127, 0, 0, 1}, port)
     :gen_tcp.close(socket)
     assert Local.port_free?({127, 0, 0, 1}, port)
+  end
+
+  # On macOS a reuseaddr bind of 127.0.0.1 succeeds next to these.
+  for {name, ip, opts} <- [
+        {"IPv4 wildcard", {0, 0, 0, 0}, []},
+        {"IPv6 wildcard", {0, 0, 0, 0, 0, 0, 0, 0}, [:inet6]},
+        {"IPv6 wildcard, v6only", {0, 0, 0, 0, 0, 0, 0, 0}, [:inet6, ipv6_v6only: true]},
+        {"IPv6 loopback", {0, 0, 0, 0, 0, 0, 0, 1}, [:inet6]}
+      ] do
+    @ip ip
+    @opts opts
+    test "port_free?/2 sees a port taken by an #{name} listener" do
+      case :gen_tcp.listen(0, [ip: @ip] ++ @opts) do
+        {:ok, socket} ->
+          {:ok, port} = :inet.port(socket)
+          refute Local.port_free?({127, 0, 0, 1}, port)
+          :gen_tcp.close(socket)
+
+        # No IPv6 on this machine: nothing to check.
+        {:error, reason} when reason in [:eaddrnotavail, :eafnosupport] ->
+          :ok
+      end
+    end
   end
 end

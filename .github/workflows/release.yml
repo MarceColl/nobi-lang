@@ -41,11 +41,10 @@ jobs:
       - run: mix deps.get
 
       - name: Build every target
-        env:
-          KINOKO_COMMIT: ${{ github.sha }}
         run: |
           zig version
-          mix kinoko.dist
+          # The 12-character short id, as local builds stamp it (Kinoko.Build).
+          KINOKO_COMMIT="${GITHUB_SHA:0:12}" mix kinoko.dist
 
       - name: Smoke test the host binary
         run: |
@@ -74,9 +73,19 @@ jobs:
           name: dist
           path: dist
 
+      # The repo file keeps the OWNER/kinoko placeholder; the published copy
+      # names this repository, so `curl | sh` works from the release.
+      - name: Stamp the repository into install.sh
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          sed "s|OWNER/kinoko|$GITHUB_REPOSITORY|" install.sh > release/install.sh
+          grep -q "KINOKO_REPO:-$GITHUB_REPOSITORY}" release/install.sh
+          ! grep -q "OWNER/" release/install.sh
+
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* install.sh \
+          gh release create "$GITHUB_REF_NAME" dist/* release/install.sh \
             --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

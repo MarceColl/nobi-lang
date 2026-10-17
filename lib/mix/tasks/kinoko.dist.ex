@@ -9,8 +9,8 @@ defmodule Mix.Tasks.Kinoko.Dist do
 
   Steps:
 
-    1. Checks the toolchain, reads the commit once, and fetches and verifies
-       the pinned runtimes (below).
+    1. Checks the toolchain, patches Burrito's wrapper (below), reads the
+       commit once, and fetches and verifies the pinned runtimes (below).
     2. `mix compile` and `mix assets.deploy`.
     3. For each target, the local release (`KINOKO_BUILD=local`) wrapped by
        Burrito (`KINOKO_DIST=1`, see `mix.exs`), written to
@@ -63,6 +63,34 @@ defmodule Mix.Tasks.Kinoko.Dist do
   second download (or a published checksum, if one exists by then), and
   add an entry `{otp, erts}` to `@erts_pins`.
 
+  ## Burrito patch (the Linux musl runtime)
+
+  The Linux ERTS is linked against musl, and its ELF interpreter is fixed
+  at build time to `/tmp/libc-musl-<sha256>.so`, which Burrito's wrapper
+  writes on first run. Upstream (1.6.0) reuses any file already at that
+  path without checking it, so on a shared host another user could plant
+  it and run code as the next person to start `kinoko`. The path itself
+  cannot move (the kernel reads the interpreter path from the ELF headers
+  of `beam.smp`, `erlexec` and friends), so the wrapper checks the file
+  instead.
+
+  `patches/burrito-musl-runtime.patch` replaces the wrapper's
+  `maybe_install_musl_runtime`. The wrapper uses the file only when it is a
+  regular file owned by the user (or root), not writable by group or
+  others, byte-for-byte the embedded runtime, and in a directory that is
+  sticky or private, so nobody else can swap it afterwards. A missing file,
+  or a stale one of the user's, is written to a private temp file and
+  renamed into place. Anything else stops the start with a message naming
+  the file.
+
+  The task applies the patch to `deps/burrito/src/wrapper.zig` before
+  building (`patch_burrito!/1`). It pins the sha256 of the upstream file and
+  of the patched one, so the build fails closed on any other wrapper. After
+  a Burrito upgrade, redo the patch against the new `wrapper.zig` and
+  update both pins (`@wrapper_upstream`, `@wrapper_patched`). A `/tmp`
+  mounted `noexec` still breaks the Linux binaries; that is upstream
+  behaviour too.
+
   ## The exqlite NIF (the only NIF)
 
     * The host target (`macos_arm64` on an Apple Silicon Mac) is no cross
@@ -78,7 +106,9 @@ defmodule Mix.Tasks.Kinoko.Dist do
   `kinoko version` prints the `mix.exs` version and the commit stamped at
   compile time (`Kinoko.Build`): `KINOKO_COMMIT` if set, else jj, else git.
   The task reads it once, before `assets.deploy`, and passes it to every
-  target's build as `KINOKO_COMMIT`, so all binaries carry the same id. The
+  target's build as `KINOKO_COMMIT`, so all binaries carry the same id. It
+  refuses to build when there is no commit (`"unknown"`): the id is what
+  keeps a build from reusing an older build's unpacked runtime. The
   release version is `<version>+<commit>`, so each build unpacks into its
   own Burrito directory (`kinoko_erts-<erts>_<version>+<commit>`); the
   directories of superseded builds are not removed automatically
@@ -118,13 +148,19 @@ defmodule Mix.Tasks.Kinoko.Dist do
     aarch64: "6b558025200a5ed1308e2ce2675217afec71b6c5a9d561e52262ca948d59905e"
   }
 
+  # Burrito 1.6.0's src/wrapper.zig, before and after patches/burrito-musl-runtime.patch.
+  @burrito_patch "patches/burrito-musl-runtime.patch"
+  @wrapper_upstream "17b3b57de52c0c4f7c96405f1c216c5b69bee5635488e02353dbf4e025eb4b35"
+  @wrapper_patched "b99a63102e36741a2752f5fff3f49d1e40a5a941efa88d7f40acad550d8745b9"
+
   @impl Mix.Task
   def run(args) do
     targets = targets(args)
     check_toolchain!()
+    patch_burrito!(Mix.Project.deps_paths() |> Map.fetch!(:burrito))
 
     # One commit for every target, read before the build touches the tree.
-    commit = Kinoko.Build.Commit.read()
+    commit = check_commit!(Kinoko.Build.Commit.read())
     runtimes = Map.new(targets, &{&1, fetch_runtimes!(&1)})
     env = [{"KINOKO_COMMIT", commit}]
     burrito_tmp_before = burrito_tmp()
@@ -139,6 +175,62 @@ defmodule Mix.Tasks.Kinoko.Dist do
       clean_digests()
     end
   end
+
+  @doc """
+  Applies `patches/burrito-musl-runtime.patch` to Burrito's wrapper in
+  `burrito_dir` (`deps/burrito`), unless it is applied already. Fails
+  closed: the wrapper must be exactly Burrito 1.6.0's before and exactly
+  the pinned patched file after.
+  """
+  @spec patch_burrito!(Path.t()) :: :ok
+  def patch_burrito!(burrito_dir) do
+    wrapper = Path.join(burrito_dir, "src/wrapper.zig")
+
+    case sha256!(wrapper) do
+      @wrapper_patched ->
+        :ok
+
+      @wrapper_upstream ->
+        patch = Path.expand(@burrito_patch, Path.dirname(Mix.Project.project_file()))
+
+        case System.cmd("patch", ["-p1", "-N", "-s", "-d", burrito_dir, "-i", patch],
+               stderr_to_stdout: true
+             ) do
+          {_, 0} -> :ok
+          {out, _} -> Mix.raise("kinoko.dist: could not patch #{wrapper}:\n#{out}")
+        end
+
+        if sha256!(wrapper) != @wrapper_patched,
+          do: Mix.raise("kinoko.dist: #{wrapper} is not the pinned patched file after patching")
+
+        Mix.shell().info("==> kinoko.dist: patched #{wrapper} (#{@burrito_patch})")
+
+      other ->
+        Mix.raise("""
+        kinoko.dist: #{wrapper} is neither Burrito 1.6.0's (#{@wrapper_upstream})
+        nor the patched one (#{@wrapper_patched}); it is #{other}.
+        A new Burrito needs the patch redone; see "Burrito patch" in `mix help kinoko.dist`.
+        """)
+    end
+  end
+
+  defp sha256!(path), do: :crypto.hash(:sha256, File.read!(path)) |> Base.encode16(case: :lower)
+
+  @doc """
+  Returns `commit`, or raises when it does not name one: Burrito never
+  unpacks over an existing directory, so a second `+unknown` build would
+  run the first one's runtime.
+  """
+  @spec check_commit!(String.t()) :: String.t()
+  def check_commit!(commit) when commit in ["", "unknown"] do
+    Mix.raise("""
+    kinoko.dist: cannot tell which commit this is (jj and git both failed).
+    Every build needs its own commit id: it names the directory the binary
+    unpacks into. Build from a jj or git checkout, or set KINOKO_COMMIT.
+    """)
+  end
+
+  def check_commit!(commit), do: commit
 
   # Burrito leaves its work dir and the unpacked ERTS (about 115 MB) in the
   # system temp dir for every target it builds; this run's are removed.

@@ -52,7 +52,7 @@ Unknown commands print usage. The banner gets one extra line: `connect an agent:
 It is POSIX sh and works on `bash`, `dash` and macOS `/bin/sh`. Steps:
 1. Detect the OS and architecture with `uname -s` and `uname -m`, mapping `arm64`/`aarch64` and `x86_64`/`amd64` to the four targets. Anything else gets a clear error.
 2. Download `kinoko-<target>` and its `.sha256` from the release (`KINOKO_VERSION`, default `latest`) and verify the checksum (`shasum -a 256` or `sha256sum`). On a mismatch it stops and deletes the download.
-3. Install to `${KINOKO_INSTALL_DIR:-$HOME/.local/bin}/kinoko` with mode 0755. It never uses sudo.
+3. Install to `${KINOKO_BIN_DIR:-$HOME/.local/bin}/kinoko` with mode 0755. It never uses sudo.
 4. If that directory is not on `PATH`, print the line to add for the user's shell. It never edits rc files.
 5. Print the next step: `kinoko`.
 
@@ -85,8 +85,9 @@ Nothing is pushed or published until Marce says so.
 - **Linux check:** run the `linux-arm64` binary in a Docker container (`alpine` and `debian:stable-slim`) if Docker is available. If it isn't, record that.
 - **install.sh:**
   - run with `shellcheck`;
-  - run against a local http server: a clean install into a temp `KINOKO_INSTALL_DIR`, a checksum mismatch refused, an unknown arch refused.
+  - run against a local http server: a clean install into a temp `KINOKO_BIN_DIR`, a checksum mismatch refused, an unknown arch refused.
 - **Safari:** whether `*.localhost` resolves. If it doesn't, record it; the landing's install section then recommends Chrome or Firefox for served apps. A path-based fallback is out of scope.
+  - Result (2026-10-17, macOS 26.7.1, Safari 26.6.2): it resolves. `open -a Safari http://m1probe.localhost:4125/...` reached a probe server on `127.0.0.1:4125`, which logged `Host: m1probe.localhost:4125` and Safari's user agent. The macOS resolver itself maps `*.localhost` to `::1` and `127.0.0.1` (`dscacheutil -q host -a name foo.localhost`).
 
 ## Out of scope
 

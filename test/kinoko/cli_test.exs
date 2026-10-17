@@ -96,7 +96,27 @@ defmodule Kinoko.CLITest do
       })
 
     assert text =~ "/h/.burrito/kinoko_erts-16.1.1_0.1.0+abc"
-    assert text =~ "/h/.burrito/kinoko_erts-*"
+    assert text =~ "'/h/.burrito/kinoko_erts-'*"
+  end
+
+  test "uninstall_text/1 single-quotes every path, so a copied one survives rm -rf" do
+    text =
+      CLI.uninstall_text(%{
+        binary: "/Users/u/bin/kinoko",
+        cache: "/Users/u/Library/Application Support/.burrito/kinoko_erts-16.1.1_0.1.0+abc",
+        runtimes: "/Users/u/Library/Application Support/.burrito/kinoko_erts-*",
+        data: "/Users/o'brien/.kinoko"
+      })
+
+    assert text =~ "'/Users/u/bin/kinoko'"
+    assert text =~ "'/Users/u/Library/Application Support/.burrito/kinoko_erts-16.1.1_0.1.0+abc'"
+    # The glob stays outside the quotes so the shell still expands it.
+    assert text =~ "'/Users/u/Library/Application Support/.burrito/kinoko_erts-'*"
+    assert text =~ ~S('/Users/o'\''brien/.kinoko')
+
+    # What a shell makes of the printed data path is the path itself.
+    [quoted] = Regex.run(~r/^  ('.*')    your data/m, text, capture: :all_but_first)
+    assert {"/Users/o'brien/.kinoko\n", 0} = System.cmd("sh", ["-c", "printf '%s\\n' " <> quoted])
   end
 
   test "uninstall_text/1 without a Burrito cache lists no cache line" do

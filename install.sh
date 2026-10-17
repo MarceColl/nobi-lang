@@ -3,7 +3,7 @@
 # sha256 and installs it. Never uses sudo, never edits shell rc files.
 #
 #   KINOKO_VERSION      release tag to install (default: latest)
-#   KINOKO_INSTALL_DIR  where to put `kinoko` (default: $HOME/.local/bin)
+#   KINOKO_BIN_DIR      where to put `kinoko` (default: $HOME/.local/bin)
 #   KINOKO_BASE_URL     overrides the whole download base URL
 #   KINOKO_REPO         GitHub owner/repo the releases live in
 #
@@ -27,9 +27,9 @@ cleanup() {
 
 main() {
   # --- install dir ------------------------------------------------------------
-  install_dir="${KINOKO_INSTALL_DIR:-}"
+  install_dir="${KINOKO_BIN_DIR:-}"
   if [ -z "$install_dir" ]; then
-    [ -n "${HOME:-}" ] || die "neither KINOKO_INSTALL_DIR nor HOME is set; set KINOKO_INSTALL_DIR"
+    [ -n "${HOME:-}" ] || die "neither KINOKO_BIN_DIR nor HOME is set; set KINOKO_BIN_DIR"
     install_dir="$HOME/.local/bin"
   fi
   while [ "${#install_dir}" -gt 1 ]; do
@@ -83,7 +83,9 @@ main() {
       fetch() { curl -fsSL -o "$2" "$1"; }
     fi
   elif command -v wget >/dev/null 2>&1; then
-    if [ -n "$https_only" ]; then
+    # Busybox wget (stock Alpine) has no --https-only and rejects it; the
+    # checksum check below still applies either way.
+    if [ -n "$https_only" ] && wget --help 2>&1 | grep -q -- --https-only; then
       fetch() { wget -q --https-only -O "$2" "$1"; }
     else
       fetch() { wget -q -O "$2" "$1"; }

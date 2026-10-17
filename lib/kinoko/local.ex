@@ -60,6 +60,7 @@ defmodule Kinoko.Local do
     case File.read(path) do
       {:ok, contents} -> read_secret(path, contents)
       {:error, :enoent} -> create_secret(path)
+      {:error, reason} -> raise "cannot read #{path}: #{:file.format_error(reason)}"
     end
   end
 
@@ -86,7 +87,12 @@ defmodule Kinoko.Local do
     tmp = path <> ".tmp-" <> Base.url_encode64(:crypto.strong_rand_bytes(9))
 
     try do
-      {:ok, file} = File.open(tmp, [:write, :exclusive])
+      file =
+        case File.open(tmp, [:write, :exclusive]) do
+          {:ok, file} -> file
+          {:error, reason} -> raise "cannot create #{tmp}: #{:file.format_error(reason)}"
+        end
+
       :ok = File.chmod(tmp, 0o600)
       :ok = IO.binwrite(file, secret <> "\n")
       :ok = File.close(file)
@@ -94,6 +100,7 @@ defmodule Kinoko.Local do
       case File.ln(tmp, path) do
         :ok -> secret
         {:error, :eexist} -> read_or_create_secret(path)
+        {:error, reason} -> raise "cannot create #{path}: #{:file.format_error(reason)}"
       end
     after
       File.rm(tmp)
@@ -150,10 +157,24 @@ defmodule Kinoko.Local do
 
   def check_build!(_mode, _mcp_enabled), do: :ok
 
-  @doc "Whether something already listens on `ip:port` (checked the way Bandit binds)."
+  @doc """
+  Whether `port` is free for Kinoko on `ip`: the bind Bandit will do
+  succeeds (with `reuseaddr`, as Bandit binds, so a previous run's
+  TIME_WAIT sockets do not count), and nothing answers on `127.0.0.1:port`
+  or `[::1]:port`. The connect probes catch a wildcard listener (`*:port`,
+  `[::]:port`) or one on `::1`: on macOS the `reuseaddr` bind of
+  `127.0.0.1` succeeds next to those, and a browser's `localhost` could
+  then reach the other server.
+  """
   @spec port_free?(:inet.ip_address(), :inet.port_number()) :: boolean()
   def port_free?(ip, port) do
-    case :gen_tcp.listen(port, ip: ip, reuseaddr: true) do
+    bind_free?(ip, port) and
+      not answers?({127, 0, 0, 1}, port) and
+      not answers?({0, 0, 0, 0, 0, 0, 0, 1}, port)
+  end
+
+  defp bind_free?(ip, port) do
+    case :gen_tcp.listen(port, [ip: ip, reuseaddr: true] ++ family(ip)) do
       {:ok, socket} ->
         :gen_tcp.close(socket)
         true
@@ -162,6 +183,21 @@ defmodule Kinoko.Local do
         false
     end
   end
+
+  # No IPv6 on the machine is an error too: nothing answers there.
+  defp answers?(addr, port) do
+    case :gen_tcp.connect(addr, port, [active: false] ++ family(addr), 500) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        true
+
+      {:error, _} ->
+        false
+    end
+  end
+
+  defp family(ip) when tuple_size(ip) == 8, do: [:inet6]
+  defp family(_ip), do: []
 
   @doc """
   Whether to open the browser. Options: `os` (`:darwin`, `:linux`, ...),

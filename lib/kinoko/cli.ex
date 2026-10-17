@@ -140,23 +140,35 @@ defmodule Kinoko.CLI do
           required(:data) => String.t()
         }) :: String.t()
   def uninstall_text(%{binary: binary, cache: cache, data: data} = paths) do
-    cache_line = if cache, do: "  #{cache}    its unpacked runtime (Burrito cache)\n", else: ""
+    cache_line =
+      if cache, do: "  #{shell_quote(cache)}    its unpacked runtime (Burrito cache)\n", else: ""
 
     runtimes_line =
       case paths[:runtimes] do
         nil -> ""
-        runtimes -> "  #{runtimes}    the runtimes of every kinoko build run here\n"
+        runtimes -> "  #{shell_glob(runtimes)}    the runtimes of every kinoko build run here\n"
       end
 
     """
     To remove Kinoko, stop it and delete:
 
-      #{binary}    the kinoko binary
-    #{cache_line}#{runtimes_line}  #{data}    your data: the database, every app's data, the secret
+      #{shell_quote(binary)}    the kinoko binary
+    #{cache_line}#{runtimes_line}  #{shell_quote(data)}    your data: the database, every app's data, the secret
 
     kinoko uninstall deletes nothing itself. Deleting the data directory
     deletes your work for good.
     """
+  end
+
+  # Single-quoted for a POSIX shell, so a copied path survives `rm -rf`
+  # ("Application Support" has a space).
+  defp shell_quote(path), do: "'" <> String.replace(path, "'", ~S('\'')) <> "'"
+
+  # A pattern ending in `*`: the directory part quoted, the `*` left to glob.
+  defp shell_glob(pattern) do
+    if String.ends_with?(pattern, "*"),
+      do: shell_quote(String.slice(pattern, 0..-2//1)) <> "*",
+      else: shell_quote(pattern)
   end
 
   @doc """
@@ -223,27 +235,69 @@ defmodule Kinoko.CLI do
   def start(opts) do
     port = check_port!()
 
-    case Kinoko.Release.start() do
+    case run_release_start() do
       :ok ->
         Kinoko.ParentWatch.maybe_start(System.get_env())
         announce(opts)
 
-      {:error, reason} ->
-        IO.puts(:stderr, start_error_message(reason, port))
+      failure ->
+        IO.puts(:stderr, start_error_message(failure, port))
+        if debug?(System.get_env()), do: IO.puts(:stderr, "\n" <> start_error_details(failure))
         System.halt(1)
     end
   end
 
-  @doc """
-  The message for a failed start: the friendly "port in use" one when the
-  bind failed (the port was taken after `check_port!/0`), else the reason.
-  """
-  @spec start_error_message(term(), :inet.port_number()) :: String.t()
-  def start_error_message(reason, port) do
-    if inspect(reason, limit: :infinity) =~ "eaddrinuse",
-      do: port_taken_message(port),
-      else: "kinoko: could not start: #{inspect(reason)}"
+  # A raise or exit in the start (an unwritable data dir, a short secret
+  # file, a failed migration) is a failure like `{:error, reason}`, not a
+  # crash with a stack trace.
+  defp run_release_start do
+    Kinoko.Release.start()
+  rescue
+    e -> {:exception, e, __STACKTRACE__}
+  catch
+    kind, reason -> {:caught, kind, reason, __STACKTRACE__}
   end
+
+  @doc "Whether `KINOKO_DEBUG=1`: a failed start then also prints the full error."
+  @spec debug?(Kinoko.Local.env()) :: boolean()
+  def debug?(env), do: env["KINOKO_DEBUG"] == "1"
+
+  @typedoc "How `Kinoko.Release.start/0` failed: its error, a raise, or a throw/exit."
+  @type start_failure ::
+          {:error, term()}
+          | {:exception, Exception.t(), Exception.stacktrace()}
+          | {:caught, :throw | :exit, term(), Exception.stacktrace()}
+
+  @doc """
+  The one line a failed start prints: the friendly "port in use" one when
+  the bind failed (the port was taken after `check_port!/0`), else the
+  first line of the error, with a pointer to `KINOKO_DEBUG=1`.
+  """
+  @spec start_error_message(start_failure(), :inet.port_number()) :: String.t()
+  def start_error_message(failure, port) do
+    if inspect(failure, limit: :infinity) =~ "eaddrinuse" do
+      port_taken_message(port)
+    else
+      "kinoko: could not start: #{summary(failure)} (KINOKO_DEBUG=1 prints the full error)"
+    end
+  end
+
+  defp summary({:exception, e, _}), do: one_line(Exception.message(e))
+  defp summary({:caught, kind, reason, _}), do: one_line("#{kind} #{inspect(reason, limit: 8)}")
+  defp summary({:error, reason}), do: one_line(inspect(reason, limit: 8, printable_limit: 120))
+
+  defp one_line(text) do
+    line = text |> String.split(~r/\s+/, trim: true) |> Enum.join(" ")
+    if String.length(line) > 240, do: String.slice(line, 0, 240) <> "...", else: line
+  end
+
+  @doc "The full error of a failed start, for `KINOKO_DEBUG=1`."
+  @spec start_error_details(start_failure()) :: String.t()
+  def start_error_details({:exception, e, stacktrace}),
+    do: Exception.format(:error, e, stacktrace)
+
+  def start_error_details({:caught, kind, reason, st}), do: Exception.format(kind, reason, st)
+  def start_error_details({:error, reason}), do: inspect(reason, pretty: true, limit: :infinity)
 
   defp port_taken_message(port),
     do: "kinoko: port #{port} is in use. Stop what uses it, or set PORT."

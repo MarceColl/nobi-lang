@@ -29,7 +29,13 @@ defmodule Kinoko.InstallShTest do
   alias Kinoko.InstallShTest.FilePlug
 
   @install Path.expand("../install.sh", __DIR__)
-  @targets ~w(macos-arm64 macos-x86_64 linux-x86_64 linux-arm64)
+  # The dist task's targets (mix.exs), as install.sh names them.
+  @targets Mix.Project.config()[:releases][:kinoko][:burrito][:targets]
+           |> Keyword.keys()
+           |> Enum.map(
+             &(Mix.Tasks.Kinoko.Dist.binary_name(&1)
+               |> String.replace_prefix("kinoko-", ""))
+           )
 
   setup %{tmp_dir: tmp} do
     dist = Path.join(tmp, "dist")
@@ -89,7 +95,7 @@ defmodule Kinoko.InstallShTest do
 
   defp clean_install(ctx, shell) do
     {out, 0} =
-      install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}], nil, shell)
+      install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}], nil, shell)
 
     bin = Path.join(ctx.dir, "kinoko")
     assert File.regular?(bin)
@@ -105,7 +111,7 @@ defmodule Kinoko.InstallShTest do
     for t <- @targets, do: File.write!(Path.join(ctx.dist, "kinoko-#{t}"), "tampered\n")
 
     {out, status} =
-      install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}], nil, shell)
+      install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}], nil, shell)
 
     assert status != 0
     assert out =~ "checksum mismatch"
@@ -119,7 +125,7 @@ defmodule Kinoko.InstallShTest do
 
     {out, 0} =
       System.cmd("sh", [@install],
-        env: [{"PATH", path}, {"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}],
+        env: [{"PATH", path}, {"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}],
         stderr_to_stdout: true
       )
 
@@ -133,7 +139,7 @@ defmodule Kinoko.InstallShTest do
     File.rm!(Path.join(ctx.dist, "kinoko-linux-arm64.sha256"))
     File.rm!(Path.join(ctx.dist, "kinoko-macos-x86_64.sha256"))
 
-    {out, status} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}])
+    {out, status} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}])
     assert status != 0
     assert out =~ "could not download"
     refute File.exists?(Path.join(ctx.dir, "kinoko"))
@@ -145,7 +151,7 @@ defmodule Kinoko.InstallShTest do
     File.write!(Path.join(ctx.dir, "kinoko"), "old")
     for t <- @targets, do: File.write!(Path.join(ctx.dist, "kinoko-#{t}"), "tampered\n")
 
-    {_, status} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}])
+    {_, status} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}])
     assert status != 0
     assert File.read!(Path.join(ctx.dir, "kinoko")) == "old"
   end
@@ -153,7 +159,7 @@ defmodule Kinoko.InstallShTest do
   @tag :tmp_dir
   test "unknown architecture and OS are refused", ctx do
     uname(ctx.stubs, "Linux", "riscv64")
-    env = [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}]
+    env = [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}]
 
     {out, status} = install(env, ctx.stubs)
     assert status != 0
@@ -168,20 +174,28 @@ defmodule Kinoko.InstallShTest do
 
   @tag :tmp_dir
   test "uname values map to the four targets", ctx do
-    env = [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}]
+    env = [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}]
 
-    for {os, arch, target} <- [
-          {"Darwin", "arm64", "macos-arm64"},
-          {"Darwin", "x86_64", "macos-x86_64"},
-          {"Linux", "aarch64", "linux-arm64"},
-          {"Linux", "amd64", "linux-x86_64"}
-        ] do
-      uname(ctx.stubs, "#{os}", "#{arch}")
-      stub(ctx.stubs, "sysctl", "echo 0\n")
-      {_, 0} = install(env, ctx.stubs)
-      assert {out, 0} = System.cmd(Path.join(ctx.dir, "kinoko"), [])
-      assert out =~ "fake-kinoko #{target}"
-    end
+    reached =
+      for {os, arch, target} <- [
+            {"Darwin", "arm64", "macos-arm64"},
+            {"Darwin", "x86_64", "macos-x86_64"},
+            {"Linux", "aarch64", "linux-arm64"},
+            {"Linux", "arm64", "linux-arm64"},
+            {"Linux", "amd64", "linux-x86_64"},
+            {"Linux", "x86_64", "linux-x86_64"}
+          ] do
+        uname(ctx.stubs, "#{os}", "#{arch}")
+        stub(ctx.stubs, "sysctl", "echo 0\n")
+        {_, 0} = install(env, ctx.stubs)
+        assert {out, 0} = System.cmd(Path.join(ctx.dir, "kinoko"), [])
+        assert out =~ "fake-kinoko #{target}"
+        target
+      end
+
+    # install.sh reaches exactly the binaries `mix kinoko.dist` builds.
+    assert MapSet.new(reached) == MapSet.new(@targets)
+    assert length(@targets) == 4
   end
 
   # A curl that records the URLs it is asked for and fails, so nothing is
@@ -190,7 +204,7 @@ defmodule Kinoko.InstallShTest do
     log = Path.join(ctx.stubs, "urls")
     uname(ctx.stubs, "Linux", "x86_64")
     stub(ctx.stubs, "curl", ~s(for a; do :; done; echo "$a" >> "#{log}"; exit 22\n))
-    result = install([{"KINOKO_INSTALL_DIR", ctx.dir} | env], ctx.stubs)
+    result = install([{"KINOKO_BIN_DIR", ctx.dir} | env], ctx.stubs)
     {result, if(File.exists?(log), do: File.read!(log), else: "")}
   end
 
@@ -230,7 +244,7 @@ defmodule Kinoko.InstallShTest do
     File.mkdir_p!(bin)
 
     for tool <-
-          ~w(uname mktemp rm mkdir cp mv chmod cut head cat dirname sha256sum shasum printf sh env) do
+          ~w(uname mktemp rm mkdir cp mv chmod cut head cat dirname sha256sum shasum printf sh env grep) do
       if real = System.find_executable(tool), do: File.ln_s!(real, Path.join(bin, tool))
     end
 
@@ -247,7 +261,7 @@ defmodule Kinoko.InstallShTest do
         env: [
           {"PATH", bin},
           {"KINOKO_BASE_URL", ctx.base},
-          {"KINOKO_INSTALL_DIR", ctx.dir}
+          {"KINOKO_BIN_DIR", ctx.dir}
         ],
         stderr_to_stdout: true
       )
@@ -255,6 +269,64 @@ defmodule Kinoko.InstallShTest do
     assert status == 0, out
     assert File.read!(wget) =~ "-q -O"
     assert File.exists?(Path.join(ctx.dir, "kinoko"))
+  end
+
+  # A PATH with sh's basics and the given wget stub, no curl.
+  defp wget_only_path(ctx, wget_body) do
+    bin = Path.join(ctx.stubs, "bin")
+    File.mkdir_p!(bin)
+
+    for tool <-
+          ~w(uname mktemp rm mkdir cp mv chmod cut head cat dirname sha256sum shasum printf sh env grep) do
+      if real = System.find_executable(tool), do: File.ln_s!(real, Path.join(bin, tool))
+    end
+
+    stub(bin, "wget", wget_body)
+    bin
+  end
+
+  @tag :tmp_dir
+  test "https bases pass --https-only only to a wget that supports it", ctx do
+    log = Path.join(ctx.stubs, "wget.log")
+
+    # Busybox-like: no --https-only in its help, and an unknown flag is a usage error.
+    busybox =
+      wget_only_path(ctx, """
+      case "$1" in --help) echo "Usage: wget [-cqS] [-O FILE] URL"; exit 1;; esac
+      for a; do case "$a" in --https-only) echo "wget: unrecognized option" >&2; exit 1;; esac; done
+      echo "$@" >> "#{log}"; exit 1
+      """)
+
+    System.cmd("/bin/sh", [@install],
+      env: [
+        {"PATH", busybox},
+        {"KINOKO_BASE_URL", "https://example.test"},
+        {"KINOKO_BIN_DIR", ctx.dir}
+      ],
+      stderr_to_stdout: true
+    )
+
+    assert File.read!(log) =~ "-q -O"
+    refute File.read!(log) =~ "--https-only"
+    File.rm_rf!(Path.join(ctx.stubs, "bin"))
+    File.rm!(log)
+
+    gnu =
+      wget_only_path(ctx, """
+      case "$1" in --help) echo "       --https-only                only follow secure HTTPS links"; exit 0;; esac
+      echo "$@" >> "#{log}"; exit 1
+      """)
+
+    System.cmd("/bin/sh", [@install],
+      env: [
+        {"PATH", gnu},
+        {"KINOKO_BASE_URL", "https://example.test"},
+        {"KINOKO_BIN_DIR", ctx.dir}
+      ],
+      stderr_to_stdout: true
+    )
+
+    assert File.read!(log) =~ "--https-only"
   end
 
   @tag :tmp_dir
@@ -265,7 +337,7 @@ defmodule Kinoko.InstallShTest do
 
     {out, status} =
       install(
-        [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}, {"TMPDIR", tmpdir}],
+        [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}, {"TMPDIR", tmpdir}],
         ctx.stubs
       )
 
@@ -285,7 +357,7 @@ defmodule Kinoko.InstallShTest do
 
     {_, status} =
       install(
-        [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}, {"TMPDIR", tmpdir}],
+        [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}, {"TMPDIR", tmpdir}],
         ctx.stubs
       )
 
@@ -310,7 +382,7 @@ defmodule Kinoko.InstallShTest do
         "#{lines - 3}",
         @install
       ],
-      env: [{"PATH", path}, {"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}],
+      env: [{"PATH", path}, {"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}],
       stderr_to_stdout: true
     )
 
@@ -319,7 +391,7 @@ defmodule Kinoko.InstallShTest do
   end
 
   @tag :tmp_dir
-  test "without KINOKO_INSTALL_DIR or HOME it refuses before downloading", ctx do
+  test "without KINOKO_BIN_DIR or HOME it refuses before downloading", ctx do
     log = Path.join(ctx.stubs, "urls")
     stub(ctx.stubs, "curl", ~s(echo "$@" >> "#{log}"; exit 22\n))
 
@@ -334,7 +406,7 @@ defmodule Kinoko.InstallShTest do
       )
 
     assert status != 0
-    assert out =~ "KINOKO_INSTALL_DIR"
+    assert out =~ "KINOKO_BIN_DIR"
     refute File.exists?(log)
   end
 
@@ -345,7 +417,7 @@ defmodule Kinoko.InstallShTest do
     stub(ctx.stubs, "curl", ~s(echo "$@" >> "#{log}"; exit 22\n))
 
     install(
-      [{"KINOKO_BASE_URL", "https://example.test"}, {"KINOKO_INSTALL_DIR", ctx.dir}],
+      [{"KINOKO_BASE_URL", "https://example.test"}, {"KINOKO_BIN_DIR", ctx.dir}],
       ctx.stubs
     )
 
@@ -353,7 +425,7 @@ defmodule Kinoko.InstallShTest do
     File.rm!(log)
 
     install(
-      [{"KINOKO_BASE_URL", "http://example.test"}, {"KINOKO_INSTALL_DIR", ctx.dir}],
+      [{"KINOKO_BASE_URL", "http://example.test"}, {"KINOKO_BIN_DIR", ctx.dir}],
       ctx.stubs
     )
 
@@ -364,7 +436,7 @@ defmodule Kinoko.InstallShTest do
   test "an arm64 Mac under Rosetta gets the arm64 binary", ctx do
     uname(ctx.stubs, "Darwin", "x86_64")
     stub(ctx.stubs, "sysctl", "echo 1\n")
-    {_, 0} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}], ctx.stubs)
+    {_, 0} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}], ctx.stubs)
     assert {out, 0} = System.cmd(Path.join(ctx.dir, "kinoko"), [])
     assert out =~ "macos-arm64"
   end
@@ -378,7 +450,7 @@ defmodule Kinoko.InstallShTest do
         env: [
           {"PATH", path},
           {"KINOKO_BASE_URL", ctx.base},
-          {"KINOKO_INSTALL_DIR", ctx.dir <> "/"}
+          {"KINOKO_BIN_DIR", ctx.dir <> "/"}
         ],
         stderr_to_stdout: true
       )
@@ -389,7 +461,7 @@ defmodule Kinoko.InstallShTest do
 
   @tag :tmp_dir
   test "the PATH hint is fish_add_path for fish and export otherwise", ctx do
-    env = [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_INSTALL_DIR", ctx.dir}]
+    env = [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}]
     {out, 0} = install([{"SHELL", "/usr/local/bin/fish"} | env])
     assert out =~ "fish_add_path #{ctx.dir}"
     refute out =~ "export PATH"

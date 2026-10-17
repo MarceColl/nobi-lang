@@ -1,0 +1,141 @@
+--- a/src/wrapper.zig
++++ b/src/wrapper.zig
+@@ -218,29 +218,120 @@
+     std.process.exit(1);
+ }
+ 
++// Kinoko patch (kinoko: patches/burrito-musl-runtime.patch).
++//
++// The precompiled ERTS names MUSL_RUNTIME_PATH (/tmp/libc-musl-<sha>.so) as
++// its ELF interpreter, so the path cannot move. Upstream reuses any file
++// already there, so on a shared host another user could plant it and run
++// code as whoever starts the binary next. Here the file is used only when it
++// is trusted: a regular file owned by this user (or root), not writable by
++// group or others, executable, byte-for-byte the embedded runtime, in a directory that is
++// sticky or private (so nobody else can swap it afterwards). A missing file,
++// or a stale one of ours, is written to a private temp file and renamed into
++// place. Anything else stops the start with a message; it is never loaded.
++const MuslState = enum { trusted, missing, ours_stale, foreign };
++
+ fn maybe_install_musl_runtime(io: Io) !void {
+-    if (!std.mem.eql(u8, build_options.MUSL_RUNTIME_PATH, "")) {
+-        // Check if the file was already extracted using std.fs API (cross-platform)
+-        const file_exists = Io.Dir.cwd().statFile(io, build_options.MUSL_RUNTIME_PATH, .{}) catch null;
++    _ = io;
++    if (comptime std.mem.eql(u8, build_options.MUSL_RUNTIME_PATH, "")) return;
+ 
+-        if (file_exists != null) {
+-            // File exists
+-            log.debug("The musl runtime file is already present. Continuing.", .{});
+-            return;
+-        }
++    const bytes = @embedFile("musl-runtime.so");
++    var path_buf: [4096]u8 = undefined;
++    const path = std.fmt.bufPrintZ(&path_buf, "{s}", .{build_options.MUSL_RUNTIME_PATH}) catch unreachable;
++    var dir_buf: [4096]u8 = undefined;
++    const dir = std.fmt.bufPrintZ(&dir_buf, "{s}", .{std.fs.path.dirname(build_options.MUSL_RUNTIME_PATH) orelse "/"}) catch unreachable;
+ 
+-        const file = Io.Dir.cwd().createFile(io, build_options.MUSL_RUNTIME_PATH, .{ .read = true }) catch |e| {
+-            log.debug("Failed to extract burrito musl runtime: {}", .{e});
+-            return;
+-        };
+-        defer file.close(io);
++    if (musl_dir_safe(dir)) {
++        switch (musl_state(path, bytes)) {
++            .trusted => return,
++            .missing, .ours_stale => if (musl_write(path, bytes) and musl_state(path, bytes) == .trusted) {
++                log.debug("Wrote musl runtime file: {s}", .{build_options.MUSL_RUNTIME_PATH});
++                return;
++            },
++            .foreign => {},
++        }
++    }
+ 
+-        const exec_permissions = Io.File.Permissions.fromMode(@intCast(0o754));
+-        try file.setPermissions(io, exec_permissions);
++    logger.err("Refusing to load the musl runtime {s}: it is not a verified copy owned by you,", .{build_options.MUSL_RUNTIME_PATH});
++    logger.err("or its directory is writable by others. Another user may have created it.", .{});
++    logger.err("Remove it (or ask its owner to) and run this program again.", .{});
++    std.process.exit(1);
++}
+ 
+-        const MUSL_RUNTIME_BYTES = @embedFile("musl-runtime.so");
+-        try file.writePositionalAll(io, MUSL_RUNTIME_BYTES, 0);
++fn musl_stat(path: [*:0]const u8, st: *std.os.linux.Statx) std.os.linux.E {
++    const linux = std.os.linux;
++    const mask: linux.STATX = .{ .TYPE = true, .MODE = true, .UID = true, .SIZE = true };
++    return linux.errno(linux.statx(linux.AT.FDCWD, path, linux.AT.SYMLINK_NOFOLLOW, mask, st));
++}
+ 
+-        log.debug("Wrote musl runtime file: {s}", .{build_options.MUSL_RUNTIME_PATH});
++fn musl_dir_safe(dir: [*:0]const u8) bool {
++    var st: std.os.linux.Statx = undefined;
++    if (musl_stat(dir, &st) != .SUCCESS) return false;
++    const euid = std.os.linux.geteuid();
++    if (st.uid != euid and st.uid != 0) return false;
++    if ((st.mode & 0o170000) != 0o040000) return false;
++    // Sticky (like /tmp): only a file's owner may rename or delete it.
++    return (st.mode & 0o1000) != 0 or (st.mode & 0o022) == 0;
++}
++
++fn musl_state(path: [*:0]const u8, bytes: []const u8) MuslState {
++    var st: std.os.linux.Statx = undefined;
++    switch (musl_stat(path, &st)) {
++        .SUCCESS => {},
++        .NOENT => return .missing,
++        else => return .foreign,
+     }
++
++    const euid = std.os.linux.geteuid();
++    if (st.uid != euid and st.uid != 0) return .foreign;
++    const bad: MuslState = if (st.uid == euid) .ours_stale else .foreign;
++    if ((st.mode & 0o170000) != 0o100000) return bad;
++    if ((st.mode & 0o022) != 0) return bad;
++    if (st.size != bytes.len) return bad;
++    // The kernel needs to execute it as the ELF interpreter.
++    if (std.c.access(path, std.c.X_OK) != 0) return bad;
++
++    const fd = std.c.open(path, .{ .ACCMODE = .RDONLY, .NOFOLLOW = true, .CLOEXEC = true });
++    if (fd < 0) return bad;
++    defer _ = std.c.close(fd);
++
++    var buf: [65536]u8 = undefined;
++    var off: usize = 0;
++    while (true) {
++        const n = std.c.read(fd, &buf, buf.len);
++        if (n < 0) return bad;
++        if (n == 0) break;
++        const len: usize = @intCast(n);
++        if (off + len > bytes.len) return bad;
++        if (!std.mem.eql(u8, buf[0..len], bytes[off .. off + len])) return bad;
++        off += len;
++    }
++    return if (off == bytes.len) .trusted else bad;
+ }
++
++fn musl_write(path: [:0]const u8, bytes: []const u8) bool {
++    var tmp_buf: [4096]u8 = undefined;
++    const tmp = std.fmt.bufPrintZ(&tmp_buf, "{s}.{d}.tmp", .{ path, std.os.linux.getpid() }) catch return false;
++
++    const fd = std.c.open(tmp, .{ .ACCMODE = .WRONLY, .CREAT = true, .EXCL = true, .NOFOLLOW = true, .CLOEXEC = true }, @as(c_uint, 0o755));
++    if (fd < 0) return false;
++
++    var ok = std.c.fchmod(fd, 0o755) == 0;
++    var off: usize = 0;
++    while (ok and off < bytes.len) {
++        const n = std.c.write(fd, bytes[off..].ptr, bytes.len - off);
++        if (n <= 0) {
++            ok = false;
++        } else {
++            off += @intCast(n);
++        }
++    }
++    if (std.c.close(fd) != 0) ok = false;
++
++    // In a sticky directory, rename cannot replace another user's file.
++    if (!ok or std.c.rename(tmp, path) != 0) {
++        _ = std.c.unlink(tmp);
++        return false;
++    }
++    return true;
++}

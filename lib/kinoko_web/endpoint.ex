@@ -57,6 +57,16 @@ defmodule KinokoWeb.Endpoint do
   plug Plug.Session, @session_options
   plug KinokoWeb.Router
 
+  # In local mode a request for any Host but a loopback name is refused
+  # before anything else (KinokoWeb.LocalHost). It runs here, not as a plug
+  # above, because Phoenix dispatches the LiveView socket before the plugs.
+  def call(conn, opts) do
+    case KinokoWeb.LocalHost.call(conn, []) do
+      %Plug.Conn{halted: true} = refused -> refused
+      conn -> super(conn, opts)
+    end
+  end
+
   defp parse_body(%Plug.Conn{path_info: ["mcp"]} = conn, _opts), do: conn
   defp parse_body(conn, _opts), do: Plug.Parsers.call(conn, @parsers)
 end
