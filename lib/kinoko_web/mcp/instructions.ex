@@ -141,6 +141,7 @@ defmodule KinokoWeb.Mcp.Instructions do
     Option.Some(x) / Option.None      variants are qualified too
     deftest App.adds do always(App.add(1, 2) == 3) end
   Every name is fully qualified everywhere: `App.helper(x)`, never `helper(x)`.
+  Construction lists EVERY field (no defaults); `{row | f: v}` copies the rest.
   A pattern is `_`, a lowercase name, an Int, String, true or false, a tuple
   or a variant. NO list patterns (`[]`, `[x | rest]`): use
   `case List.head(xs) do Option.Some(x) -> ... Option.None -> ... end`.

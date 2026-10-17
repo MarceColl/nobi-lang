@@ -24,6 +24,8 @@ defmodule Kinoko.Deployment do
   alias Kinoko.{Repo, Universe}
   alias Kinoko.Universe.Registry
 
+  @loopback_hosts ["localhost", "127.0.0.1", "[::1]", "::1"]
+
   @type t :: %{
           name: String.t(),
           universe: String.t(),
@@ -37,10 +39,34 @@ defmodule Kinoko.Deployment do
   commit is checked like `pin/2`'s, anything else is `{:error,
   :no_such_commit}`) and `hosts:` (default `[]`, a list of strings).
   Non-string name, universe, routes or hosts are `{:error, :bad_name}`.
+
+  Hosts are normalized (lowercase, no port, no trailing dot) and then
+  checked, so a deployment can never take a request host from another:
+
+    * `{:error, :bad_host}`: not a DNS name (dot-separated labels of
+      `a-z`, `0-9` and inner `-`, at most 63 each, 253 in all);
+    * `{:error, :reserved_host}`: `localhost`, `127.0.0.1` or `[::1]`
+      (the built-in `local` deployment's);
+    * `{:error, :foreign_localhost}`: a `*.localhost` other than
+      `<name>.localhost` (`<other>.localhost` is deployment `<other>`'s);
+    * `{:error, :host_taken}`: a host another deployment already lists.
   """
   @spec create(String.t(), String.t(), String.t(), keyword()) ::
-          :ok | {:error, :exists | :bad_name | :no_such_universe | :no_such_commit | term()}
-  def create(name, universe, routes, opts \\ []) do
+          :ok
+          | {:error,
+             :exists
+             | :bad_name
+             | :bad_host
+             | :reserved_host
+             | :foreign_localhost
+             | :host_taken
+             | :no_such_universe
+             | :no_such_commit
+             | term()}
+  def create(name, universe, routes, opts \\ []), do: create(name, universe, routes, opts, false)
+
+  # `loopback?` lets `ensure_local/0` give `local` the loopback hosts.
+  defp create(name, universe, routes, opts, loopback?) do
     commit = Keyword.get(opts, :commit)
     hosts = Keyword.get(opts, :hosts, [])
 
@@ -48,6 +74,9 @@ defmodule Kinoko.Deployment do
       not Registry.valid_name?(name) or not is_binary(universe) or not is_binary(routes) or
           not (is_list(hosts) and Enum.all?(hosts, &is_binary/1)) ->
         {:error, :bad_name}
+
+      (refused = refused_host(name, Enum.map(hosts, &normalize_host/1), loopback?)) != nil ->
+        {:error, refused}
 
       not universe_exists?(universe) ->
         {:error, :no_such_universe}
@@ -83,6 +112,11 @@ defmodule Kinoko.Deployment do
     Repo.transaction(fn ->
       case Repo.insert_all("deployments", [row], on_conflict: :nothing, conflict_target: :name) do
         {1, _} ->
+          # Inside the transaction, so a host is never listed twice.
+          if hosts != [] and
+               Repo.exists?(from h in "deployment_hosts", where: h.host in ^hosts),
+             do: Repo.rollback(:host_taken)
+
           # 3 bound parameters per row; chunks stay under SQLite's limit (32_766).
           hosts
           |> Enum.with_index()
@@ -98,8 +132,34 @@ defmodule Kinoko.Deployment do
     end)
     |> case do
       {:ok, :ok} -> :ok
-      {:error, :exists} -> {:error, :exists}
+      {:error, reason} when reason in [:exists, :host_taken] -> {:error, reason}
     end
+  end
+
+  @label ~r/\A[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\z/
+
+  # The first refusal among `hosts` (normalized), or nil.
+  defp refused_host(name, hosts, loopback?) do
+    Enum.find_value(hosts, fn host ->
+      cond do
+        host in @loopback_hosts ->
+          if loopback?, do: nil, else: :reserved_host
+
+        not dns_name?(host) ->
+          :bad_host
+
+        String.ends_with?(host, ".localhost") and host != name <> ".localhost" ->
+          :foreign_localhost
+
+        true ->
+          nil
+      end
+    end)
+  end
+
+  defp dns_name?(host) do
+    byte_size(host) <= 253 and
+      host |> String.split(".") |> Enum.all?(&Regex.match?(@label, &1))
   end
 
   @spec get(String.t()) :: {:ok, t} | :error
@@ -187,7 +247,7 @@ defmodule Kinoko.Deployment do
   def ensure_local do
     :ok = Registry.ensure_main()
 
-    case create("local", "main", "Main", hosts: @local_hosts) do
+    case create("local", "main", "Main", [hosts: @local_hosts], true) do
       :ok -> :ok
       {:error, :exists} -> :ok
     end
@@ -214,9 +274,13 @@ defmodule Kinoko.Deployment do
     end
   end
 
-  # `:localhost_deployments`; unset, it follows `:mcp_enabled`, which is
-  # set in dev, test and the local build (never a server build), like deployment serving itself.
-  defp localhost_deployments? do
+  @doc """
+  Whether `<name>.localhost` reaches deployment `<name>` without being
+  listed: `:localhost_deployments`, which, unset, follows `:mcp_enabled`
+  (dev, test and the local build; never a server build).
+  """
+  @spec localhost_deployments?() :: boolean()
+  def localhost_deployments? do
     Application.get_env(
       :kinoko,
       :localhost_deployments,

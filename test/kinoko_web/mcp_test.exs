@@ -309,7 +309,7 @@ defmodule KinokoWeb.McpTest do
       text = instructions(conn)
       tools = Enum.map(KinokoWeb.Mcp.Tools.list(), & &1.name)
 
-      for tool <- tools, do: assert(text =~ "`#{tool}`" or text =~ tool, "unmentioned: #{tool}")
+      for tool <- tools, do: assert(text =~ "`#{tool}`", "unmentioned: `#{tool}`")
 
       named =
         Regex.scan(~r/`([a-z]+_[a-z_]+)`/, text, capture: :all_but_first)
@@ -351,7 +351,8 @@ defmodule KinokoWeb.McpTest do
               "ONE expression",
               "never a type\nvariable",
               "trimmed at both ends",
-              "no `!`, `&&` or `||`"
+              "no `!`, `&&` or `||`",
+              "Construction lists EVERY field"
             ],
           do: assert(head =~ fact, "the head lacks #{fact}")
     end
@@ -434,6 +435,10 @@ defmodule KinokoWeb.McpTest do
       assert stage.(view.("on-input")) =~ "[bad-event] on-input needs a message value"
       assert stage.(view.("on-change")) == "promoted: p"
 
+      # A binding names one value.
+      assert stage.("def A.g() : Int do\n  (a, b) = (1, 2)\n  a\nend") =~
+               "a binding names one value"
+
       # A binding in a case arm.
       assert stage.(
                "def A.f(n : Int) : Int do\n  case n do\n    1 ->\n      m = n + 1\n      m\n    _ -> 0\n  end\nend"
@@ -462,8 +467,6 @@ defmodule KinokoWeb.McpTest do
                "no `List.find`"
     end
   end
-
-  # ---------- tools ----------
 
   # ---------- tools ----------
 
@@ -763,6 +766,105 @@ defmodule KinokoWeb.McpTest do
                "argument `hosts` must be an array of strings"
 
       assert Kinoko.Deployment.get("x3") == :error
+    end
+
+    test "create_deployment refuses another deployment's hosts, each with its reason", %{
+      conn: conn,
+      u: u
+    } do
+      with_example(conn, u)
+      args = %{"name" => u, "routes" => "Main", "universe" => u}
+      ok!(conn, "create_deployment", Map.put(args, "hosts", ["shop.example.test"]))
+      other = %{args | "name" => "#{u}-b"}
+
+      assert err!(conn, "create_deployment", Map.put(other, "hosts", ["localhost"])) =~
+               "belong to the built-in `local` deployment"
+
+      assert err!(conn, "create_deployment", Map.put(other, "hosts", ["#{u}.localhost"])) =~
+               "belongs to another deployment"
+
+      assert err!(conn, "create_deployment", Map.put(other, "hosts", ["Shop.example.test"])) =~
+               "already another deployment's"
+
+      assert err!(conn, "create_deployment", Map.put(other, "hosts", ["a b.test"])) =~
+               "not a DNS name"
+
+      assert Kinoko.Deployment.get("#{u}-b") == :error
+    end
+
+    test "local still serves / after an attempted hijack of localhost", %{conn: conn} do
+      stop_on_exit("main")
+      with_example(conn, "main")
+      :ok = Kinoko.Deployment.ensure_local()
+
+      err!(conn, "create_deployment", %{
+        "name" => "a",
+        "routes" => "Main",
+        "hosts" => ["localhost"]
+      })
+
+      err!(conn, "create_deployment", %{
+        "name" => "b",
+        "routes" => "Main",
+        "hosts" => ["local.localhost", "127.0.0.1"]
+      })
+
+      html = %{build_conn() | host: "localhost"} |> get("/") |> html_response(200)
+      assert html =~ "clicks: 0"
+      assert {:ok, %{name: "local"}} = Kinoko.Deployment.resolve("localhost")
+    end
+
+    test "in local mode a host that is not a localhost name is refused", %{conn: conn, u: u} do
+      with_example(conn, u)
+      previous = Application.fetch_env(:kinoko, :mode)
+      Application.put_env(:kinoko, :mode, :local)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, mode} -> Application.put_env(:kinoko, :mode, mode)
+          :error -> Application.delete_env(:kinoko, :mode)
+        end
+      end)
+
+      conn = %{conn | host: "localhost"}
+      args = %{"name" => u, "routes" => "Main", "universe" => u}
+
+      assert err!(conn, "create_deployment", Map.put(args, "hosts", ["forum.example.com"])) =~
+               "local mode serves only localhost names"
+
+      assert ok!(conn, "create_deployment", Map.put(args, "hosts", ["#{u}.localhost"])) =~
+               "http://#{u}.localhost:#{port()}/"
+    end
+
+    test "URLs list <name>.localhost only where it is served", %{conn: conn, u: u} do
+      with_example(conn, u)
+      previous = Application.fetch_env(:kinoko, :localhost_deployments)
+      Application.put_env(:kinoko, :localhost_deployments, false)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, v} -> Application.put_env(:kinoko, :localhost_deployments, v)
+          :error -> Application.delete_env(:kinoko, :localhost_deployments)
+        end
+      end)
+
+      args = %{"name" => u, "routes" => "Main", "universe" => u}
+      assert ok!(conn, "create_deployment", args) =~ "no URL"
+      refute ok!(conn, "list_deployments", %{}) =~ "#{u}.localhost"
+
+      ok!(
+        conn,
+        "create_deployment",
+        %{args | "name" => "#{u}-h"} |> Map.put("hosts", ["h.example.test"])
+      )
+
+      line =
+        ok!(conn, "list_deployments", %{})
+        |> String.split("\n")
+        |> Enum.find(&String.starts_with?(&1, "#{u}-h:"))
+
+      assert line =~ "http://h.example.test:#{port()}/"
+      refute line =~ ".localhost"
     end
 
     test "list_deployments shows each deployment's routes, head and URLs", %{conn: conn, u: u} do

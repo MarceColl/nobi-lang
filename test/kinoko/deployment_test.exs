@@ -101,13 +101,102 @@ defmodule Kinoko.DeploymentTest do
     assert :error = Deployment.resolve("a.b.localhost")
   end
 
-  test "exact host wins over <name>.localhost" do
-    u = fresh_universe()
-    a = dname()
-    b = dname()
-    :ok = Deployment.create(a, u, "Main")
-    :ok = Deployment.create(b, u, "Main", hosts: ["#{a}.localhost"])
-    assert {:ok, %{name: ^b}} = Deployment.resolve("#{a}.localhost")
+  describe "a deployment never takes another's host" do
+    test "loopback names are local's: reserved" do
+      u = fresh_universe()
+
+      for host <- [
+            "localhost",
+            "LOCALHOST:4000",
+            "127.0.0.1",
+            "[::1]",
+            "[::1]:4000",
+            "localhost."
+          ],
+          do:
+            assert(
+              {:error, :reserved_host} = Deployment.create(dname(), u, "Main", hosts: [host])
+            )
+    end
+
+    test "another deployment's <name>.localhost is foreign; its own is fine" do
+      u = fresh_universe()
+      a = dname()
+      b = dname()
+      :ok = Deployment.create(a, u, "Main")
+
+      assert {:error, :foreign_localhost} =
+               Deployment.create(b, u, "Main", hosts: ["#{a}.localhost"])
+
+      assert {:error, :foreign_localhost} =
+               Deployment.create(b, u, "Main", hosts: ["x.#{b}.localhost"])
+
+      assert {:ok, %{name: ^a}} = Deployment.resolve("#{a}.localhost")
+      assert :ok = Deployment.create(b, u, "Main", hosts: ["#{b}.localhost"])
+    end
+
+    test "a host another deployment lists is taken, and nothing is written" do
+      u = fresh_universe()
+      a = dname()
+      b = dname()
+      :ok = Deployment.create(a, u, "Main", hosts: ["shop.example.com"])
+
+      assert {:error, :host_taken} =
+               Deployment.create(b, u, "Main", hosts: ["new.example.com", "Shop.Example.com:80"])
+
+      assert :error = Deployment.get(b)
+      assert :error = Deployment.resolve("new.example.com")
+      assert {:ok, %{name: ^a}} = Deployment.resolve("shop.example.com")
+    end
+
+    test "a host that is not a DNS name is bad_host" do
+      u = fresh_universe()
+
+      for host <- [
+            "",
+            "a b.com",
+            "-a.com",
+            "a-.com",
+            "a..com",
+            "a_b.com",
+            "a/b",
+            String.duplicate("a", 64) <> ".com"
+          ],
+          do: assert({:error, :bad_host} = Deployment.create(dname(), u, "Main", hosts: [host]))
+
+      assert :ok = Deployment.create(dname(), u, "Main", hosts: ["a-1.b2.example.com"])
+    end
+
+    test "local keeps localhost after an attempted hijack" do
+      :ok = Deployment.ensure_local()
+      u = fresh_universe()
+
+      assert {:error, :reserved_host} =
+               Deployment.create("a", u, "Main", hosts: ["localhost", "127.0.0.1"])
+
+      assert {:error, :foreign_localhost} =
+               Deployment.create(dname(), u, "Main", hosts: ["local.localhost"])
+
+      assert {:ok, %{name: "local"}} = Deployment.resolve("localhost")
+      assert {:ok, %{name: "local"}} = Deployment.resolve("127.0.0.1")
+      assert {:ok, %{name: "local"}} = Deployment.resolve("local.localhost")
+    end
+  end
+
+  test "localhost_deployments?/0 follows :localhost_deployments" do
+    previous = Application.fetch_env(:kinoko, :localhost_deployments)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, v} -> Application.put_env(:kinoko, :localhost_deployments, v)
+        :error -> Application.delete_env(:kinoko, :localhost_deployments)
+      end
+    end)
+
+    Application.put_env(:kinoko, :localhost_deployments, false)
+    refute Deployment.localhost_deployments?()
+    Application.put_env(:kinoko, :localhost_deployments, true)
+    assert Deployment.localhost_deployments?()
   end
 
   test "ensure_local is idempotent and serves localhost" do
@@ -158,15 +247,13 @@ defmodule Kinoko.DeploymentTest do
     assert {:error, :no_such_commit} = Deployment.create(dname(), u, "Main", commit: :x)
   end
 
-  test "host normalization: trailing dot, port, ipv6" do
+  test "host normalization: trailing dot, port" do
     u = fresh_universe()
     n = dname()
-    :ok = Deployment.create(n, u, "Main", hosts: ["App.Example.com.:4000", "[::1]:4000"])
-    assert {:ok, %{hosts: ["app.example.com", "[::1]"]}} = Deployment.get(n)
+    :ok = Deployment.create(n, u, "Main", hosts: ["App.Example.com.:4000"])
+    assert {:ok, %{hosts: ["app.example.com"]}} = Deployment.get(n)
     assert {:ok, %{name: ^n}} = Deployment.resolve("app.example.com.")
     assert {:ok, %{name: ^n}} = Deployment.resolve("app.example.com.:4000")
-    assert {:ok, %{name: ^n}} = Deployment.resolve("[::1]:4000")
-    assert {:ok, %{name: ^n}} = Deployment.resolve("[::1]")
     assert {:ok, %{name: ^n}} = Deployment.resolve("#{n}.localhost.")
     assert {:ok, %{name: ^n}} = Deployment.resolve("#{n}.localhost.:4000")
     :ok = Deployment.ensure_local()

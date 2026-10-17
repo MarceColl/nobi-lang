@@ -25,6 +25,9 @@ defmodule KinokoWeb.Mcp.Tools do
   @default_universe "main"
   @name_rule "^[a-z0-9][a-z0-9_-]{0,62}$"
 
+  # `Kinoko.Deployment.create/4`'s host refusals.
+  @host_refusals [:bad_host, :reserved_host, :foreign_localhost, :host_taken]
+
   @universe_prop %{
     type: "string",
     description: "The universe to act on (default \"main\"). list_universes shows them."
@@ -297,11 +300,13 @@ defmodule KinokoWeb.Mcp.Tools do
          {:ok, name} <- string(args, "name"),
          {:ok, routes} <- string(args, "routes"),
          {:ok, hosts} <- strings(args, "hosts"),
+         :ok <- local_hosts(hosts),
          :ok <- route_table(u, routes) do
       case Deployment.create(name, u, routes, hosts: hosts) do
         :ok -> {:ok, created_text(name)}
         {:error, :exists} -> {:error, "deployment #{name} already exists (list_deployments)"}
-        {:error, :bad_name} -> {:error, bad_deployment_name(name, hosts)}
+        {:error, :bad_name} -> {:error, bad_deployment_name(name)}
+        {:error, refused} when refused in @host_refusals -> {:error, host_refusal(refused, name)}
         {:error, :no_such_universe} -> universe_error(:no_such_universe, u)
         {:error, error} -> universe_error(error, u)
       end
@@ -334,23 +339,60 @@ defmodule KinokoWeb.Mcp.Tools do
     end
   end
 
-  defp bad_deployment_name(name, []),
+  defp bad_deployment_name(name),
     do: "bad deployment name: #{Jason.encode!(name)} (names match #{@name_rule})"
 
-  defp bad_deployment_name(name, _hosts),
+  # A local build answers only on loopback names (KinokoWeb.LocalHost), so
+  # any other host could never reach the deployment.
+  defp local_hosts(hosts) do
+    case {Application.get_env(:kinoko, :mode),
+          Enum.reject(hosts, &KinokoWeb.LocalHost.local_host?(strip_port(&1)))} do
+      {:local, [host | _]} ->
+        {:error,
+         "host #{Jason.encode!(host)} cannot be served: local mode serves only localhost " <>
+           "names. Leave `hosts` out; the deployment is at http://<name>.localhost:#{port()}/."}
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp strip_port(host), do: String.replace(host, ~r/:\d+$/, "")
+
+  defp host_refusal(:bad_host, _name),
     do:
-      "bad deployment name: #{Jason.encode!(name)} (names match #{@name_rule}), " <>
-        "or a bad host name"
+      "a host is not a DNS name: each dot-separated label is a-z, 0-9 and inner '-', " <>
+        "at most 63 characters (e.g. forum.example.com)"
+
+  defp host_refusal(:reserved_host, name),
+    do:
+      "localhost, 127.0.0.1 and [::1] belong to the built-in `local` deployment " <>
+        "(it serves `defroutes Main`). Leave them out: #{name} is at " <>
+        "http://#{name}.localhost:#{port()}/."
+
+  defp host_refusal(:foreign_localhost, name),
+    do:
+      "a *.localhost host other than #{name}.localhost belongs to another deployment " <>
+        "(<x>.localhost is deployment x). Leave it out: #{name}.localhost needs no host, " <>
+        "or name the deployment after the address you want."
+
+  defp host_refusal(:host_taken, _name),
+    do: "a host is already another deployment's (list_deployments shows whose); leave it out"
 
   defp created_text(name) do
     {:ok, d} = Deployment.get(name)
 
+    urls =
+      case urls(d) do
+        [] -> ["no URL: this server does not serve <name>.localhost and it has no hosts"]
+        [url | more] -> ["URL: #{url}" | Enum.map(more, &"also: #{&1}")]
+      end
+
     Enum.join(
       [
         "created: deployment #{name} serves route table #{d.routes} of universe #{d.universe}, " <>
-          "following its head (each promotion is live at once).",
-        "URL: #{localhost_url(name)}"
-        | Enum.map(d.hosts, &"also: #{host_url(&1)}")
+          "following its head (each promotion is live at once)."
+        | urls
       ],
       "\n"
     )
@@ -358,11 +400,14 @@ defmodule KinokoWeb.Mcp.Tools do
 
   defp deployment_line(d) do
     head = if d.commit, do: "pinned to commit #{d.commit}", else: "follows head"
-    urls = [localhost_url(d.name) | Enum.map(d.hosts, &host_url/1)]
-    "#{d.name}: universe #{d.universe}, routes #{d.routes}, #{head}; #{Enum.join(urls, " ")}"
+    "#{d.name}: universe #{d.universe}, routes #{d.routes}, #{head}; #{Enum.join(urls(d), " ")}"
   end
 
-  defp localhost_url(name), do: host_url(name <> ".localhost")
+  # `<name>.localhost` only where it reaches the deployment, then its hosts.
+  defp urls(d) do
+    own = if Deployment.localhost_deployments?(), do: [d.name <> ".localhost"], else: []
+    Enum.map(own ++ d.hosts, &host_url/1)
+  end
 
   defp host_url(host), do: "http://#{host}:#{port()}/"
 
