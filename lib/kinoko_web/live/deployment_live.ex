@@ -758,7 +758,7 @@ defmodule KinokoWeb.DeploymentLive do
     case call(c, c.app <> ".view", [model]) do
       {_c, {:ok, html}} ->
         render = c.render + 1
-        {tree, handlers} = YabuHtml.prepare(html, render)
+        {tree, handlers} = YabuHtml.prepare(html, render, c.entries)
 
         %{
           model: model,

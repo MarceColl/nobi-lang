@@ -71,15 +71,16 @@ defmodule Kinoko.Exec.StdlibTest do
       assert value(divergent) == false
     end
 
-    # `Map` is this port's own (kinoko-next has none): no oracle rows, its
-    # cases are `Kinoko.Lang.MapStdlibTest`'s.
-    test "every row is a stdlib def, and every stdlib def but Cmd/JSON/Tx/Map/Store has examples" do
+    # `Map` and `Uuid` are this port's own (kinoko-next has none): no oracle
+    # rows, their cases are `Kinoko.Lang.MapStdlibTest`'s and
+    # `Kinoko.Lang.LinksTest`'s.
+    test "every row is a stdlib def, and every stdlib def but Cmd/JSON/Tx/Map/Store/Uuid has examples" do
       rows = Enum.map(YabuGolden.stdlib(), & &1["name"])
       sigs = Sigs.signatures()
 
       for name <- rows, do: assert(match?({:def, _, _, _}, sigs[name]), name)
 
-      exempt? = &String.starts_with?(&1, ["Cmd.", "JSON.", "Tx.", "Map.", "Store."])
+      exempt? = &String.starts_with?(&1, ["Cmd.", "JSON.", "Tx.", "Map.", "Store.", "Uuid."])
 
       for {name, {:def, _, _, _}} <- sigs,
           not exempt?.(name),

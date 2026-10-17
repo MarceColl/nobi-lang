@@ -389,4 +389,20 @@ defmodule Kinoko.Lang.Rt.Stdlib do
 
   @doc "`Store.list` without its model: an error."
   def store_list(_store), do: error!("`Store.list` " <> @store_why)
+
+  # ---------- Uuid ----------
+
+  @uuid ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
+
+  @doc "The canonical lowercase text of a Uuid, as a route URL carries it."
+  def uuid_to_string({:uuid, s}) when is_binary(s), do: s
+  def uuid_to_string(_), do: wrong!("Uuid.to_string")
+
+  @doc "`Option.Some(uuid)` for a UUID in any case (kept lowercase), else `Option.None`."
+  def uuid_parse(s) when is_binary(s) do
+    down = String.downcase(s)
+    if Regex.match?(@uuid, down), do: some({:uuid, down}), else: none()
+  end
+
+  def uuid_parse(_), do: wrong!("Uuid.parse")
 end

@@ -501,6 +501,7 @@ defmodule Kinoko.Lang.Types.Check do
   # `name(args)`: the target must resolve to something callable with as
   # many arguments as are given, each checked against its parameter.
   defp synth_call(ctx, {:call, _, ["Cmd.navigate", _]} = e), do: Routes.synth_navigate(ctx, e)
+  defp synth_call(ctx, {:call, _, ["Html.href", _]} = e), do: Routes.synth_href(ctx, e)
   defp synth_call(ctx, {:call, _, ["Tx.delete", _]} = e), do: Store.synth_tx_delete(ctx, e)
 
   defp synth_call(ctx, {:call, m, [name, args]} = e) do

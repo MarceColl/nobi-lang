@@ -53,11 +53,19 @@ defmodule KinokoWeb.YabuHtml do
       form); a standalone element (no ancestor form) gets a minimal
       `<form phx-change="yabu:change" phx-submit="yabu:submit" class="contents">` wrapper.
 
+  Links. `href={Html.href(App, args…)}` is resolved against the route
+  table `prepare/3` is given: the element gets the route's path as its
+  `href` and, on an `<a>`, `data-phx-link="patch"` and
+  `data-phx-link-state="push"` (host-added; an app's own `data-phx-*` is
+  dropped). A link no route reaches gets no `href`.
+
   "Relative" URLs include protocol-relative `//host/path`, which is allowed
   like https.
   """
 
   use Phoenix.Component
+
+  alias Kinoko.Lang.Routes
 
   @tags ~w(div span p a ul ol li h1 h2 h3 h4 h5 h6 button input textarea select option
            optgroup label form fieldset legend section header footer nav main article aside
@@ -94,9 +102,9 @@ defmodule KinokoWeb.YabuHtml do
   Walk a Yabu `Html` value into `{tree, handlers}`, its handler ids stamped
   with render number `render`. Pure.
   """
-  @spec prepare(term, non_neg_integer()) :: {tuple | nil, %{String.t() => term}}
-  def prepare(html, render \\ 0) when is_integer(render) and render >= 0 do
-    acc = %{prefix: "r#{render}.e", n: 0, handlers: %{}, changed?: false}
+  @spec prepare(term, non_neg_integer(), [Routes.entry()]) :: {tuple | nil, %{String.t() => term}}
+  def prepare(html, render \\ 0, routes \\ []) when is_integer(render) and render >= 0 do
+    acc = %{prefix: "r#{render}.e", n: 0, handlers: %{}, changed?: false, routes: routes}
     {node, acc} = walk(html, false, acc)
     {node, acc.handlers}
   end
@@ -119,7 +127,9 @@ defmodule KinokoWeb.YabuHtml do
   defp walk(_other, _in_form?, acc), do: {nil, acc}
 
   defp element(tag, attrs, children, in_form?, acc) do
+    {attrs, link} = link(tag, attrs, acc.routes)
     plain = for {name, value} <- attrs, attr = plain_attr(name, value), do: attr
+    plain = plain ++ link
     {event_attrs, change, acc} = events(tag, attrs, acc)
 
     {outer_changed?, acc} = enter(tag, acc)
@@ -138,6 +148,39 @@ defmodule KinokoWeb.YabuHtml do
       {id, true} -> {name_change(el, id), %{acc | changed?: true}}
       {id, false} -> {{:change, name_change(el, id)}, acc}
     end
+  end
+
+  # An `href={Html.href(App, args…)}`: the path the route table gives it,
+  # and on an `<a>` LiveView's patch attributes, so a click stays in the
+  # page's LiveView while middle-click and copy-link get a real URL. A link
+  # no route reaches renders without an href.
+  defp link(tag, attrs, routes) do
+    case List.keyfind(attrs, "href", 0) do
+      {"href", {:href, app, args}} when is_binary(app) and is_list(args) ->
+        rest = List.keydelete(attrs, "href", 0)
+
+        case route_path(routes, app, args) do
+          {:ok, path} when tag == "a" ->
+            {rest ++ [{"href", path}],
+             [{"data-phx-link", "patch"}, {"data-phx-link-state", "push"}]}
+
+          {:ok, path} ->
+            {rest ++ [{"href", path}], []}
+
+          :error ->
+            {rest, []}
+        end
+
+      _ ->
+        {attrs, []}
+    end
+  end
+
+  # `Routes.path/3` raises when the args do not fit the route's params.
+  defp route_path(routes, app, args) do
+    Routes.path(routes, app, args)
+  rescue
+    ArgumentError -> :error
   end
 
   # A form scopes its own on-change flag.

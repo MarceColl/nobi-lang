@@ -139,11 +139,11 @@ defmodule Kinoko.Lang.Types.Check.Decl do
 
   @doc """
   Whether `t` is itself disallowed where data is required: a function type,
-  `Cmd`, `Html`, or a transaction's `Store`. The predicate `forbid_in_model_field/3` and the map-key
+  `Cmd`, `Html`, a transaction's `Store`, or a link's `Href`. The predicate `forbid_in_model_field/3` and the map-key
   rule (`Kinoko.Lang.Types.Keys`) are built on.
   """
   def non_data?({:arrow, _, _}), do: true
-  def non_data?({:named, n}), do: n in ["Cmd", "Store"]
+  def non_data?({:named, n}), do: n in ["Cmd", "Store", "Href"]
   def non_data?({:applied, n, _}), do: n in ["Cmd", "Html"]
   def non_data?(_), do: false
 

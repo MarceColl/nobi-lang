@@ -705,6 +705,9 @@ defmodule Kinoko.Lang.Rt.Json do
       {:store, _, _} ->
         refuse!("cannot encode a Store as JSON at #{path(at)}")
 
+      {:href, _, _} ->
+        refuse!("cannot encode a link (Html.href) as JSON at #{path(at)}")
+
       f when is_function(f) ->
         refuse!("cannot encode a function as JSON at #{path(at)}")
 

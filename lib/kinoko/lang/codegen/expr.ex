@@ -418,6 +418,11 @@ defmodule Kinoko.Lang.Codegen.Expr do
           &rt(:cmd_effect, [lit("Cmd.navigate"), lit(nil), list([lit(app) | &1])])
         )
 
+      # `Html.href(App, args…)`: `{:href, app, args}`, a link the page's
+      # route table turns into a path (`KinokoWeb.YabuHtml`).
+      {:href, app, _params} ->
+        seq(tl(parts), ctx, &{:tuple, @a, [lit(:href), lit(app), list(&1)]})
+
       # `Tx.delete(Model, id)`: the model by name, then the id
       # (`Kinoko.Lang.Types.Store`).
       {:tx_delete, model} ->

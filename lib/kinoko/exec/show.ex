@@ -16,6 +16,7 @@ defmodule Kinoko.Exec.Show do
   | Cmd | `Cmd.none()`, `Cmd.batch([...])`, an effect as its call: `Cmd.store.list(<fn M.Msg.Rows>)` (a store effect's model is its types', as in source) |
   | Tx.Op | its call: `Tx.insert(%M.Row{…})`, `Tx.update(<uuid …>, %M.Row{…})`, `Tx.delete(M.Row, <uuid …>)` |
   | Store | `<store>` |
+  | Href | its call: `Html.href(Forum.Post, <uuid …>)` |
   | Uuid | `<uuid 0b9e2c4a-…>` (source has no Uuid literal) |
   | function | `<fn M.f>` for a def (the image's or the stdlib's), `<fn M.Msg.Add>` for a constructor, `<fn>` for a closure |
 
@@ -131,6 +132,13 @@ defmodule Kinoko.Exec.Show do
   defp kind({:tx, _, _, _} = op, left, below), do: kind(Rt.tx_variant(op), left, below)
   defp kind({:tx, _, _, _, _} = op, left, below), do: kind(Rt.tx_variant(op), left, below)
   defp kind({:store, _, _}, left, _), do: {name("<store>"), left}
+
+  # `Html.href(App, args…)`: a link, as in source.
+  defp kind({:href, app, args}, left, below) when is_binary(app) and is_list(args) do
+    {es, left} = all(args, left, below)
+    {node(:call, ["Html.href", [name(app) | es]]), left}
+  end
+
   defp kind(f, left, _) when is_function(f), do: {name(fun_name(f)), left}
 
   defp kind(t, left, below) when is_tuple(t) do

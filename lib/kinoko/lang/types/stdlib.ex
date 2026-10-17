@@ -2,7 +2,7 @@ defmodule Kinoko.Lang.Types.Stdlib do
   @moduledoc """
   Stdlib signatures (ported from `types/stdlib.rs`): the 59 rows the checker
   resolves calls against, in the Rust/TS declared order, then the `Map` rows
-  this port adds, then `Store.get`/`Store.list` (70 in all). `Cmd.store.tx`
+  this port adds, then `Store.get`/`Store.list`, then `Uuid.to_string`/`Uuid.parse` (72 in all). `Cmd.store.tx`
   takes a closure and `Tx.delete` a model and an id (a special form), where
   Rust's took a list of ops and a row. Generic positions use
   lowercase `{:var, "a"}` for defs and `{:var, "T"}` for the `Option`/`Result`
@@ -131,7 +131,13 @@ defmodule Kinoko.Lang.Types.Stdlib do
             # every earlier row keeps its rank). `a` is the stored model,
             # taken from the type the result is used at.
             {"Store.get", def_.([store, uuid], option.(a))},
-            {"Store.list", def_.([store], list.(a))}
+            {"Store.list", def_.([store], list.(a))},
+            # Uuid <-> String (after the Store rows so every earlier row
+            # keeps its rank): to_string is the canonical lowercase form a
+            # route matches; parse takes any case and answers None for
+            # anything that is not a UUID.
+            {"Uuid.to_string", def_.([uuid], str)},
+            {"Uuid.parse", def_.([str], option.(uuid))}
           ]
         )
 

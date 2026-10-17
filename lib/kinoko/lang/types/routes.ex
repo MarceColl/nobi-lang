@@ -1,6 +1,6 @@
 defmodule Kinoko.Lang.Types.Routes do
   @moduledoc """
-  Route tables (`defroutes`) and `Cmd.navigate`, checked.
+  Route tables (`defroutes`), `Cmd.navigate` and `Html.href`, checked.
 
   A route table maps URL patterns to apps. Each target must be a `defapp`,
   and its pattern's parameters must be exactly the target's `init`
@@ -14,6 +14,9 @@ defmodule Kinoko.Lang.Types.Routes do
   the serving deployment uses. The call node's `res:` is `{:navigate, app,
   [{param, type}]}` (init's parameters, in order), and the app argument's
   is `{:app, app}`.
+
+  `Html.href(App, args…)` is the same form, of type `Href`: a link's URL,
+  which only an `<a href>` takes (`Kinoko.Lang.Types.JsxApp`).
 
   Every signature is read through `Ctx.dget/2`, so a table depends on each
   target and its `init`, and a navigating declaration on `App` and
@@ -146,12 +149,35 @@ defmodule Kinoko.Lang.Types.Routes do
   defp kind(:test), do: "a test"
   defp kind(_), do: "not an app"
 
-  # ---------- Cmd.navigate ----------
+  # ---------- Cmd.navigate and Html.href ----------
 
-  @example "`Cmd.navigate(Forum.Post, id)`"
+  # What each form is called, its example, its error code, and its type.
+  @forms %{
+    "Cmd.navigate" => %{
+      example: "`Cmd.navigate(Forum.Post, id)`",
+      code: "bad-navigate",
+      does: "opens"
+    },
+    "Html.href" => %{
+      example: "`<a href={Html.href(Forum.Post, id)}>`",
+      code: "bad-href",
+      does: "links to"
+    }
+  }
 
   @doc "`Cmd.navigate(App, args…)`, annotated `Cmd<a>` for a fresh `a`."
-  def synth_navigate(ctx, {:call, m, [name, [{:name, _, [app]} = a | args]]} = e) do
+  def synth_navigate(ctx, e), do: synth_open(ctx, e, "Cmd.navigate")
+
+  @doc """
+  `Html.href(App, args…)`, annotated `Href`: the URL of the route that
+  opens `App` with `args`, for an `<a href>`. Typed like `Cmd.navigate`;
+  the serving deployment's route table turns it into a path when the page
+  renders (`KinokoWeb.YabuHtml`). The call node's `res:` is `{:href, app,
+  [{param, type}]}`.
+  """
+  def synth_href(ctx, e), do: synth_open(ctx, e, "Html.href")
+
+  defp synth_open(ctx, {:call, m, [name, [{:name, _, [app]} = a | args]]} = e, form) do
     with true <- Ast.capitalised?(app),
          {:app, ctx} <- Ctx.dget(ctx, app),
          {{:def, types, _, names}, ctx} <- Ctx.dget(ctx, "#{app}.init") do
@@ -162,43 +188,58 @@ defmodule Kinoko.Lang.Types.Routes do
           args
           |> Enum.zip(params)
           |> Enum.map_reduce(ctx, fn {arg, param}, ctx ->
-            navigate_arg(ctx, e, app, arg, param)
+            open_arg(ctx, e, app, arg, param, form)
           end)
 
-        {u, ctx} = Ctx.fresh(ctx)
         a = put_ann(a, {:named, "Unit"}, {:app, app})
-        {put_ann({:call, m, [name, [a | args]]}, cmd(u), {:navigate, app, params}), ctx}
+        {type, res, ctx} = typed(ctx, form, app, params)
+        {put_ann({:call, m, [name, [a | args]]}, type, res), ctx}
       else
         message =
-          "`#{Quote.expr(e)}` opens `#{app}`, whose `#{init_text(app, params)}` takes " <>
-            "#{length(types)} argument(s), got #{length(args)} — write " <>
-            "`Cmd.navigate(#{Enum.join([app | names], ", ")})`"
+          "`#{Quote.expr(e)}` #{@forms[form].does} `#{app}`, whose `#{init_text(app, params)}` " <>
+            "takes #{length(types)} argument(s), got #{length(args)} — write " <>
+            "`#{form}(#{Enum.join([app | names], ", ")})`"
 
-        failed(ctx, e, message)
+        failed(ctx, e, message, form)
       end
     else
       false ->
-        failed(ctx, e, "`#{Quote.expr(e)}`: `#{app}` is not an app — #{needs()}")
+        failed(ctx, e, "`#{Quote.expr(e)}`: `#{app}` is not an app — #{needs(form)}", form)
 
       {nil, ctx} ->
-        failed(ctx, e, "`#{Quote.expr(e)}`: `#{app}` is not defined — #{needs()}")
+        failed(ctx, e, "`#{Quote.expr(e)}`: `#{app}` is not defined — #{needs(form)}", form)
 
       {:app, ctx} ->
-        failed(ctx, e, "`#{Quote.expr(e)}`: `#{app}.init` is not a def — #{needs()}")
+        failed(ctx, e, "`#{Quote.expr(e)}`: `#{app}.init` is not a def — #{needs(form)}", form)
 
       {sig, ctx} ->
-        failed(ctx, e, "`#{Quote.expr(e)}`: `#{app}` is #{kind(sig)}, not an app — #{needs()}")
+        failed(
+          ctx,
+          e,
+          "`#{Quote.expr(e)}`: `#{app}` is #{kind(sig)}, not an app — #{needs(form)}",
+          form
+        )
     end
   end
 
-  def synth_navigate(ctx, e),
-    do: failed(ctx, e, "`#{Quote.expr(e)}` needs an app first — #{needs()}")
+  defp synth_open(ctx, e, form),
+    do: failed(ctx, e, "`#{Quote.expr(e)}` needs an app first — #{needs(form)}", form)
 
-  defp needs, do: "`Cmd.navigate` opens a `defapp` with its init's arguments, as in #{@example}"
+  defp typed(ctx, "Cmd.navigate", app, params) do
+    {u, ctx} = Ctx.fresh(ctx)
+    {cmd(u), {:navigate, app, params}, ctx}
+  end
+
+  defp typed(ctx, "Html.href", app, params), do: {{:named, "Href"}, {:href, app, params}, ctx}
+
+  defp needs(form),
+    do:
+      "`#{form}` #{@forms[form].does} a `defapp` with its init's arguments, as in " <>
+        @forms[form].example
 
   # An argument of exactly its parameter's type; one still open is unified
   # with it when it can be.
-  defp navigate_arg(ctx, e, app, arg, {n, t}) do
+  defp open_arg(ctx, e, app, arg, {n, t}, form) do
     {s, ctx} = Check.synth(ctx, arg)
     {resolved, ctx} = Ctx.resolve_deep(ctx, ty(s), fn -> Quote.expr(arg) end)
 
@@ -221,13 +262,18 @@ defmodule Kinoko.Lang.Types.Routes do
           "`#{Quote.expr(e)}`: argument `#{Quote.expr(arg)}` is #{Ctx.format(ctx, resolved)}, but " <>
             "`#{app}.init` takes `#{n} : #{Quote.type(t)}`"
 
-        {s, Ctx.error(ctx, "bad-navigate", message)}
+        {s, Ctx.error(ctx, @forms[form].code, message)}
     end
   end
 
-  defp failed(ctx, e, message) do
-    {call, ctx} = ctx |> Ctx.error("bad-navigate", message) |> Check.unchecked(e)
-    {call, ctx}
+  # A refused href is still an `Href`: its `<a href>` reports nothing more.
+  defp failed(ctx, e, message, form) do
+    {call, ctx} = ctx |> Ctx.error(@forms[form].code, message) |> Check.unchecked(e)
+
+    case form do
+      "Html.href" -> {call, Ctx.unify!(ctx, ty(call), {:named, "Href"}, e)}
+      _ -> {call, ctx}
+    end
   end
 
   defp cmd(t), do: {:applied, "Cmd", [t]}

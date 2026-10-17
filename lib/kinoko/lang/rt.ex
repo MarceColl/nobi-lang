@@ -19,6 +19,7 @@ defmodule Kinoko.Lang.Rt do
   | Cmd | `{:cmd, :none}`, `{:cmd, {:batch, [bare]}}`, `{:cmd, {:effect, name, model \\| nil, [args]}}` |
   | Tx.Op | `{:tx, :insert, model, row}`, `{:tx, :update, model, id, row}`, `{:tx, :delete, model, id}` |
   | Store | `{:store, coordinator_pid, ref}`: opaque, only a running `Cmd.store.tx` makes one |
+  | Href | `{:href, "App.Name", [args]}`: a link, `Html.href(App, args…)` |
 
   ## Store effects
 
@@ -49,14 +50,16 @@ defmodule Kinoko.Lang.Rt do
   `Cmd.navigate(App, args…)` is `{:cmd, {:effect, "Cmd.navigate", nil,
   [app | args]}}`: the target app's name (a binary) followed by `init`'s
   arguments positionally. The host turns it into a URL with
-  `Kinoko.Lang.Routes.path/3`.
+  `Kinoko.Lang.Routes.path/3`. `Html.href(App, args…)` is `{:href, app,
+  args}` the same way, a link the page's renderer resolves
+  (`KinokoWeb.YabuHtml`).
 
   A batch holds its commands *bare*: `:none`, `{:batch, _}` or
   `{:effect, ...}`, never re-wrapped in `{:cmd, _}`.
 
-  A Yabu tuple is never mistaken for a record, variant, Uuid, Cmd, Tx op
-  or Store: those tag their first element with an atom (`:rec`, `:var`,
-  `:uuid`, `:cmd`, `:tx`, `:store`) that no Yabu value is. A Store is its
+  A Yabu tuple is never mistaken for a record, variant, Uuid, Cmd, Tx op,
+  Store or Href: those tag their first element with an atom (`:rec`,
+  `:var`, `:uuid`, `:cmd`, `:tx`, `:store`, `:href`) that no Yabu value is. A Store is its
   own kind (`kind_name/1` "a Store"); comparing two is a runtime error, as
   a handle has no order (`eq/2` is still structural).
 

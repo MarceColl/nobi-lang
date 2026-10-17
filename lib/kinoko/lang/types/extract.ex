@@ -23,7 +23,7 @@ defmodule Kinoko.Lang.Types.Extract do
   """
   @type default :: :none | Ast.node_()
 
-  @builtin_named ~w(Int String Bool Uuid Unit Store)
+  @builtin_named ~w(Int String Bool Uuid Unit Store Href)
   @builtin_applied %{"List" => 1, "Map" => 2, "Cmd" => 1, "Html" => 1}
 
   @doc "Names that are never dependencies in type position."
@@ -133,8 +133,9 @@ defmodule Kinoko.Lang.Types.Extract do
   defp expr({:bin, _, [_, l, r]}), do: expr(l) ++ expr(r)
   defp expr({k, _, [e]}) when k in [:not, :neg, :always, :sometimes], do: expr(e)
 
-  defp expr({:call, _, ["Cmd.navigate", [{:name, _, [app]} | args]]}),
-    do: [app, "#{app}.init" | exprs(args)]
+  defp expr({:call, _, [form, [{:name, _, [app]} | args]]})
+       when form in ["Cmd.navigate", "Html.href"],
+       do: [app, "#{app}.init" | exprs(args)]
 
   defp expr({:call, _, ["Tx.delete", [{:name, _, [model]} | args]]}),
     do: [model | exprs(args)]

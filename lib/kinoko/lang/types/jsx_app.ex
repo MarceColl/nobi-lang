@@ -93,6 +93,16 @@ defmodule Kinoko.Lang.Types.JsxApp do
 
     ctx =
       case resolved do
+        {:named, "Href"} when name == "href" ->
+          ctx
+
+        {:named, "Href"} ->
+          message =
+            "attribute `#{name}` cannot hold a link: `Html.href(...)` goes in an `href`, as " <>
+              "in `<a href={#{Quote.expr(x)}}>`"
+
+          Ctx.error(ctx, "mismatch", message)
+
         {:named, n} ->
           if n in Patterns.scalars(), do: ctx, else: not_scalar(ctx, name, x, s)
 

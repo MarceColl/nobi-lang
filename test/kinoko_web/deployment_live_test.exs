@@ -48,6 +48,41 @@ defmodule KinokoWeb.DeploymentLiveTest do
   end
   """
 
+  # A real link to a route with a param (`Html.href`), and the id as text.
+  @hop """
+  defmodel Forum.Hop.Model do
+    target : Uuid
+  end
+
+  deftype Forum.Hop.Msg do
+    Noop
+  end
+
+  def Forum.Hop.init(id : Uuid) : (Forum.Hop.Model, Cmd<Forum.Hop.Msg>) do
+    (%Forum.Hop.Model{target: id}, Cmd.none())
+  end
+
+  def Forum.Hop.update(msg : Forum.Hop.Msg, model : Forum.Hop.Model) : (Forum.Hop.Model, Cmd<Forum.Hop.Msg>) do
+    (model, Cmd.none())
+  end
+
+  def Forum.Hop.view(model : Forum.Hop.Model) : Html<Forum.Hop.Msg> do
+    <p>
+      <a id="hop" href={Html.href(Forum.Post, model.target)}>{Uuid.to_string(model.target)}</a>
+      <a id="nowhere" href={Html.href(Forum.Hop, model.target)}>unrouted</a>
+    </p>
+  end
+
+  defapp Forum.Hop
+
+  defroutes Forum do
+    "/" -> Forum.Threads
+    "/post/:id" -> Forum.Post
+    "/settings" -> Forum.Settings
+    "/hop/:id" -> Forum.Hop
+  end
+  """
+
   # Two handlers on one element, and a row list keyed by position.
   @rows """
   defmodel P.Model do
@@ -369,6 +404,71 @@ defmodule KinokoWeb.DeploymentLiveTest do
       click(view, click_id(view, "#go"))
       assert_patch(view, "/post/#{@uuid}")
       eventually(view, &(&1 =~ ~s(data-post="#{@uuid}")))
+    end
+  end
+
+  describe "links (Html.href)" do
+    setup do
+      u = deploy(@forum, "Forum")
+      assert {:promoted, _} = Universe.stage(u, "hop", @hop)
+      %{u: u}
+    end
+
+    test "render a real href to the route, patched by LiveView", %{conn: conn, u: u} do
+      doc =
+        conn
+        |> on_host(u)
+        |> get("/hop/#{@uuid}")
+        |> html_response(200)
+        |> LazyHTML.from_document()
+
+      [hop] = doc |> LazyHTML.query("a#hop") |> Enum.to_list()
+      assert LazyHTML.attribute(hop, "href") == ["/post/#{@uuid}"]
+      assert LazyHTML.attribute(hop, "data-phx-link") == ["patch"]
+      assert LazyHTML.text(hop) == @uuid
+
+      # A link to the app's own route.
+      [self] = doc |> LazyHTML.query("a#nowhere") |> Enum.to_list()
+      assert LazyHTML.attribute(self, "href") == ["/hop/#{@uuid}"]
+    end
+
+    test "a click navigates inside the LiveView", %{conn: conn, u: u} do
+      {view, _html} = open(conn, u, "/hop/#{@uuid}")
+      view |> element("a#hop") |> render_click()
+      assert_patch(view, "/post/#{@uuid}")
+      eventually(view, &(&1 =~ ~s(data-post="#{@uuid}")))
+    end
+
+    test "a link goes to the first route that reaches it, and without one has no href", %{
+      conn: conn,
+      u: u
+    } do
+      assert {:promoted, _} =
+               Universe.stage(u, "unroute", """
+               defroutes Forum do
+                 "/" -> Forum.Threads
+                 "/post/:id" -> Forum.Post
+                 "/settings" -> Forum.Settings
+                 "/hop/:id" -> Forum.Hop
+                 "/jump/:id" -> Forum.Hop
+               end
+               """)
+
+      # Two routes to Forum.Hop: the first wins, so a link to it is /hop/<id>.
+      {view, _html} = open(conn, u, "/jump/#{@uuid}")
+      assert has_element?(view, ~s(a#nowhere[href="/hop/#{@uuid}"]))
+
+      assert {:promoted, _} =
+               Universe.stage(u, "unroute", """
+               defroutes Forum do
+                 "/" -> Forum.Threads
+                 "/jump/:id" -> Forum.Hop
+               end
+               """)
+
+      {view, _html} = open(conn, u, "/jump/#{@uuid}")
+      assert has_element?(view, "a#hop")
+      refute has_element?(view, "a#hop[href]")
     end
   end
 

@@ -6,7 +6,7 @@ defmodule KinokoWeb.Mcp.Instructions do
   only what this server has. The stdlib list is generated from the
   stdlib's own table (`Kinoko.Lang.Rt.Stdlib` / `Kinoko.Lang.Types.Stdlib`),
   so it cannot drift; the code examples are `examples/0` (the DECLARATIONS
-  app, then the form and the route table built on it), which a test stages
+  app, then the form, the route table and a linked page built on it), which a test stages
   in order into a fresh universe (each must promote), so they cannot drift
   either. The "there is no ..." facts are each asserted against the parser
   and checker by the MCP tests.
@@ -106,6 +106,41 @@ defmodule KinokoWeb.Mcp.Instructions do
   end
   """
 
+  # A page per row, and a real link to it (`Html.href`), on the example's
+  # Counter. Restates Counter.Routes with the new route.
+  @link_example """
+  defmodel Counter.Show.Model do
+    snap : Uuid
+  end
+
+  deftype Counter.Show.Msg do
+    Back
+  end
+
+  def Counter.Show.init(id : Uuid) : (Counter.Show.Model, Cmd<Counter.Show.Msg>) do
+    (%Counter.Show.Model{snap: id}, Cmd.none())
+  end
+
+  def Counter.Show.update(msg : Counter.Show.Msg, model : Counter.Show.Model) : (Counter.Show.Model, Cmd<Counter.Show.Msg>) do
+    (model, Cmd.navigate(Counter))
+  end
+
+  def Counter.Show.view(model : Counter.Show.Model) : Html<Counter.Show.Msg> do
+    <p>Snapshot {Uuid.to_string(model.snap)} <a href={Html.href(Counter)}>back</a></p>
+  end
+
+  defapp Counter.Show
+
+  def Counter.link(snap : Counter.Snapshot) : Html<Counter.Msg> do
+    <a class="underline" href={Html.href(Counter.Show, snap.id)}>{snap.label}</a>
+  end
+
+  defroutes Counter.Routes do
+    "/" -> Counter
+    "/snap/:id" -> Counter.Show
+  end
+  """
+
   # What an agent must see first. Claude Code shows a server's instructions
   # only up to about 4096 characters, so this part (with the "serving at"
   # line before it) must fit in 4000 (a test checks): the facts whose
@@ -153,6 +188,8 @@ defmodule KinokoWeb.Mcp.Instructions do
   input, textarea or select: an unapplied constructor of one String
   (`on-change={App.Msg.SetTitle}`), sent with the text on every edit.
   Any other on-* (on-input too) is refused.
+  Link to a page with a real href: `<a href={Html.href(Forum.Post, row.id)}>`
+  (typed like Cmd.navigate); `Uuid.to_string(id)` gives an id's text.
   A case arm's body is ONE expression: no `x = e` in it (bind before the
   case, or call a helper). Annotations name concrete types, never a type
   variable: a shared view helper returns `Html<App.Msg>`, not `Html<a>`.
@@ -208,6 +245,15 @@ defmodule KinokoWeb.Mcp.Instructions do
     when it takes none. Promotion checks that the target is an app and the
     args fit its init; whether a route reaches it is checked at run time, by
     the deployment serving the page (with none, the page shows an error).
+  - LINKS: `Html.href(App, args...)` is the URL of the route that opens App
+    with those args, checked like Cmd.navigate. It goes in an `href` and
+    nowhere else (it is not a String and not data): the page renders the
+    route's path, a click stays in the page, and middle-click and copy-link
+    get the real URL. A link no route reaches renders without an href. A page
+    per stored row, linked from a list:
+  #{@link_example |> String.trim_trailing() |> String.split("\n") |> Enum.map_join("\n", &String.trim_trailing("    " <> &1))}
+    `Uuid.to_string(id)` is an id's text (lowercase, as in a URL);
+    `Uuid.parse(s)` is `Option<Uuid>`.
   - `list_staged` shows every staged patch, its reasons and source;
     `unstage` drops one. `history` shows what promoted, and when.
 
@@ -306,7 +352,7 @@ defmodule KinokoWeb.Mcp.Instructions do
   staged after the ones before it.
   """
   @spec examples() :: [String.t()]
-  def examples, do: [@example, @form_example, @routes_example]
+  def examples, do: [@example, @form_example, @routes_example, @link_example]
 
   @doc """
   The instructions text, with the stdlib generated from its table and
