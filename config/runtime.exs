@@ -12,41 +12,41 @@ import Config
 # If you use `mix release`, you need to explicitly enable the server
 # by passing the PHX_SERVER=true when you start it:
 #
-#     PHX_SERVER=true bin/kinoko start
+#     PHX_SERVER=true bin/nobi start
 #
 # Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
 # script that automatically sets the env var above.
 if System.get_env("PHX_SERVER") do
-  config :kinoko, KinokoWeb.Endpoint, server: true
+  config :nobi, NobiWeb.Endpoint, server: true
 end
 
 if config_env() == :prod do
-  # The run mode (Kinoko.Local): `local` (default) is the distributed
-  # `kinoko` binary on one machine; `server` is a prod deploy.
-  # Kinoko.Application refuses a build that does not fit the mode.
+  # The run mode (Nobi.Local): `local` (default) is the distributed
+  # `nobi` binary on one machine; `server` is a prod deploy.
+  # Nobi.Application refuses a build that does not fit the mode.
   env = System.get_env()
-  mode = Kinoko.Local.mode(env)
-  data_dir = Kinoko.Local.data_dir(mode, env)
+  mode = Nobi.Local.mode(env)
+  data_dir = Nobi.Local.data_dir(mode, env)
   port = String.to_integer(System.get_env("PORT") || "4000")
 
-  config :kinoko, :mode, mode
+  config :nobi, :mode, mode
 
-  config :kinoko, Kinoko.Repo,
-    database: Path.join(data_dir, "kinoko.db"),
+  config :nobi, Nobi.Repo,
+    database: Path.join(data_dir, "nobi.db"),
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
 
-  config :kinoko, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+  config :nobi, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   case mode do
     :local ->
       # Loopback only, http://localhost:<port>; the console and every
       # `<name>.localhost` app may open the LiveView socket. No secret here:
-      # this file runs for every release command (`kinoko version` too), and
-      # those must create nothing. Kinoko.Release.start/0 resolves it.
-      config :kinoko, KinokoWeb.Endpoint,
+      # this file runs for every release command (`nobi version` too), and
+      # those must create nothing. Nobi.Release.start/0 resolves it.
+      config :nobi, NobiWeb.Endpoint,
         url: [host: "localhost", port: port, scheme: "http"],
-        http: [ip: Kinoko.Local.bind_ip(:local), port: port],
-        check_origin: Kinoko.Local.check_origin()
+        http: [ip: Nobi.Local.bind_ip(:local), port: port],
+        check_origin: Nobi.Local.check_origin()
 
     :server ->
       # The secret key base is used to sign/encrypt cookies and other secrets.
@@ -59,13 +59,13 @@ if config_env() == :prod do
 
       host = System.get_env("PHX_HOST") || "example.com"
 
-      config :kinoko, KinokoWeb.Endpoint,
+      config :nobi, NobiWeb.Endpoint,
         url: [host: host, port: 443, scheme: "https"],
         http: [
           # Enable IPv6 and bind on all interfaces.
           # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
           # for details about using IPv6 vs IPv4 and loopback vs public addresses.
-          ip: Kinoko.Local.bind_ip(:server),
+          ip: Nobi.Local.bind_ip(:server),
           port: port
         ],
         secret_key_base: secret_key_base
@@ -76,7 +76,7 @@ if config_env() == :prod do
   # To get SSL working, you will need to add the `https` key
   # to your endpoint configuration:
   #
-  #     config :kinoko, KinokoWeb.Endpoint,
+  #     config :nobi, NobiWeb.Endpoint,
   #       https: [
   #         ...,
   #         port: 443,
@@ -98,7 +98,7 @@ if config_env() == :prod do
   # We also recommend setting `force_ssl` in your config/prod.exs,
   # ensuring no data is ever sent via http, always redirecting to https:
   #
-  #     config :kinoko, KinokoWeb.Endpoint,
+  #     config :nobi, NobiWeb.Endpoint,
   #       force_ssl: [hsts: true]
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.
@@ -108,7 +108,7 @@ if config_env() == :prod do
   # In production you need to configure the mailer to use a different adapter.
   # Here is an example configuration for Mailgun:
   #
-  #     config :kinoko, Kinoko.Mailer,
+  #     config :nobi, Nobi.Mailer,
   #       adapter: Swoosh.Adapters.Mailgun,
   #       api_key: System.get_env("MAILGUN_API_KEY"),
   #       domain: System.get_env("MAILGUN_DOMAIN")

@@ -1,20 +1,20 @@
-defmodule Kinoko.Site.SamplesTest do
+defmodule Nobi.Site.SamplesTest do
   @moduledoc """
-  The homepage's code sample (site/samples/counter.yabu) is real: it is
+  The homepage's code sample (site/samples/counter.nobi) is real: it is
   staged into a fresh universe and must promote.
   """
-  use Kinoko.DataCase, async: false
+  use Nobi.DataCase, async: false
 
-  import Kinoko.UniverseHelpers
+  import Nobi.UniverseHelpers
 
-  alias Kinoko.Universe
+  alias Nobi.Universe
 
-  test "counter.yabu promotes" do
+  test "counter.nobi promotes" do
     assert {:promoted, ["counter"]} =
              Universe.stage(
                fresh_universe("site"),
                "counter",
-               File.read!("site/samples/counter.yabu")
+               File.read!("site/samples/counter.nobi")
              )
   end
 end

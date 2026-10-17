@@ -1,4 +1,4 @@
-// The console shell's keyboard and memory (KinokoWeb.Console.Live holds the state).
+// The console shell's keyboard and memory (NobiWeb.Console.Live holds the state).
 //
 // ConsoleKeys sits on the shell's root (#console):
 // - ⌘K / Ctrl-K toggles the palette; Esc closes it, else the intro;
@@ -8,8 +8,8 @@
 // - the REPL keeps its submitted expressions in sessionStorage: Ctrl-↑ / Ctrl-↓
 //   (or the caret) walk them, and the input clears once the server answers.
 
-const UNIVERSE_KEY = "kinoko.console.universe"
-const HISTORY_KEY = "kinoko.console.repl"
+const UNIVERSE_KEY = "nobi.console.universe"
+const HISTORY_KEY = "nobi.console.repl"
 const HISTORY_CAP = 50
 
 const read = (key, fallback) => {

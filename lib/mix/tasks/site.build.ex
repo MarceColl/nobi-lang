@@ -2,15 +2,15 @@ defmodule Mix.Tasks.Site.Build do
   @shortdoc "Builds the static homepage into site/dist"
 
   @moduledoc """
-  Builds Kinoko's static homepage:
+  Builds Nobi's static homepage:
 
       mix site.build
 
   Writes `site/dist/`:
 
     * `index.html`: `site/src/index.html.eex` rendered with, HTML-escaped:
-      the counter sample `site/samples/counter.yabu` verbatim (kept
-      compiling by `test/site/samples_test.exs`), and the Kinoko tool calls
+      the counter sample `site/samples/counter.nobi` verbatim (kept
+      compiling by `test/site/samples_test.exs`), and the Nobi tool calls
       of a recorded agent run, `site/samples/agent-run.jsonl` (see
       `agent_run/1`);
     * `forum.webp`: the forum that run built, from `site/src/forum.webp`;
@@ -25,11 +25,11 @@ defmodule Mix.Tasks.Site.Build do
 
   @site "site"
 
-  # The GitHub repository the page links to and installs from: `KINOKO_REPO`
+  # The GitHub repository the page links to and installs from: `NOBI_REPO`
   # (CI sets it from `github.repository`), else this placeholder locally. The install line fetches install.sh from
   # the latest release, where the release workflow has stamped this repository into it (the copy
-  # on the main branch keeps the OWNER/kinoko default and refuses to run).
-  @repo "OWNER/kinoko"
+  # on the main branch keeps the OWNER/nobi-lang default and refuses to run).
+  @repo "OWNER/nobi-lang"
 
   # Keywords the console colours at the start of a line (and a trailing `do`).
   @keywords ~w(defmodel deftype defapp def case if else end)
@@ -75,7 +75,7 @@ defmodule Mix.Tasks.Site.Build do
         install_url: install_url(),
         source_url: "https://github.com/#{repo()}",
         releases_url: "https://github.com/#{repo()}/releases",
-        counter: code(read(site, ["samples", "counter.yabu"])),
+        counter: code(read(site, ["samples", "counter.nobi"])),
         agent_run: agent_run(read(site, ["samples", "agent-run.jsonl"]))
       ]
     )
@@ -86,7 +86,7 @@ defmodule Mix.Tasks.Site.Build do
   def install_url, do: "https://github.com/#{repo()}/releases/latest/download/install.sh"
 
   defp repo do
-    case System.get_env("KINOKO_REPO") do
+    case System.get_env("NOBI_REPO") do
       repo when repo in [nil, ""] -> @repo
       repo -> repo
     end
@@ -132,7 +132,7 @@ defmodule Mix.Tasks.Site.Build do
 
   @doc """
   The recorded agent run (`site/samples/agent-run.jsonl`, Claude Code's
-  `stream-json` events) as the page shows it: `calls`, one per Kinoko tool
+  `stream-json` events) as the page shows it: `calls`, one per Nobi tool
   call in order, `%{name, arg, result, class}` (the tool without its
   `mcp__kinoko__` prefix, its key argument or `""`, the result's one line,
   and `tok-ok` for a successful step), and `summary`, the agent's closing

@@ -1,4 +1,4 @@
-defmodule Kinoko.Site.BuildTest do
+defmodule Nobi.Site.BuildTest do
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
@@ -29,7 +29,7 @@ defmodule Kinoko.Site.BuildTest do
     html = Build.render("site")
     text = visible(html)
 
-    assert text =~ String.trim_trailing(File.read!("site/samples/counter.yabu"))
+    assert text =~ String.trim_trailing(File.read!("site/samples/counter.nobi"))
     assert html =~ ~s(data-copy="#install")
     assert html =~ ~s(data-copy="#mcp-add")
 
@@ -46,7 +46,7 @@ defmodule Kinoko.Site.BuildTest do
     assert text =~ "v#{major}.#{minor}. macOS and Linux."
   end
 
-  test "the agent-run block is every Kinoko tool call of the recorded run, in order" do
+  test "the agent-run block is every Nobi tool call of the recorded run, in order" do
     events = events()
 
     # A finished, successful run that refused nothing.

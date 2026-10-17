@@ -1,8 +1,8 @@
-defmodule Kinoko.PersistentCounterUnmigrated do
+defmodule Nobi.PersistentCounterUnmigrated do
   @moduledoc "Version 2 of a counter that keeps the default (raising) `migrate/2`."
 
-  use Kinoko.PersistentElmGenServer
-  alias Kinoko.Elm.Effect, as: Fx
+  use Nobi.PersistentElmGenServer
+  alias Nobi.Elm.Effect, as: Fx
 
   @impl true
   def version, do: 2

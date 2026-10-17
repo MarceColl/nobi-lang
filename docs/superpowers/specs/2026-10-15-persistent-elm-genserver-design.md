@@ -2,7 +2,7 @@
 
 # PersistentElmGenServer — design (piece 2)
 
-Piece 2 of 7. It builds on the Elm foundation (`Kinoko.ElmGenServer`, `Kinoko.Elm.Runtime`). Piece 3, the code DB server, becomes a `PersistentElmGenServer` that holds a universe.
+Piece 2 of 7. It builds on the Elm foundation (`Nobi.ElmGenServer`, `Nobi.Elm.Runtime`). Piece 3, the code DB server, becomes a `PersistentElmGenServer` that holds a universe.
 
 ## Goal
 
@@ -24,22 +24,22 @@ msg ─▶ Runtime.step ─▶ update/2 (pure) ─▶ {state', effects}
                          └─ perform(effects)
 ```
 
-- **`Kinoko.Elm.Runtime`** gains one option, `on_step: (state, seq -> :ok)`. It is called after `update`/`init` returns and before any effect is performed. A raise in it crashes the host, so nothing performs. This is the only change to the foundation, and every existing test stays green.
-- **`Kinoko.Elm.Store`** handles storage, through `Kinoko.Repo`:
+- **`Nobi.Elm.Runtime`** gains one option, `on_step: (state, seq -> :ok)`. It is called after `update`/`init` returns and before any effect is performed. A raise in it crashes the host, so nothing performs. This is the only change to the foundation, and every existing test stays green.
+- **`Nobi.Elm.Store`** handles storage, through `Nobi.Repo`:
   - **Table** `elm_states(key text, seq bigint, version int, state bytea, inserted_at timestamptz)`, primary key `(key, seq)`. It is append-only: one row per changed state.
   - `append(key, seq, version, binary)` adds a row.
   - `latest(key) :: {:ok, %{seq, version, state}} | :none` reads the newest row.
   - `history(key, limit)` lists past rows.
   - `prune(key, keep)` deletes all but the newest `keep` rows, so storage stays bounded.
-- **`Kinoko.PersistentElmGenServer`** is a module plus a `use` macro. It has the same `init/1` and `update/2` callbacks as `ElmGenServer`, and these optional ones:
+- **`Nobi.PersistentElmGenServer`** is a module plus a `use` macro. It has the same `init/1` and `update/2` callbacks as `ElmGenServer`, and these optional ones:
   - `version/0`, default `1`, stored with every row;
   - `migrate(state, from_version) :: state`, called on boot when the stored version differs; the default raises, telling the author to implement it;
   - `resume(state) :: {state, effects}`, called instead of `init/1` when a stored state exists; the default is `{state, []}`, and it is where timers get restarted;
-  - `encode(state) :: binary` and `decode(binary) :: state`. The defaults are `:erlang.term_to_binary` and `:erlang.binary_to_term(b, [:safe])`. Piece 3 overrides them to store a universe's history and texts and rebuild it with `Kinoko.Lang.restore/2`.
+  - `encode(state) :: binary` and `decode(binary) :: state`. The defaults are `:erlang.term_to_binary` and `:erlang.binary_to_term(b, [:safe])`. Piece 3 overrides them to store a universe's history and texts and rebuild it with `Nobi.Lang.restore/2`.
 
 ## Behaviour
 
-- **Start:** `start_link(module, args, key: key, keep: n \\ 100)`. The process registers under `{:via, Registry, {Kinoko.Elm.Registry, key}}`, so one live process per key per node.
+- **Start:** `start_link(module, args, key: key, keep: n \\ 100)`. The process registers under `{:via, Registry, {Nobi.Elm.Registry, key}}`, so one live process per key per node.
 - **Boot:**
   - If `Store.latest(key)` finds a row: decode it, migrate it if the version differs, then call `resume/1`.
   - Otherwise call `init/1`.
@@ -61,7 +61,7 @@ msg ─▶ Runtime.step ─▶ update/2 (pure) ─▶ {state', effects}
 - `resume` runs on reboot, and `init` does not.
 - With safe decoding, a stored binary that names an unknown atom refuses to boot with a clear error.
 
-The tests use `Kinoko.DataCase`, with the sandbox in shared mode so the server process can reach the connection.
+The tests use `Nobi.DataCase`, with the sandbox in shared mode so the server process can reach the connection.
 
 ## Done when
 
@@ -70,8 +70,8 @@ The tests above pass, `mix precommit` is green, and the moduledoc has a persiste
 ## Amendments from the final review
 
 - **Rows record the owning module.** A new `module text` column; boot refuses when a key was written by a different module. The name is compared as a string and never turned into an atom.
-- **`durable(state)` callback**, default identity. Change detection and `encode` run on this projection, so a volatile cache never causes a write. Piece 3 projects a universe to its history and texts, and rebuilds it with `Kinoko.Lang.restore/2`.
-- **`start/3`** runs a server under `Kinoko.Elm.Supervisor`, a `DynamicSupervisor` with a tolerant restart limit. Its children are `:transient`.
+- **`durable(state)` callback**, default identity. Change detection and `encode` run on this projection, so a volatile cache never causes a write. Piece 3 projects a universe to its history and texts, and rebuilds it with `Nobi.Lang.restore/2`.
+- **`start/3`** runs a server under `Nobi.Elm.Supervisor`, a `DynamicSupervisor` with a tolerant restart limit. Its children are `:transient`.
 - **Durability is written down in the moduledoc:**
   - effects run at most once, and the stored state may be ahead of them;
   - a call that times out has an unknown outcome;

@@ -8,8 +8,8 @@
 
 **Architecture:**
 - `Runtime` gets an `on_step` hook that runs before effects are performed.
-- `Kinoko.Elm.Store` reads and writes the `elm_states` table through `Kinoko.Repo`.
-- `Kinoko.PersistentElmGenServer` wires the hook to `Store`. It handles boot (`latest` → decode → migrate → resume, or `init`) and registers each process by key in a `Registry`.
+- `Nobi.Elm.Store` reads and writes the `elm_states` table through `Nobi.Repo`.
+- `Nobi.PersistentElmGenServer` wires the hook to `Store`. It handles boot (`latest` → decode → migrate → resume, or `init`) and registers each process by key in a `Registry`.
 
 **Tech Stack:** Elixir, Ecto SQL with Postgres, a `Registry`, ExUnit with the SQL sandbox.
 
@@ -21,7 +21,7 @@
 - **Decoding:** `:erlang.binary_to_term(b, [:safe])` by default. Never create atoms from stored data.
 - **Ordering:** `on_step` runs after `update`/`init` and before any effect is performed. A raise in it propagates, so the host crashes and nothing is performed.
 - **Existing behaviour:** the existing `ElmGenServer`, `ElmLiveView` and `Runtime` tests must stay green, unchanged.
-- **Registry:** `Kinoko.Elm.Registry`, a unique-keys `Registry` started in `Kinoko.Application`.
+- **Registry:** `Nobi.Elm.Registry`, a unique-keys `Registry` started in `Nobi.Application`.
 - **Pruning:** `keep` defaults to 100.
 - `mix precommit` must be green after every task. VCS is jj: end each task with `jj commit -m "<msg>"`.
 
@@ -35,20 +35,20 @@
 
 ---
 
-### Task 1: `elm_states` migration and `Kinoko.Elm.Store`
+### Task 1: `elm_states` migration and `Nobi.Elm.Store`
 
 **Files:**
 - Create: `priv/repo/migrations/<timestamp>_create_elm_states.exs`
-- Create: `lib/kinoko/elm/store.ex`
-- Test: `test/kinoko/elm/store_test.exs`, using `Kinoko.DataCase`
+- Create: `lib/nobi/elm/store.ex`
+- Test: `test/nobi/elm/store_test.exs`, using `Nobi.DataCase`
 
 **Interfaces:**
 
 ```elixir
-Kinoko.Elm.Store.append(key :: String.t(), seq :: non_neg_integer, version :: pos_integer, state :: binary) :: :ok   # raises on failure
-Kinoko.Elm.Store.latest(key) :: {:ok, %{seq: integer, version: integer, state: binary}} | :none
-Kinoko.Elm.Store.history(key, limit \\ 50) :: [%{seq, version, state, inserted_at}]    # newest first
-Kinoko.Elm.Store.prune(key, keep :: pos_integer) :: non_neg_integer                     # rows deleted
+Nobi.Elm.Store.append(key :: String.t(), seq :: non_neg_integer, version :: pos_integer, state :: binary) :: :ok   # raises on failure
+Nobi.Elm.Store.latest(key) :: {:ok, %{seq: integer, version: integer, state: binary}} | :none
+Nobi.Elm.Store.history(key, limit \\ 50) :: [%{seq, version, state, inserted_at}]    # newest first
+Nobi.Elm.Store.prune(key, keep :: pos_integer) :: non_neg_integer                     # rows deleted
 ```
 
 - [ ] **Step 1:** Write the failing tests:
@@ -63,8 +63,8 @@ Kinoko.Elm.Store.prune(key, keep :: pos_integer) :: non_neg_integer             
 ### Task 2: `Runtime` `on_step` hook
 
 **Files:**
-- Modify: `lib/kinoko/elm/runtime.ex`
-- Test: `test/kinoko/elm/runtime_on_step_test.exs`
+- Modify: `lib/nobi/elm/runtime.ex`
+- Test: `test/nobi/elm/runtime_on_step_test.exs`
 
 **Interfaces:** `Runtime.init(module, init_msg, init_fun, opts)` now accepts `on_step: (state, seq -> any)`. It is called in `init` and in every `step`, after the module returns and before `perform`. `seq` is the timeline `seq` of that msg. The hook is stored on the struct.
 
@@ -75,22 +75,22 @@ Kinoko.Elm.Store.prune(key, keep :: pos_integer) :: non_neg_integer             
 - [ ] **Step 2:** Implement: in `init/4` and `step/3`, call the hook between `record_msg` and `perform`.
 - [ ] **Step 3:** Check the tests pass and all the existing elm and LiveView tests stay green, run `mix precommit`, then `jj commit -m "feat(elm): on_step hook before effects"`.
 
-### Task 3: `Kinoko.PersistentElmGenServer`
+### Task 3: `Nobi.PersistentElmGenServer`
 
 **Files:**
-- Create: `lib/kinoko/persistent_elm_genserver.ex`
-- Modify: `lib/kinoko/application.ex`, to add `{Registry, keys: :unique, name: Kinoko.Elm.Registry}`
+- Create: `lib/nobi/persistent_elm_genserver.ex`
+- Modify: `lib/nobi/application.ex`, to add `{Registry, keys: :unique, name: Nobi.Elm.Registry}`
 - Create: `test/support/persistent_counter.ex`
-- Test: `test/kinoko/persistent_elm_genserver_test.exs`
+- Test: `test/nobi/persistent_elm_genserver_test.exs`
 
 **Interfaces:**
 
 ```elixir
-use Kinoko.PersistentElmGenServer       # @behaviour + defaults for version/0, migrate/2, resume/1, encode/1, decode/1 (overridable)
-Kinoko.PersistentElmGenServer.start_link(module, args, key: key, keep: 100) :: GenServer.on_start()
-Kinoko.PersistentElmGenServer.call(key_or_pid, request, timeout \\ 5000)
-Kinoko.PersistentElmGenServer.cast(key_or_pid, msg)
-Kinoko.PersistentElmGenServer.whereis(key) :: pid | nil
+use Nobi.PersistentElmGenServer       # @behaviour + defaults for version/0, migrate/2, resume/1, encode/1, decode/1 (overridable)
+Nobi.PersistentElmGenServer.start_link(module, args, key: key, keep: 100) :: GenServer.on_start()
+Nobi.PersistentElmGenServer.call(key_or_pid, request, timeout \\ 5000)
+Nobi.PersistentElmGenServer.cast(key_or_pid, msg)
+Nobi.PersistentElmGenServer.whereis(key) :: pid | nil
 child_spec(arg) via `use` (id: {module, key})
 ```
 
@@ -109,17 +109,17 @@ child_spec(arg) via `use` (id: {module, key})
     - If it exists: decode it, migrate if needed, then `Runtime.init(module, {:resume, seq}, fn -> module.resume(state) end, on_step: hook)`, with seq continuing from the stored one.
     - Otherwise use `module.init(args)`.
   - **The hook:** compare against the last written state (keep it in the hook's closure or the host state). Append when the state changed. Prune every `keep` appends.
-  - The rest delegates exactly like `Kinoko.ElmGenServer`. Factor the shared host code instead of copy-pasting, through a small shared module if needed.
+  - The rest delegates exactly like `Nobi.ElmGenServer`. Factor the shared host code instead of copy-pasting, through a small shared module if needed.
 - [ ] **Step 3:** Check the tests pass, run `mix precommit`, then `jj commit -m "feat: PersistentElmGenServer"`.
 
 ### Task 4: Docs and a worked example
 
-**Files:** modify the moduledocs; create `test/kinoko/persistent_elm_genserver_doc_test.exs` or extend Task 3's tests.
+**Files:** modify the moduledocs; create `test/nobi/persistent_elm_genserver_doc_test.exs` or extend Task 3's tests.
 
 - [ ] **Step 1:** The moduledoc covers:
   - a persistent counter example (start under a key, inc, restart, still there);
   - durability semantics: written before effects, in-flight effects lost, stale pids in state;
   - the `version`/`migrate` contract;
   - storage cost and pruning;
-  - the `encode`/`decode` override, mentioning piece 3's universe use: store `history` and `texts`, and rebuild with `Kinoko.Lang.restore/2`.
+  - the `encode`/`decode` override, mentioning piece 3's universe use: store `history` and `texts`, and rebuild with `Nobi.Lang.restore/2`.
 - [ ] **Step 2:** Doctest or test the example, run `mix precommit`, then `jj commit -m "docs: PersistentElmGenServer"`.

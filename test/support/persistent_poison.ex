@@ -1,12 +1,12 @@
-defmodule Kinoko.PersistentPoison do
+defmodule Nobi.PersistentPoison do
   @moduledoc """
-  A `Kinoko.PersistentElmGenServer` whose `encode/1` raises on a state marked
+  A `Nobi.PersistentElmGenServer` whose `encode/1` raises on a state marked
   `poison: true`, standing in for a store failure mid-step. At version 2, its
   `migrate/2` passes a version 1 state through unchanged.
   """
 
-  use Kinoko.PersistentElmGenServer
-  alias Kinoko.Elm.Effect, as: Fx
+  use Nobi.PersistentElmGenServer
+  alias Nobi.Elm.Effect, as: Fx
 
   @impl true
   def version, do: 2

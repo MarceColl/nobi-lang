@@ -1,14 +1,14 @@
-defmodule Kinoko.ElmTestServer do
+defmodule Nobi.ElmTestServer do
   @moduledoc """
-  A small `Kinoko.ElmGenServer` used to exercise the runtime in tests:
+  A small `Nobi.ElmGenServer` used to exercise the runtime in tests:
   a counter, an HTTP fetch with deferred replies, timers and random.
 
   `init/1` takes keyword options; `:req` is merged into every HTTP request,
   so tests can pass `plug:` to stub the network.
   """
 
-  use Kinoko.ElmGenServer
-  alias Kinoko.Elm.Effect, as: Fx
+  use Nobi.ElmGenServer
+  alias Nobi.Elm.Effect, as: Fx
 
   @impl true
   def init(opts) do

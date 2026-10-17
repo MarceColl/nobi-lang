@@ -11,7 +11,7 @@ on:
       - "mix.exs"
       - "mix.lock"
       - "config/config.exs"
-      - "lib/kinoko/lang/**"
+      - "lib/nobi/lang/**"
       - "test/site/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -48,7 +48,7 @@ jobs:
       - run: mix deps.get
 
       # A sample that stops compiling must block the deploy. Needs no services:
-      # the test alias creates and migrates the SQLite file at .kinoko/test.db.
+      # the test alias creates and migrates the SQLite file at .nobi/test.db.
       # test/site also fetches the Tailwind binary on first use.
       - name: Test the samples
         run: mix test test/site
@@ -58,10 +58,10 @@ jobs:
       - name: Build the site
         run: mix site.build
         env:
-          KINOKO_REPO: ${{ github.repository }}
+          NOBI_REPO: ${{ github.repository }}
 
       # Same guard as release.yml: never publish the placeholder repository.
-      - name: Refuse the OWNER/kinoko placeholder
+      - name: Refuse the OWNER/nobi-lang placeholder
         run: |
           if grep -q 'OWNER/' site/dist/index.html; then
             echo "site/dist/index.html still contains OWNER/" >&2

@@ -5,29 +5,29 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Universes become the system's only point of interaction:
-- `Kinoko.Universe` is the interface.
-- `Kinoko.CodeDb` is the per-universe persistent process behind it.
+- `Nobi.Universe` is the interface.
+- `Nobi.CodeDb` is the per-universe persistent process behind it.
 - A process-free CAS holds declaration text, and a universe stores only symbol → CID.
 - The REPL and an MCP endpoint at `/mcp` are thin adapters.
 
 **Architecture:**
-- **Pure core:** `Kinoko.Lang`, made text-free and internal.
-- **Process-free DB modules:** `Kinoko.Cas` (`declarations` table) and `Kinoko.Universe.Registry` (`universes` table).
-- **Processes:** `Kinoko.CodeDb`, a `PersistentElmGenServer` keyed `"universe:<name>"` that serializes only check, promote and persist.
-- **Routing:** `Kinoko.Universe`, stateless. Writes do parse and `Cas.put` in the caller, then call CodeDb. Reads call CodeDb. `eval`, `call` and `test` take a snapshot and run through `Kinoko.Exec` in the caller.
+- **Pure core:** `Nobi.Lang`, made text-free and internal.
+- **Process-free DB modules:** `Nobi.Cas` (`declarations` table) and `Nobi.Universe.Registry` (`universes` table).
+- **Processes:** `Nobi.CodeDb`, a `PersistentElmGenServer` keyed `"universe:<name>"` that serializes only check, promote and persist.
+- **Routing:** `Nobi.Universe`, stateless. Writes do parse and `Cas.put` in the caller, then call CodeDb. Reads call CodeDb. `eval`, `call` and `test` take a snapshot and run through `Nobi.Exec` in the caller.
 
-**Tech Stack:** Elixir/Phoenix 1.8, Ecto/Postgres, `PersistentElmGenServer` (piece 2), `Kinoko.Exec` (piece 4), ExUnit with the SQL sandbox, Phoenix.ConnTest.
+**Tech Stack:** Elixir/Phoenix 1.8, Ecto/Postgres, `PersistentElmGenServer` (piece 2), `Nobi.Exec` (piece 4), ExUnit with the SQL sandbox, Phoenix.ConnTest.
 
 **Spec:** `docs/superpowers/specs/2026-10-15-codedb-mcp-design.md`. Glossary: `docs/GLOSSARY.md`.
 
 ## Global Constraints
 
-- `Kinoko.Universe` is the only public API for universes. `Kinoko.Lang` is internal: only `Kinoko.CodeDb` and `Kinoko.Universe` call it. `Kinoko.Exec` takes a snapshot or an image, never a universe.
+- `Nobi.Universe` is the only public API for universes. `Nobi.Lang` is internal: only `Nobi.CodeDb` and `Nobi.Universe` call it. `Nobi.Exec` takes a snapshot or an image, never a universe.
 - **Universe durable state:** `%{commits: [commit], staged: [{id, [{symbol, cid | :gone}]}]}`, where commit = `%{ids: [id], entries: [{:live, symbol, cid} | {:gone, symbol}]}`. No declaration text and no parsed declarations, ever.
 - **CAS table:** `declarations(cid text primary key, text text not null, inserted_at timestamptz not null default now())`. Append-only; inserts use `on_conflict: :nothing`; there is no process.
 - **Universes table:** `universes(name text primary key, parent text null, forked_at_commit integer null, created_at timestamptz not null default now())`. No process. `main` is created at app boot, idempotently.
 - **Universe names** match `~r/^[a-z0-9][a-z0-9_-]{0,62}$/`; anything else is `{:error, :bad_name}`. An unknown name is `{:error, :no_such_universe}`.
-- **CodeDb key:** `"universe:" <> name`, run under `Kinoko.Elm.Supervisor` via `PersistentElmGenServer.start/3`. It uses `durable/1`, `encode` = `term_to_binary(durable, compressed: 6)`, and `decode` = `binary_to_term(b, [:safe])` followed by a CAS fetch, a parse and `Lang.restore`.
+- **CodeDb key:** `"universe:" <> name`, run under `Nobi.Elm.Supervisor` via `PersistentElmGenServer.start/3`. It uses `durable/1`, `encode` = `term_to_binary(durable, compressed: 6)`, and `decode` = `binary_to_term(b, [:safe])` followed by a CAS fetch, a parse and `Lang.restore`.
 - **Write order:** `Cas.put` happens before the CodeDb call that references those CIDs.
 - **Salsa is never persisted.**
 - `mix precommit` must be green after every task. VCS is jj: end each task with `jj commit -m "<msg>"`.
@@ -45,18 +45,18 @@
 ### Task 1: CAS and universe registry tables
 
 **Files:**
-- Create: two migrations (`create_declarations`, `create_universes`), `lib/kinoko/cas.ex`, `lib/kinoko/universe/registry.ex`
-- Test: `test/kinoko/cas_test.exs`, `test/kinoko/universe/registry_test.exs`
+- Create: two migrations (`create_declarations`, `create_universes`), `lib/nobi/cas.ex`, `lib/nobi/universe/registry.ex`
+- Test: `test/nobi/cas_test.exs`, `test/nobi/universe/registry_test.exs`
 
 **Interfaces:**
 
 ```elixir
-Kinoko.Cas.put([{cid :: String.t(), text :: String.t()}]) :: :ok
-Kinoko.Cas.get([cid]) :: %{cid => text}                      # missing cids absent
-Kinoko.Universe.Registry.create(name, opts \\ []) :: :ok | {:error, :exists | :bad_name}
-Kinoko.Universe.Registry.exists?(name) :: boolean
-Kinoko.Universe.Registry.list() :: [%{name, parent, forked_at_commit, created_at}]   # by name
-Kinoko.Universe.Registry.ensure_main() :: :ok                 # idempotent; called at boot
+Nobi.Cas.put([{cid :: String.t(), text :: String.t()}]) :: :ok
+Nobi.Cas.get([cid]) :: %{cid => text}                      # missing cids absent
+Nobi.Universe.Registry.create(name, opts \\ []) :: :ok | {:error, :exists | :bad_name}
+Nobi.Universe.Registry.exists?(name) :: boolean
+Nobi.Universe.Registry.list() :: [%{name, parent, forked_at_commit, created_at}]   # by name
+Nobi.Universe.Registry.ensure_main() :: :ok                 # idempotent; called at boot
 ```
 
 - [ ] **Step 1: failing tests.**
@@ -67,21 +67,21 @@ Kinoko.Universe.Registry.ensure_main() :: :ok                 # idempotent; call
   - A duplicate create gives `:exists`; a bad name gives `:bad_name`.
   - Concurrent creates give exactly one `:ok`.
   - `ensure_main` twice succeeds.
-- [ ] **Step 2:** Implement. Call `Registry.ensure_main()` from `Kinoko.Application` after the Repo starts, through a one-shot `Task` child, or another way that doesn't block boot if the DB is down. Log the failure and let the first `Universe` call retry it. Document the choice.
+- [ ] **Step 2:** Implement. Call `Registry.ensure_main()` from `Nobi.Application` after the Repo starts, through a one-shot `Task` child, or another way that doesn't block boot if the DB is down. Log the failure and let the first `Universe` call retry it. Document the choice.
 - [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat: CAS and universe registry tables"`.
 
 ### Task 2: Text-free `Lang` universe
 
-**Files:** modify `lib/kinoko/lang/universe.ex` and `lib/kinoko/lang.ex`, plus the piece-1 tests that touch `texts`/`text`/`restore`.
+**Files:** modify `lib/nobi/lang/universe.ex` and `lib/nobi/lang.ex`, plus the piece-1 tests that touch `texts`/`text`/`restore`.
 
 **Interfaces:**
 
 ```elixir
-Kinoko.Lang.durable(u) :: %{commits: [commit], staged: [{id, [{symbol, cid | :gone}]}]}
-Kinoko.Lang.restore(commits, staged, decls :: %{cid => decl}) :: {:ok, u} | {:error, [reason]}
-Kinoko.Lang.stage_entries(u, id, [{:live, decl} | {:gone, symbol}]) :: {u, verdict}
-Kinoko.Lang.prepare(source, opts \\ [remove: [symbol]]) :: {:ok, entries, [{cid, text}]} | {:error, [reason]}   # pure: parse + canonical text + cid; used by Universe before Cas.put
-Kinoko.Lang.snapshot(u) :: %{committed: %{symbol => %{cid, decl, typed, signature}}, signatures: sigs}
+Nobi.Lang.durable(u) :: %{commits: [commit], staged: [{id, [{symbol, cid | :gone}]}]}
+Nobi.Lang.restore(commits, staged, decls :: %{cid => decl}) :: {:ok, u} | {:error, [reason]}
+Nobi.Lang.stage_entries(u, id, [{:live, decl} | {:gone, symbol}]) :: {u, verdict}
+Nobi.Lang.prepare(source, opts \\ [remove: [symbol]]) :: {:ok, entries, [{cid, text}]} | {:error, [reason]}   # pure: parse + canonical text + cid; used by Universe before Cas.put
+Nobi.Lang.snapshot(u) :: %{committed: %{symbol => %{cid, decl, typed, signature}}, signatures: sigs}
 ```
 
 - [ ] **Step 1: failing tests.**
@@ -94,29 +94,29 @@ Kinoko.Lang.snapshot(u) :: %{committed: %{symbol => %{cid, decl, typed, signatur
   - `read`/`text` format the declaration.
   - `restore/2`'s old callers move to `restore/3`.
   - Piece-1 tests that relied on texts adapt. Any change in what they assert must be called out in the report.
-  - The moduledoc says `Kinoko.Lang` is internal and callers use `Kinoko.Universe`.
+  - The moduledoc says `Nobi.Lang` is internal and callers use `Nobi.Universe`.
 - [ ] **Step 3:** `mix precommit`, then `jj commit -m "refactor(lang): text-free universe, durable/restore, prepare, snapshot"`.
 
 ### Task 3: `Exec` takes snapshots
 
-**Files:** modify `lib/kinoko/exec.ex` and `lib/kinoko/repl.ex` (keep it compiling for now); update the `test/kinoko/exec*` tests.
+**Files:** modify `lib/nobi/exec.ex` and `lib/nobi/repl.ex` (keep it compiling for now); update the `test/nobi/exec*` tests.
 
 **Interfaces:**
 
 ```elixir
-Kinoko.Exec.load(snapshot | committed_map, opts) :: {:ok, image} | {:error, reason}
-Kinoko.Exec.call(snapshot | image, symbol, args, opts)
-Kinoko.Exec.eval(snapshot, source, opts)      # checks source against snapshot.signatures
-Kinoko.Exec.test(snapshot | image, symbol, opts)
+Nobi.Exec.load(snapshot | committed_map, opts) :: {:ok, image} | {:error, reason}
+Nobi.Exec.call(snapshot | image, symbol, args, opts)
+Nobi.Exec.eval(snapshot, source, opts)      # checks source against snapshot.signatures
+Nobi.Exec.test(snapshot | image, symbol, opts)
 ```
 
 - [ ] **Step 1:** Change the signatures. The tests build a snapshot with `Lang.snapshot(u)` from a staged universe.
-- [ ] **Step 2:** `Exec` must not call any `Kinoko.Lang` function that takes a universe. Document this in the moduledoc. The goldens stay green.
+- [ ] **Step 2:** `Exec` must not call any `Nobi.Lang` function that takes a universe. Document this in the moduledoc. The goldens stay green.
 - [ ] **Step 3:** `mix precommit`, then `jj commit -m "refactor(exec): take snapshots, not universes"`.
 
-### Task 4: `Kinoko.CodeDb` and `Kinoko.Universe`
+### Task 4: `Nobi.CodeDb` and `Nobi.Universe`
 
-**Files:** create `lib/kinoko/code_db.ex` and `lib/kinoko/universe.ex`; tests `test/kinoko/universe_test.exs` and `test/kinoko/code_db_test.exs`.
+**Files:** create `lib/nobi/code_db.ex` and `lib/nobi/universe.ex`; tests `test/nobi/universe_test.exs` and `test/nobi/code_db_test.exs`.
 
 **Interfaces:** the spec's public API, exactly:
 
@@ -146,29 +146,29 @@ CodeDb messages: `{:call, from, {:stage, id, entries}}`, `{:unstage, id}`, `:sym
     - `decode` collects the CIDs, then `Cas.get`, parses, and calls `Lang.restore/3`. On a missing CID or a parse failure it raises with the CID.
     - `Universe` turns a boot failure into `{:error, %{code: "internal", message}}`, so the caller survives.
   - **Call timeout:** `:infinity` for stage, since the server is the serialization point. 5 s for reads.
-- [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat: Kinoko.Universe interface over per-universe CodeDb"`.
+- [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat: Nobi.Universe interface over per-universe CodeDb"`.
 
-### Task 5: REPL on `Kinoko.Universe`
+### Task 5: REPL on `Nobi.Universe`
 
-**Files:** modify `lib/kinoko/repl.ex` and `test/kinoko/repl_test.exs`.
+**Files:** modify `lib/nobi/repl.ex` and `test/nobi/repl_test.exs`.
 
 - [ ] **Step 1:** Remove the Agent.
   - `Y.*` targets the current universe: `"main"` by default; `Y.use(name)` switches, and `Y.universes()` / `Y.create(name)` are new.
   - The current-universe choice is per iex session: the process dictionary of the shell process is fine here, because the REPL isn't the pure tree.
   - `Y.reset()` is removed; document creating a fresh universe instead.
 - [ ] **Step 2:** The tests use a fresh universe per test via `Y.create` plus `Y.use`. Keep the walkthrough test, and add: a restart of `main`'s CodeDb mid-session keeps state.
-- [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat(repl): drive universes through Kinoko.Universe"`.
+- [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat(repl): drive universes through Nobi.Universe"`.
 
 ### Task 6: MCP endpoint
 
 **Files:**
-- Create `lib/kinoko_web/controllers/mcp_controller.ex`, `lib/kinoko_web/mcp/{protocol,tools,instructions}.ex`
-- Modify `lib/kinoko_web/router.ex` (new `:mcp` pipeline: `accepts ["json"]`, no CSRF or session)
-- Test: `test/kinoko_web/mcp_test.exs`
+- Create `lib/nobi_web/controllers/mcp_controller.ex`, `lib/nobi_web/mcp/{protocol,tools,instructions}.ex`
+- Modify `lib/nobi_web/router.ex` (new `:mcp` pipeline: `accepts ["json"]`, no CSRF or session)
+- Test: `test/nobi_web/mcp_test.exs`
 
 **Interfaces:** `POST /mcp`, JSON-RPC 2.0.
 - **Methods:**
-  - `initialize`: `protocolVersion` echoes the client's when it's one we support, else `"2025-06-18"`; `serverInfo` is `%{name: "kinoko", version}`; `capabilities` is `%{tools: %{}}`; plus `instructions`.
+  - `initialize`: `protocolVersion` echoes the client's when it's one we support, else `"2025-06-18"`; `serverInfo` is `%{name: "nobi", version}`; `capabilities` is `%{tools: %{}}`; plus `instructions`.
   - `notifications/*`: answered with 202 and an empty body.
   - `ping`, `tools/list` and `tools/call`.
 - **Tools.** Each has an optional `universe` argument, default `"main"`:
@@ -194,7 +194,7 @@ CodeDb messages: `{:call, from, {:stage, id, entries}}`, `{:unstage, id}`, `:sym
   - an end-to-end flow: create a universe, stage the counter corpus, eval `Counter.update(…)`, stage a broken def, read its reasons, fix it, and see it promote.
 - [ ] **Step 2:** Implement.
   - `Protocol` is pure: decode a request, dispatch, encode a response.
-  - `Tools` maps arguments onto `Kinoko.Universe` and formats results, reusing `Exec.show` and `Format.type`.
-  - `Instructions` adapts the TS server instructions (shown in this session's MCP list for `kinoko`: syntax you cannot guess, the loop, rework costs). It drops anything about features we don't have yet (apps hosting, store, deploy, decide, PRs) and generates the stdlib list from `Rt.Stdlib`'s table.
+  - `Tools` maps arguments onto `Nobi.Universe` and formats results, reusing `Exec.show` and `Format.type`.
+  - `Instructions` adapts the TS server instructions (shown in this session's MCP list for `nobi`: syntax you cannot guess, the loop, rework costs). It drops anything about features we don't have yet (apps hosting, store, deploy, decide, PRs) and generates the stdlib list from `Rt.Stdlib`'s table.
   - A raised exception inside a tool becomes `isError: true` with the message.
-- [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat(web): MCP endpoint over Kinoko.Universe"`.
+- [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat(web): MCP endpoint over Nobi.Universe"`.

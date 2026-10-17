@@ -16,7 +16,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # Must match the OTP the ERTS pins in lib/mix/tasks/kinoko.dist.ex cover.
+      # Must match the OTP the ERTS pins in lib/mix/tasks/nobi.dist.ex cover.
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           otp-version: "28.1.1"
@@ -43,14 +43,14 @@ jobs:
       - name: Build every target
         run: |
           zig version
-          # The 12-character short id, as local builds stamp it (Kinoko.Build).
-          KINOKO_COMMIT="${GITHUB_SHA:0:12}" mix kinoko.dist
+          # The 12-character short id, as local builds stamp it (Nobi.Build).
+          NOBI_COMMIT="${GITHUB_SHA:0:12}" mix nobi.dist
 
       - name: Smoke test the host binary
         run: |
           ls -l dist
-          chmod +x dist/kinoko-macos-arm64
-          dist/kinoko-macos-arm64 version
+          chmod +x dist/nobi-macos-arm64
+          dist/nobi-macos-arm64 version
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -73,14 +73,14 @@ jobs:
           name: dist
           path: dist
 
-      # The repo file keeps the OWNER/kinoko placeholder; the published copy
+      # The repo file keeps the OWNER/nobi-lang placeholder; the published copy
       # names this repository, so `curl | sh` works from the release.
       - name: Stamp the repository into install.sh
         run: |
           set -euo pipefail
           mkdir -p release
-          sed "s|OWNER/kinoko|$GITHUB_REPOSITORY|" install.sh > release/install.sh
-          grep -q "KINOKO_REPO:-$GITHUB_REPOSITORY}" release/install.sh
+          sed "s|OWNER/nobi-lang|$GITHUB_REPOSITORY|" install.sh > release/install.sh
+          grep -q "NOBI_REPO:-$GITHUB_REPOSITORY}" release/install.sh
           ! grep -q "OWNER/" release/install.sh
 
       - name: Create the GitHub release

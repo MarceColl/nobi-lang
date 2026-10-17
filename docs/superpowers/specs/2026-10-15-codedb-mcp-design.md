@@ -1,14 +1,14 @@
 # Universe, CodeDb, CAS and MCP — design (piece 3)
 
-Piece 3 of 7. It builds on piece 1 (`Kinoko.Lang`), piece 4 (`Kinoko.Exec`) and piece 2 (`PersistentElmGenServer`). Terms are defined in `docs/GLOSSARY.md`.
+Piece 3 of 7. It builds on piece 1 (`Nobi.Lang`), piece 4 (`Nobi.Exec`) and piece 2 (`PersistentElmGenServer`). Terms are defined in `docs/GLOSSARY.md`.
 
 ## Goal
 
-Universes become the system's single point of interaction. **`Kinoko.Universe`** is the interface: list, create, stage, read, eval, call and test any named universe (`"main"` by default). The REPL and agents over **MCP** use only it. Behind it, each running universe is kept alive by one **CodeDb** process, which Universe starts on demand and routes to. Declaration text lives in a global, process-free **CAS**. A universe stores only symbol → CID.
+Universes become the system's single point of interaction. **`Nobi.Universe`** is the interface: list, create, stage, read, eval, call and test any named universe (`"main"` by default). The REPL and agents over **MCP** use only it. Behind it, each running universe is kept alive by one **CodeDb** process, which Universe starts on demand and routes to. Declaration text lives in a global, process-free **CAS**. A universe stores only symbol → CID.
 
 ## Rules (from Marce, binding)
 
-- `Kinoko.Universe` is the only place anything interacts with a universe. CodeDb is its implementation detail. `Kinoko.Lang` becomes internal (CodeDb's pure core). `Kinoko.Exec` takes images, not universes.
+- `Nobi.Universe` is the only place anything interacts with a universe. CodeDb is its implementation detail. `Nobi.Lang` becomes internal (CodeDb's pure core). `Nobi.Exec` takes images, not universes.
 - A universe stores only symbol → CID references: commits and staged patches. Definitions live in the CAS.
 - The CAS is not serialized: plain functions over the Repo, callable from any process.
 - Every derived computation (type checks, signatures) goes through salsa.
@@ -38,40 +38,40 @@ MCP /mcp  ───┼─▶ Universe.stage(u, id, src):                        
 
 ## Components
 
-### `Kinoko.Cas` (new, `lib/kinoko/cas.ex`)
+### `Nobi.Cas` (new, `lib/nobi/cas.ex`)
 
 - **Table:** `declarations(cid text primary key, text text not null, inserted_at timestamptz not null default now())`. It is append-only and global. Nothing is ever garbage-collected for now.
 - `put([{cid, text}])` inserts with `on_conflict: :nothing`. It is idempotent and needs no process.
 - `get([cid]) :: %{cid => text}`. Missing CIDs are simply absent from the result.
 - **Writes happen before the universe references them**, so a crash leaves at worst an unreferenced row, never a dangling reference.
 
-### `Kinoko.Lang` (changed: internal, text-free universe)
+### `Nobi.Lang` (changed: internal, text-free universe)
 
 - **No `texts` field.** `Lang.Universe` drops its `texts` map. Canonical text is derived on demand with `Format.decl(decl)`, and `read` formats the committed or staged declaration.
 - **`restore`** becomes `restore(commits, staged, decls)`, where `decls :: %{cid => decl}` is the parsed declarations for every CID referenced. It replays the commits, rebuilds committed code, then restages the staged patches in their original order. It returns `{:ok, u} | {:error, [reason]}`.
 - **`stage_entries(u, id, entries)`** stages already-parsed entries, `{:live, decl}` or `{:gone, symbol}`. The string-taking `Lang.stage/4` stays for internal tests only.
 - **`durable(u) :: %{commits: [commit], staged: [{id, [{symbol, cid | :gone}]}]}`**: the symbol → CID projection only. Staged patches keep their staging order.
-- The moduledoc states that `Kinoko.Lang` is internal and that callers use `Kinoko.Universe`.
+- The moduledoc states that `Nobi.Lang` is internal and that callers use `Nobi.Universe`.
 
-### Universe registry (new table, behind `Kinoko.Universe`)
+### Universe registry (new table, behind `Nobi.Universe`)
 
 - **Table:** `universes(name text primary key, parent text null, forked_at_commit integer null, created_at timestamptz not null default now())`. It answers "which universes exist", including ones that aren't running.
 - `parent` and `forked_at_commit` stay null until piece 6 (fork lineage).
 - Like the CAS, it has no process. Create is an insert, and two concurrent creates of one name give one `:ok` and one `{:error, :exists}`.
 - **Explicit creation:** `main` is created at application boot, idempotently. Any other name must be created first. Using an unknown name returns `{:error, :no_such_universe}`.
 
-### `Kinoko.Universe` (new, `lib/kinoko/universe.ex`): the interface
+### `Nobi.Universe` (new, `lib/nobi/universe.ex`): the interface
 
 A stateless module that routes. Callers never see processes or registries.
 
 - **Existence** is checked against the `universes` table, cached per call path as cheaply as possible, for example only when no CodeDb is running for the name.
-- **Writes** find the universe's CodeDb or start it, via `Kinoko.Elm.Registry` and `PersistentElmGenServer.start/3`, then call it.
+- **Writes** find the universe's CodeDb or start it, via `Nobi.Elm.Registry` and `PersistentElmGenServer.start/3`, then call it.
 - **Reads** call the CodeDb.
 - **`eval`, `call` and `test`** take a snapshot from the CodeDb and run in the caller.
 
-### `Kinoko.CodeDb` (new, `lib/kinoko/code_db.ex`): the process
+### `Nobi.CodeDb` (new, `lib/nobi/code_db.ex`): the process
 
-- **Process:** a `PersistentElmGenServer` under `Kinoko.Elm.Supervisor`, keyed `"universe:" <> name`. Only `Kinoko.Universe` starts it or talks to it.
+- **Process:** a `PersistentElmGenServer` under `Nobi.Elm.Supervisor`, keyed `"universe:" <> name`. Only `Nobi.Universe` starts it or talks to it.
 - **`durable/1` = `Lang.durable/1`.**
   - `encode` is `term_to_binary(durable, compressed: 6)`.
   - `decode` uses `binary_to_term(.., [:safe])`, collects every CID referenced, calls `Cas.get`, parses each text, and calls `Lang.restore`. A missing CID or a parse failure raises with the CID, so the boot refuses.
@@ -81,7 +81,7 @@ A stateless module that routes. Callers never see processes or registries.
   - read requests: `:symbols`, `{:read, symbol}`, `:staged`, `:history`, `:snapshot`.
 
   `:snapshot` returns `%{committed: %{symbol => %{cid, typed, signature}}, signatures: sigs}`, everything a caller needs to type-check an expression and build an image.
-### Public API (`Kinoko.Universe`)
+### Public API (`Nobi.Universe`)
 
 Every function takes the universe name first. A name with no universe gives `{:error, :no_such_universe}`.
 
@@ -108,17 +108,17 @@ Universe.test(universe, symbol, opts) :: :ok | {:error, reason}
 - **`eval`, `call` and `test`** fetch `:snapshot`, then type-check and run in the caller through `Exec`. The server is never blocked by evaluation.
 - **Image memoization** stays content-keyed: Exec's image cache by image hash is the memo, so an unchanged committed state never recompiles, in any universe. This is not a per-CodeDb salsa query, because the image is already a pure function of the committed CIDs, which is exactly what its key is.
 
-### `Kinoko.Exec` (changed)
+### `Nobi.Exec` (changed)
 
 - `load`, `call`, `eval` and `test` take a committed map or an image, never a universe.
 - `eval` takes the signatures for checking: `Exec.eval(snapshot, source, opts)`.
-- Moduledoc: hosts reach it through `Kinoko.Universe`.
+- Moduledoc: hosts reach it through `Nobi.Universe`.
 
-### `Kinoko.Repl` (changed)
+### `Nobi.Repl` (changed)
 
-The Agent is gone. `Y.*` calls `Kinoko.Universe` on `"main"`, or another universe via `Y.use(name)`. Your session state survives restarts, and agents see the same `main`.
+The Agent is gone. `Y.*` calls `Nobi.Universe` on `"main"`, or another universe via `Y.use(name)`. Your session state survives restarts, and agents see the same `main`.
 
-### MCP (new, `lib/kinoko_web/controllers/mcp_controller.ex` plus `lib/kinoko_web/mcp/*`)
+### MCP (new, `lib/nobi_web/controllers/mcp_controller.ex` plus `lib/nobi_web/mcp/*`)
 
 - **Transport:** `POST /mcp`, JSON-RPC 2.0 over the streamable-HTTP MCP transport, with plain JSON responses and no SSE. It goes through a new `:mcp` pipeline that accepts JSON and skips CSRF.
 - **Methods:**
@@ -137,7 +137,7 @@ The Agent is gone. `Y.*` calls `Kinoko.Universe` on `"main"`, or another univers
   - `test`: `symbol`;
   - `history`.
 
-  Each one maps onto one `Kinoko.Universe` function. Results are text content, readable by agents, and a promotion and a staging read differently. A tool error is `isError: true` with the reasons.
+  Each one maps onto one `Nobi.Universe` function. Results are text content, readable by agents, and a promotion and a staging read differently. A tool error is `isError: true` with the reasons.
 - **Instructions:** adapted from the TS MCP's server instructions. They cover the syntax you cannot guess, the stage → read verdict → restage loop, and "a patch replaces the declarations it names whole". The stdlib list is generated from `Rt.Stdlib`, so it never drifts.
 - **Robustness:** malformed JSON gives `-32700`; unknown methods `-32601`; invalid params `-32602`. A tool that raises becomes `isError: true`, never a 500.
 
@@ -177,7 +177,7 @@ The Agent is gone. `Y.*` calls `Kinoko.Universe` on `"main"`, or another univers
   - a raising tool becomes `isError`.
 
   Plus one end-to-end script that drives the counter corpus through `/mcp` like an agent would.
-- **REPL:** the walkthrough runs on `Kinoko.Universe`, and a restart in the middle of a session keeps the state.
+- **REPL:** the walkthrough runs on `Nobi.Universe`, and a restart in the middle of a session keeps the state.
 
 ## Done when
 
@@ -187,7 +187,7 @@ The tests above pass, `mix precommit` is green, an MCP client configured with `h
 
 Rulings made in the final review that change what this spec says above.
 
-- **Supervised restarts never loop (`PersistentElmGenServer.start/3`).** The supervisor restarts a crashed `start/3` child through the same start function, which tells its first run from a restart. A restart that finds the key already registered to a live process (a caller started it again before the restart ran) returns `:ignore`, so `DynamicSupervisor` drops the child and the caller's process alone serves the key. A restart that fails to boot (the DB is down, or a stored state is corrupt) is logged and also `:ignore`d; the next `start/3` is a first start and returns the boot error to its caller. The first start keeps its contract (`{:error, {:already_started, pid}}`, boot errors). `CodeDb.start/1`'s workaround is gone: `Kinoko.Universe` starts a CodeDb with `start/3`. A boot the database fails (`DBConnection.ConnectionError`, `DBConnection.OwnershipError`, `Postgrex.Error`) is `unavailable`, not `internal`.
-- **`/mcp` is mounted only where enabled.** The router mounts the `/mcp` scope only when `Application.compile_env(:kinoko, :mcp_enabled, false)` is true: `config/dev.exs` and `config/test.exs` set it; prod leaves it off until the endpoint has auth (still deferred; see `KinokoWeb.McpController`).
-- **Degraded boot.** Boot never refuses on type errors. `Kinoko.Lang.restore/3` (still pure) returns `{:degraded, u, reasons}` when committed code no longer typechecks: committed code is kept as stored (symbol → CID, declarations), the failing symbols and reasons are kept, staging and unstaging work, and a patch promotes only when the whole image typechecks with it, which makes the universe healthy again (then every staged patch is tried). Reads (`read`, `symbols`, `staged`, `history`) work; `eval`, `call` and `test` return `{:error, %{code: "degraded", message: ...}}` naming the failing symbols. `Kinoko.Universe.health/1 :: :ok | {:degraded, [reason]}`, the MCP tool `health` and `Y.health()` report it, and `list_universes` and `symbols` mention it. Missing CAS rows and unparsable CAS text still refuse boot (corruption), and such a refusal after a crash is dropped by the supervisor rather than retried (first amendment).
-- **Eval fast path.** The CodeDb keeps its committed image's hash in its state (recomputed when a stage promotes) and answers `:image_key` with `{:ok, hash, signatures}` without copying committed code. `eval`, `call` and `test` use it and fetch the full `:snapshot` only when `Kinoko.Exec.loaded/1` has no image of that hash. On a 3000-def universe, eval with the image loaded takes about 0.2 ms against about 11 ms through the whole snapshot (median of 50; `test/kinoko/universe/eval_latency_perf_test.exs`, tagged `:perf`).
+- **Supervised restarts never loop (`PersistentElmGenServer.start/3`).** The supervisor restarts a crashed `start/3` child through the same start function, which tells its first run from a restart. A restart that finds the key already registered to a live process (a caller started it again before the restart ran) returns `:ignore`, so `DynamicSupervisor` drops the child and the caller's process alone serves the key. A restart that fails to boot (the DB is down, or a stored state is corrupt) is logged and also `:ignore`d; the next `start/3` is a first start and returns the boot error to its caller. The first start keeps its contract (`{:error, {:already_started, pid}}`, boot errors). `CodeDb.start/1`'s workaround is gone: `Nobi.Universe` starts a CodeDb with `start/3`. A boot the database fails (`DBConnection.ConnectionError`, `DBConnection.OwnershipError`, `Postgrex.Error`) is `unavailable`, not `internal`.
+- **`/mcp` is mounted only where enabled.** The router mounts the `/mcp` scope only when `Application.compile_env(:nobi, :mcp_enabled, false)` is true: `config/dev.exs` and `config/test.exs` set it; prod leaves it off until the endpoint has auth (still deferred; see `NobiWeb.McpController`).
+- **Degraded boot.** Boot never refuses on type errors. `Nobi.Lang.restore/3` (still pure) returns `{:degraded, u, reasons}` when committed code no longer typechecks: committed code is kept as stored (symbol → CID, declarations), the failing symbols and reasons are kept, staging and unstaging work, and a patch promotes only when the whole image typechecks with it, which makes the universe healthy again (then every staged patch is tried). Reads (`read`, `symbols`, `staged`, `history`) work; `eval`, `call` and `test` return `{:error, %{code: "degraded", message: ...}}` naming the failing symbols. `Nobi.Universe.health/1 :: :ok | {:degraded, [reason]}`, the MCP tool `health` and `Y.health()` report it, and `list_universes` and `symbols` mention it. Missing CAS rows and unparsable CAS text still refuse boot (corruption), and such a refusal after a crash is dropped by the supervisor rather than retried (first amendment).
+- **Eval fast path.** The CodeDb keeps its committed image's hash in its state (recomputed when a stage promotes) and answers `:image_key` with `{:ok, hash, signatures}` without copying committed code. `eval`, `call` and `test` use it and fetch the full `:snapshot` only when `Nobi.Exec.loaded/1` has no image of that hash. On a 3000-def universe, eval with the image loaded takes about 0.2 ms against about 11 ms through the whole snapshot (median of 50; `test/nobi/universe/eval_latency_perf_test.exs`, tagged `:perf`).

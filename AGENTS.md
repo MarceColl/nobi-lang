@@ -7,9 +7,9 @@ This is a web application written using the Phoenix web framework.
 
 ### Database
 
-- Kinoko uses SQLite only (`ecto_sqlite3`), a single file with no external services. Dev: `.kinoko/kinoko.db` (git-ignored); override the directory with `KINOKO_DATA`. Test: `.kinoko/test.db`.
-- `mix kinoko.start` creates, migrates and serves from a fresh checkout.
-- Release (`MIX_ENV=prod mix release`): the local `kinoko` build by default; `bin/kinoko-cli start` (`Kinoko.CLI`) migrates and serves on 127.0.0.1 with data in `$KINOKO_DATA` (default `~/.kinoko`). A server deploy is built with `KINOKO_BUILD=server` (into `_build/server`, no `/mcp` or console) and run with `KINOKO_MODE=server`: the file is `$KINOKO_DATA/kinoko.db` (default `/var/lib/kinoko`); run `bin/kinoko eval "Kinoko.Release.migrate()"` before the first start; it creates the directory and the file.
+- Nobi uses SQLite only (`ecto_sqlite3`), a single file with no external services. Dev: `.nobi/nobi.db` (git-ignored); override the directory with `NOBI_DATA`. Test: `.nobi/test.db`.
+- `mix nobi.start` creates, migrates and serves from a fresh checkout.
+- Release (`MIX_ENV=prod mix release`): the local `nobi` build by default; `bin/nobi-cli start` (`Nobi.CLI`) migrates and serves on 127.0.0.1 with data in `$NOBI_DATA` (default `~/.nobi`). A server deploy is built with `NOBI_BUILD=server` (into `_build/server`, no `/mcp` or console) and run with `NOBI_MODE=server`: the file is `$NOBI_DATA/nobi.db` (default `/var/lib/nobi`); run `bin/nobi eval "Nobi.Release.migrate()"` before the first start; it creates the directory and the file.
 - SQLite has one writer: DB-writing tests must not be `async: true`.
 
 ### Phoenix v1.8 guidelines
@@ -37,7 +37,7 @@ custom classes must fully style the input
 
 - **Always use and maintain this import syntax** in the app.css file for projects generated with `phx.new`
 - **Never** use `@apply` when writing raw css
-- Deliberate exception to the two-bundle rule: served Yabu app pages load a second bundle, `yabu.js` (the vendored `@tailwindcss/browser`), via the `yabu_root` layout; Kinoko's own pages use only app.js/app.css
+- Deliberate exception to the two-bundle rule: the apps Nobi serves load a second bundle, `nobi.js` (the vendored `@tailwindcss/browser`), via the `nobi_root` layout; the console and Nobi's other own pages use only app.js/app.css
 - **Always** manually write your own tailwind-based components instead of using daisyUI for a unique, world-class design
 - Out of the box **only the app.js and app.css bundles are supported**
   - You cannot reference an external vendor'd script `src` or link `href` in the layouts

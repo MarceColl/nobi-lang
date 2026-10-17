@@ -1,4 +1,4 @@
-defmodule Kinoko.Lang.UniverseCases do
+defmodule Nobi.Lang.UniverseCases do
   @moduledoc """
   The universe tests' generated cases (Rust's proptest strategies in
   `universe/tests.rs`) as seeded `:rand` generators, and the helpers that
@@ -8,7 +8,7 @@ defmodule Kinoko.Lang.UniverseCases do
   a change is `{:def, source}` or `{:gone, name}`.
   """
 
-  alias Kinoko.Lang.{Ast, Parser, Universe}
+  alias Nobi.Lang.{Ast, Parser, Universe}
 
   @names ~w(a b c d e f)
   @types [{"Int", "1", "+"}, {"String", "\"s\"", "++"}, {"Bool", "true", "=="}]

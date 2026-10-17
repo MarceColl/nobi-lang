@@ -1,4 +1,4 @@
-defmodule KinokoWeb.ConnCase do
+defmodule NobiWeb.ConnCase do
   @moduledoc """
   This module defines the test case to be used by
   tests that require setting up a connection.
@@ -19,20 +19,20 @@ defmodule KinokoWeb.ConnCase do
   using do
     quote do
       # The default endpoint for testing
-      @endpoint KinokoWeb.Endpoint
+      @endpoint NobiWeb.Endpoint
 
-      use KinokoWeb, :verified_routes
+      use NobiWeb, :verified_routes
 
       # Import conveniences for testing with connections
       import Plug.Conn
       import Phoenix.ConnTest
-      import KinokoWeb.ConnCase
+      import NobiWeb.ConnCase
     end
   end
 
   setup tags do
-    Kinoko.DataCase.setup_sandbox(tags)
-    unless tags[:async], do: Kinoko.UniverseHelpers.stop_universes_on_exit()
+    Nobi.DataCase.setup_sandbox(tags)
+    unless tags[:async], do: Nobi.UniverseHelpers.stop_universes_on_exit()
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

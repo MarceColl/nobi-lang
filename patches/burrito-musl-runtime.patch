@@ -4,7 +4,7 @@
      std.process.exit(1);
  }
  
-+// Kinoko patch (kinoko: patches/burrito-musl-runtime.patch).
++// Nobi patch (nobi: patches/burrito-musl-runtime.patch).
 +//
 +// The precompiled ERTS names MUSL_RUNTIME_PATH (/tmp/libc-musl-<sha>.so) as
 +// its ELF interpreter, so the path cannot move. Upstream reuses any file

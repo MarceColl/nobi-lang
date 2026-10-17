@@ -1,4 +1,4 @@
-defmodule Kinoko.Lang.NaiveUniverse do
+defmodule Nobi.Lang.NaiveUniverse do
   @moduledoc """
   The universe's reference (Rust's `stage_naive` and friends in
   `universe/tests.rs`): every subset of the staged patches, largest first
@@ -7,9 +7,9 @@ defmodule Kinoko.Lang.NaiveUniverse do
   committed; it never checks through it.
   """
 
-  alias Kinoko.Lang.Types.{Check, Evolution, Extract, Stdlib}
-  alias Kinoko.Lang.Universe
-  alias Kinoko.Lang.Universe.{Db, Search}
+  alias Nobi.Lang.Types.{Check, Evolution, Extract, Stdlib}
+  alias Nobi.Lang.Universe
+  alias Nobi.Lang.Universe.{Db, Search}
 
   def new, do: Universe.new()
 

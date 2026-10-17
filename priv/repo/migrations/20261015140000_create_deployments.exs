@@ -1,4 +1,4 @@
-defmodule Kinoko.Repo.Migrations.CreateDeployments do
+defmodule Nobi.Repo.Migrations.CreateDeployments do
   use Ecto.Migration
 
   def change do

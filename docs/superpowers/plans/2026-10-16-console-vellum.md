@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** Replace the `/_` console with a LiveView port of the Claude Design prototype "Kinoko Vellum". It covers the shell, Home, the System graph, Code, Data browsing, the Deployment page, the ⌘K palette and the intro dialog, all backed by real universes and deployments.
+**Goal:** Replace the `/_` console with a LiveView port of the Claude Design prototype "Nobi Vellum". It covers the shell, Home, the System graph, Code, Data browsing, the Deployment page, the ⌘K palette and the intro dialog, all backed by real universes and deployments.
 
 **Spec:**
-- `docs/design/kinoko-vellum/Kinoko Vellum.dc.html`, the **pixel spec**. Port its inline styles value by value. Do not interpret them.
-- `docs/design/kinoko-vellum/IMPLEMENTATION-MAP.md`, the concept mapping, v1 scope, degrade rules, tokens and routes. It is binding.
+- `docs/design/nobi-vellum/Kinoko Vellum.dc.html`, the **pixel spec**. Port its inline styles value by value. Do not interpret them.
+- `docs/design/nobi-vellum/IMPLEMENTATION-MAP.md`, the concept mapping, v1 scope, degrade rules, tokens and routes. It is binding.
 
 **Decisions (Marce, 2026-10-16):**
 - Pages with no backing data are **hidden**: Proposals, Decisions, Traces, Workflows, Crons, Queues, Settings, Try it and the review panel.
@@ -21,7 +21,7 @@
 - **Fonts and icons:**
   - Icons always go through `<.icon name="ph-…">`, using the same mechanism as `hero-*` (a Tailwind plugin over vendored SVGs).
   - No external `<link>`/`<script>` in layouts. Fonts are served from `priv/static/fonts` through `@font-face` in `app.css`.
-- **`Kinoko.Universe` is the only interface to universes.** `Kinoko.Lang` stays pure.
+- **`Nobi.Universe` is the only interface to universes.** `Nobi.Lang` stays pure.
 - **Page scope:** no page, nav entry, button or figure for a hidden feature. Degrade states follow the IMPLEMENTATION-MAP §3 exactly, and every degrade element is styled after a prototype element.
 - **LiveView rules from AGENTS.md:**
   - `<Layouts.app flash={@flash} …>` wraps every page;
@@ -54,7 +54,7 @@
 - `assets/vendor/phosphor.js`, a Tailwind plugin modelled on `assets/vendor/heroicons.js`, giving `ph-<name>` classes as masked SVGs
 - `priv/static/fonts/*.woff2` (plus OFL license files)
 - `assets/css/app.css`: `@font-face`, the `@plugin "../vendor/phosphor"` line and the `:root` tokens
-- `lib/kinoko_web/components/core_components.ex`: `icon/1` accepts `ph-` names
+- `lib/nobi_web/components/core_components.ex`: `icon/1` accepts `ph-` names
 
 **Sources** (Marce approved downloading them):
 - Phosphor: npm `@phosphor-icons/core` 2.1.1, `assets/regular/*.svg`. Vendor only the regular weight.
@@ -71,7 +71,7 @@
 
 ### Task 2: `Universe.graph/1`
 
-**Files:** a pure analysis in `lib/kinoko/lang/` (for example `lang/graph.ex`), an entry through `lib/kinoko/lang/universe.ex` if needed, the CodeDb read request, and `lib/kinoko/universe.ex`. Tests: `test/kinoko/universe_graph_test.exs`.
+**Files:** a pure analysis in `lib/nobi/lang/` (for example `lang/graph.ex`), an entry through `lib/nobi/lang/universe.ex` if needed, the CodeDb read request, and `lib/nobi/universe.ex`. Tests: `test/nobi/universe_graph_test.exs`.
 
 **Interface:**
 
@@ -103,12 +103,12 @@ Universe.graph(universe_or_at) ::
 ### Task 3: Console shell, palette, intro, Home
 
 **Files:**
-- `lib/kinoko_web/live/console/components.ex`: rewrite `shell` as the prototype frame. It contains:
+- `lib/nobi_web/live/console/components.ex`: rewrite `shell` as the prototype frame. It contains:
   - the top bar (logo SVG copied verbatim from the prototype, crumbs, "Jump to…" box, `?` button);
   - the sidebar: Deployments, Environments ("recent" = all universes, capped at 5, then `All N environments`), the nav (System only in v1), and the account row (visual only: `mcoll` / "Workspace, keys, billing"; Settings is hidden, so it is not clickable);
   - the title bar (views segmented control, title and subtitle, the sandbox chip, the commit id);
   - the REPL bar (the two strips at the bottom).
-- `lib/kinoko_web/live/console/index_live.ex`: Home, ported from `homeStage()`.
+- `lib/nobi_web/live/console/index_live.ex`: Home, ported from `homeStage()`.
   - Environment cards are universes. The icon is `ph-cube` for a universe with no parent (tint `#EDE8F8`) and `ph-git-fork` for a fork (tint `#FBF2DF`).
   - Deployment cards use `ph-rocket-launch`: mint for a deployment following head, faint for a pinned one. The meta line is `<universe> · following head` or `pinned @ #n`.
 - ⌘K palette and intro dialog markup in the shell. The intro has pages 01 Environments and 02 Graph only, with their figures ported as markup.
@@ -138,7 +138,7 @@ Universe.graph(universe_or_at) ::
 
 ### Task 4: System graph + inspector
 
-**Files:** `lib/kinoko_web/live/console/universe_live.ex` (stage `graph`, the default view), `assets/js/console.js` (`GraphCamera` hook), and its tests.
+**Files:** `lib/nobi_web/live/console/universe_live.ex` (stage `graph`, the default view), `assets/js/console.js` (`GraphCamera` hook), and its tests.
 
 - **Layout:** computed server-side from `Universe.graph/1`, with no JS layout library.
   - App cards: 264 wide, at left 38, stacked top 30 with a 58 gap. Header 29px, the mint dot, the app name and its first route.
@@ -196,7 +196,7 @@ Universe.graph(universe_or_at) ::
 
 ### Task 6: Deployment page
 
-**Files:** `lib/kinoko_web/live/console/deployment_live.ex` and tests. It ports `deploymentStage()` within the §3 limits.
+**Files:** `lib/nobi_web/live/console/deployment_live.ex` and tests. It ports `deploymentStage()` within the §3 limits.
 
 - **Header:**
   - the name (Newsreader 25), with the chip `following head` (mint) or `pinned` (sand);
@@ -222,7 +222,7 @@ Universe.graph(universe_or_at) ::
 ### Task 7: Fidelity pass (render + measure)
 
 **Files:**
-- `test/kinoko_web/console_fidelity_test.exs`: static contracts on rendered classes and ids. Examples: the shell has the 46px top bar class `h-[46px]`, the sidebar `w-[230px] bg-(--k-sand)`, no `rounded-xl`, no `dark:` and no `rose-`.
+- `test/nobi_web/console_fidelity_test.exs`: static contracts on rendered classes and ids. Examples: the shell has the 46px top bar class `h-[46px]`, the sidebar `w-[230px] bg-(--k-sand)`, no `rounded-xl`, no `dark:` and no `rose-`.
 - A scratch harness under `.superpowers/` (not committed):
   - seed a "Ski trip"-shaped universe (app `Split` with route `/split`; stored `Split.Expense` (payer, what, cents) with 5 rows of the prototype's EXPENSES, and `Split.Share` with 3 rows) and a deployment `production`;
   - serve on PORT=4123;

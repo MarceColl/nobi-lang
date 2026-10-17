@@ -1,11 +1,11 @@
-defmodule Kinoko.PersistentCounterV2 do
+defmodule Nobi.PersistentCounterV2 do
   @moduledoc """
-  Version 2 of `Kinoko.PersistentCounter`'s state: `migrate/2` records the
+  Version 2 of `Nobi.PersistentCounter`'s state: `migrate/2` records the
   version it migrated from under `:migrated_from`.
   """
 
-  use Kinoko.PersistentElmGenServer
-  alias Kinoko.Elm.Effect, as: Fx
+  use Nobi.PersistentElmGenServer
+  alias Nobi.Elm.Effect, as: Fx
 
   @impl true
   def version, do: 2

@@ -4,12 +4,12 @@ It builds on SQLite everywhere (`2026-10-16-sqlite-design.md`), deployments (pie
 
 ## Goal
 
-Yabu apps persist data through `Cmd.store.*`. Rows belong to a **deployment**: each deployment has its own SQLite file with one table per model. Models evolve protobuf-style, add-only, and the checker enforces it at promotion. Read-modify-write is a pure transaction closure that runs atomically.
+Nobi apps persist data through `Cmd.store.*`. Rows belong to a **deployment**: each deployment has its own SQLite file with one table per model. Models evolve protobuf-style, add-only, and the checker enforces it at promotion. Read-modify-write is a pure transaction closure that runs atomically.
 
 ## Decisions (Marce)
 
 - **Data is owned by the deployment.** A pin or rollback changes code, not data; staging and prod never share rows.
-- **Storage:** one SQLite file per deployment (`.kinoko/data/<deployment>.db`), one table per model, real columns.
+- **Storage:** one SQLite file per deployment (`.nobi/data/<deployment>.db`), one table per model, real columns.
 - **Evolution is protobuf-like and add-only.** An existing field never changes type and is never removed. A new field is either `Option<T>` (old rows read `None`) or mandatory with an explicit default (`replies : Int = 0`).
   - **Defaults apply only when decoding old rows.** Construction still lists every field.
 - **`tx` takes a closure only.** The list form is dropped.
@@ -70,13 +70,13 @@ Tx.delete(Model, id : Uuid) : Tx.Op       -- names the stored model (needs a tab
 
 ## Runtime
 
-### `Kinoko.Data`: per-deployment storage (outside `lib/kinoko/lang`)
+### `Nobi.Data`: per-deployment storage (outside `lib/nobi/lang`)
 
-- **One SQLite file per deployment,** opened lazily as an Ecto dynamic repo (`Kinoko.Data.Repo`) under a `DynamicSupervisor`, and registered by deployment name.
+- **One SQLite file per deployment,** opened lazily as an Ecto dynamic repo (`Nobi.Data.Repo`) under a `DynamicSupervisor`, and registered by deployment name.
   - WAL mode, `busy_timeout` 5000 ms.
   - The file is created on first use.
 - **Table per model:**
-  - **Name mapping:** the symbol, lowercased, with `.` replaced by `__` (`Forum.Post` → `forum__post`), quoted. Anything outside `[a-z0-9_]` falls back to `m_<first 12 hex of sha256(symbol)>`, recorded in a `_kinoko_tables(symbol, table)` meta table.
+  - **Name mapping:** the symbol, lowercased, with `.` replaced by `__` (`Forum.Post` → `forum__post`), quoted. Anything outside `[a-z0-9_]` falls back to `m_<first 12 hex of sha256(symbol)>`, recorded in a `_nobi_tables(symbol, table)` meta table.
   - **Columns:**
     - `id TEXT PRIMARY KEY` (canonical Uuid) and `_seq INTEGER` (insertion order);
     - `Int` and `Bool` → `INTEGER`, `String` and `Uuid` → `TEXT`;
@@ -93,7 +93,7 @@ Tx.delete(Model, id : Uuid) : Tx.Op       -- names the stored model (needs a tab
 ### Transactions
 
 - **The `tx` coordinator** is a short-lived process. It opens `BEGIN IMMEDIATE` on the deployment's file; SQLite then serializes writers, so concurrent transactions cannot conflict.
-- **The body** runs in an Exec worker. The `Store` handle it receives is a runtime value. `Store.get`/`Store.list` send read requests to the coordinator, which runs them inside the open transaction, and reply. This lives in `Kinoko.Exec.Hooks`/`Kinoko.Data`, like the `always` hook; `Kinoko.Lang` stays pure.
+- **The body** runs in an Exec worker. The `Store` handle it receives is a runtime value. `Store.get`/`Store.list` send read requests to the coordinator, which runs them inside the open transaction, and reply. This lives in `Nobi.Exec.Hooks`/`Nobi.Data`, like the `always` hook; `Nobi.Lang` stays pure.
 - **After the body:**
   - the coordinator applies the returned ops in order, inserts minting ids, then commits, and replies `Ok((inserted_ids, r))`;
   - any error (body crash, timeout, a decode failure or `SQLITE_BUSY` after retries) rolls back and replies `Err(message)`;
@@ -101,7 +101,7 @@ Tx.delete(Model, id : Uuid) : Tx.Op       -- names the stored model (needs a tab
 
 ### Hosting
 
-- **DeploymentLive** lowers `Cmd.store.*` to `Fx.task` effects that call `Kinoko.Data`, with the deployment's name. The callback is applied through `Universe.apply` as before.
+- **DeploymentLive** lowers `Cmd.store.*` to `Fx.task` effects that call `Nobi.Data`, with the deployment's name. The callback is applied through `Universe.apply` as before.
 - **The data's owner** is the deployment, whatever commit it serves, so pinned and following deployments use the same file.
 - **The REPL and `Universe.eval`** have no deployment. There, store effects stay "not available" unless one is named (`Y.use_deployment(name)`), which is out of scope.
 

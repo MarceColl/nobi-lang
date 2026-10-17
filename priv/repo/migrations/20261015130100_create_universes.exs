@@ -1,4 +1,4 @@
-defmodule Kinoko.Repo.Migrations.CreateUniverses do
+defmodule Nobi.Repo.Migrations.CreateUniverses do
   use Ecto.Migration
 
   def change do

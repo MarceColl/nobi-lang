@@ -1,16 +1,16 @@
-defmodule Kinoko.Lang.SalsaQueries do
+defmodule Nobi.Lang.SalsaQueries do
   @moduledoc """
-  The queries `Kinoko.Lang.SalsaTest` uses: the Rust `Tests` impl of
-  `crates/yabu/tests/salsa.rs`, one clause per variant.
+  The queries `Nobi.Lang.SalsaTest` uses: the Rust `Tests` impl of
+  `crates/nobi/tests/salsa.rs`, one clause per variant.
 
   A declaration's source is `text|D,E`; `{:sig, name}` is its first
   character (cheap, often unchanged), `{:check, name}` its text and each
   dependency's `:sig`. A missing source is a domain error, memoized like any
   value: `{:error, "no source for A"}`.
   """
-  @behaviour Kinoko.Lang.Salsa
+  @behaviour Nobi.Lang.Salsa
 
-  alias Kinoko.Lang.Salsa
+  alias Nobi.Lang.Salsa
 
   @impl true
   def compute({:sig, name}, r) do

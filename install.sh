@@ -1,18 +1,18 @@
 #!/bin/sh
-# Kinoko installer: downloads the kinoko binary for this machine, verifies its
+# Nobi installer: downloads the nobi binary for this machine, verifies its
 # sha256 and installs it. Never uses sudo, never edits shell rc files.
 #
-#   KINOKO_VERSION      release tag to install (default: latest)
-#   KINOKO_BIN_DIR      where to put `kinoko` (default: $HOME/.local/bin)
-#   KINOKO_BASE_URL     overrides the whole download base URL
-#   KINOKO_REPO         GitHub owner/repo the releases live in
+#   NOBI_VERSION      release tag to install (default: latest)
+#   NOBI_BIN_DIR      where to put `nobi` (default: $HOME/.local/bin)
+#   NOBI_BASE_URL     overrides the whole download base URL
+#   NOBI_REPO         GitHub owner/repo the releases live in
 #
 # Everything runs inside main(), called on the last line: a download cut short
 # defines functions and runs nothing.
 set -eu
 
-KINOKO_REPO="${KINOKO_REPO:-OWNER/kinoko}"
-KINOKO_VERSION="${KINOKO_VERSION:-latest}"
+NOBI_REPO="${NOBI_REPO:-OWNER/nobi-lang}"
+NOBI_VERSION="${NOBI_VERSION:-latest}"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
@@ -27,9 +27,9 @@ cleanup() {
 
 main() {
   # --- install dir ------------------------------------------------------------
-  install_dir="${KINOKO_BIN_DIR:-}"
+  install_dir="${NOBI_BIN_DIR:-}"
   if [ -z "$install_dir" ]; then
-    [ -n "${HOME:-}" ] || die "neither KINOKO_BIN_DIR nor HOME is set; set KINOKO_BIN_DIR"
+    [ -n "${HOME:-}" ] || die "neither NOBI_BIN_DIR nor HOME is set; set NOBI_BIN_DIR"
     install_dir="$HOME/.local/bin"
   fi
   while [ "${#install_dir}" -gt 1 ]; do
@@ -40,16 +40,16 @@ main() {
   done
 
   # --- download base ----------------------------------------------------------
-  if [ -n "${KINOKO_BASE_URL:-}" ]; then
-    base="${KINOKO_BASE_URL%/}"
+  if [ -n "${NOBI_BASE_URL:-}" ]; then
+    base="${NOBI_BASE_URL%/}"
   else
-    case "$KINOKO_REPO" in
-      *OWNER*) die "this installer has no release repository configured yet (KINOKO_REPO=$KINOKO_REPO). Set KINOKO_REPO=owner/kinoko or KINOKO_BASE_URL." ;;
+    case "$NOBI_REPO" in
+      *OWNER*) die "this installer has no release repository configured yet (NOBI_REPO=$NOBI_REPO). Set NOBI_REPO=owner/nobi-lang or NOBI_BASE_URL." ;;
     esac
-    if [ "$KINOKO_VERSION" = "latest" ]; then
-      base="https://github.com/$KINOKO_REPO/releases/latest/download"
+    if [ "$NOBI_VERSION" = "latest" ]; then
+      base="https://github.com/$NOBI_REPO/releases/latest/download"
     else
-      base="https://github.com/$KINOKO_REPO/releases/download/$KINOKO_VERSION"
+      base="https://github.com/$NOBI_REPO/releases/download/$NOBI_VERSION"
     fi
   fi
 
@@ -71,7 +71,7 @@ main() {
     [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
     arch=arm64
   fi
-  name="kinoko-$os-$arch"
+  name="nobi-$os-$arch"
 
   # --- tools ------------------------------------------------------------------
   https_only=""
@@ -105,9 +105,9 @@ main() {
   # --- download and verify ----------------------------------------------------
   trap cleanup EXIT
   trap 'exit 130' INT TERM HUP
-  tmp="$(mktemp -d "${TMPDIR:-/tmp}/kinoko-install.XXXXXX")"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/nobi-install.XXXXXX")"
 
-  say "Downloading $name ($KINOKO_VERSION)"
+  say "Downloading $name ($NOBI_VERSION)"
   fetch "$base/$name" "$tmp/$name" || die "could not download $base/$name"
   fetch "$base/$name.sha256" "$tmp/$name.sha256" || die "could not download $base/$name.sha256"
 
@@ -120,13 +120,13 @@ main() {
   # --- install ----------------------------------------------------------------
   mkdir -p "$install_dir" || die "cannot create $install_dir"
   # Staged next to the target so the final mv is an atomic rename.
-  staged="$install_dir/.kinoko.$$"
+  staged="$install_dir/.nobi.$$"
   cp "$tmp/$name" "$staged" || die "cannot write to $install_dir"
   chmod 0755 "$staged"
-  mv -f "$staged" "$install_dir/kinoko" || die "cannot install to $install_dir/kinoko"
+  mv -f "$staged" "$install_dir/nobi" || die "cannot install to $install_dir/nobi"
   staged=""
 
-  say "Installed kinoko to $install_dir/kinoko"
+  say "Installed nobi to $install_dir/nobi"
 
   case ":${PATH:-}:" in
     *":$install_dir:"*) ;;
@@ -141,7 +141,7 @@ main() {
   esac
 
   say ""
-  say "Next: run  kinoko"
+  say "Next: run  nobi"
 }
 
 main "$@"

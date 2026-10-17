@@ -4,22 +4,22 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Products made of many `defapp`s over shared models are served through a typed `defroutes` table. A `Kinoko.Deployment` maps hosts to a universe's route table, either following its head or pinned to a commit. A catch-all `DeploymentLive` runs the matched app. Kinoko's own UIs live under `/_`.
+**Goal:** Products made of many `defapp`s over shared models are served through a typed `defroutes` table. A `Nobi.Deployment` maps hosts to a universe's route table, either following its head or pinned to a commit. A catch-all `DeploymentLive` runs the matched app. Nobi's own UIs live under `/_`.
 
 **Architecture:**
 - **Language:** a new `defroutes` declaration kind, with checker rules and a `Cmd.navigate` special form.
 - **Codegen:** exports the route tables, and a pure route matcher resolves URLs.
 - **Universe:** gains `apply`, `apps`, `routes`, commit broadcasts and execution pinned at a commit.
-- **Deployments:** a process-free table behind `Kinoko.Deployment`.
-- **Serving:** one generic `ElmLiveView`, `DeploymentLive`, renders Yabu `Html` through a safe component.
+- **Deployments:** a process-free table behind `Nobi.Deployment`.
+- **Serving:** one generic `ElmLiveView`, `DeploymentLive`, renders Nobi `Html` through a safe component.
 
-**Tech Stack:** Elixir/Phoenix 1.8 LiveView, Ecto/Postgres, Phoenix.PubSub, plus the existing Kinoko.Lang, Exec, Universe and CodeDb.
+**Tech Stack:** Elixir/Phoenix 1.8 LiveView, Ecto/Postgres, Phoenix.PubSub, plus the existing Nobi.Lang, Exec, Universe and CodeDb.
 
 **Spec:** `docs/superpowers/specs/2026-10-15-apps-liveview-design.md`. Glossary: `docs/GLOSSARY.md`.
 
 ## Global Constraints
 
-- `Kinoko.Universe` is the only interface to universes, and `Kinoko.Deployment` the only interface to deployments. `Kinoko.Lang` stays pure and internal. No Yabu value is ever sent to the browser.
+- `Nobi.Universe` is the only interface to universes, and `Nobi.Deployment` the only interface to deployments. `Nobi.Lang` stays pure and internal. No Nobi value is ever sent to the browser.
 - **Route param types:** `Int`, `String` and `Uuid` only. A URL param that doesn't parse as its type is a 404.
 - **New checker codes:** `"duplicate-route"`, `"route-mismatch"`, `"bad-route"` (malformed pattern or non-app target) and `"bad-navigate"`. Reasons keep the shape `%{name, code, message}`.
 - **`deployments` table:** `deployments(name text pk, universe text not null, routes text not null, commit integer null, hosts text[] not null default '{}', inserted_at, updated_at)`. `commit` null means follow head.
@@ -32,7 +32,7 @@
 ## Review Focus
 
 1. **A route whose param type is `Int`, and a URL with a non-numeric or overflowing value.** Expected: 404, never a crash. *Task 2.*
-2. **A browser sending a forged `phx-click` id, or an id from a stale render.** Expected: ignored, never an arbitrary Yabu value. *Task 6.*
+2. **A browser sending a forged `phx-click` id, or an id from a stale render.** Expected: ignored, never an arbitrary Nobi value. *Task 6.*
 3. **App HTML trying to inject `phx-click`, `javascript:`, `<script>` or raw HTML.** Expected: dropped or escaped. *Task 5.*
 4. **A commit that removes the routes declaration or the app currently open.** Expected: a 404 page, no crash. *Task 6.*
 5. **A pinned deployment after the universe moves on.** Expected: it still serves the old commit, and a re-pin rolls it back or forward. *Task 4.*
@@ -42,8 +42,8 @@
 ### Task 1: `defroutes` in the language
 
 **Files:**
-- Modify the lexer, parser, AST, format and checker modules under `lib/kinoko/lang/` (`types/check/decl.ex`, `jsx_app.ex` or wherever the app shape is checked), plus `types/extract.ex`.
-- Tests: `test/kinoko/lang/routes_test.exs`.
+- Modify the lexer, parser, AST, format and checker modules under `lib/nobi/lang/` (`types/check/decl.ex`, `jsx_app.ex` or wherever the app shape is checked), plus `types/extract.ex`.
+- Tests: `test/nobi/lang/routes_test.exs`.
 
 **Interfaces:**
 - **AST:** `{:defroutes, meta, [name, [{segments, app_symbol}]]}`, where a segment is `{:lit, "post"} | {:param, "id"}` and `/` is `[]`.
@@ -57,27 +57,27 @@
   - checker accepts the forum fixture: `Forum.Threads` (no params), `Forum.Post` with `init(id : Uuid)`, `Forum.Settings`, and a `defroutes Forum` declaration;
   - refuses: an unknown target; a non-app target; a param name mismatch; a param type mismatch (`init(id : Int)` routed as `/post/:slug`); a duplicate pattern (`/post/:a` vs `/post/:b`); a param type other than `Int`, `String` or `Uuid`;
   - `Cmd.navigate(Forum.Post, uuid_expr)` is OK; wrong arity or type gives `"bad-navigate"`; an unrouted app gives `"bad-navigate"`;
-  - staging through `Kinoko.Universe` promotes the fixture;
+  - staging through `Nobi.Universe` promotes the fixture;
   - the piece-1 oracle tests stay green.
-- [ ] **Step 2:** Implement. The pattern string is parsed at parse time into segments; malformed patterns (`//`, empty param name, `:` mid-segment) give a parse error. Save the forum fixture as `test/fixtures/yabu/forum.yabu`, a small but real product: models, a thread list, a post view with `id`, settings, navigation between them, and `defroutes Forum`.
+- [ ] **Step 2:** Implement. The pattern string is parsed at parse time into segments; malformed patterns (`//`, empty param name, `:` mid-segment) give a parse error. Save the forum fixture as `test/fixtures/nobi/forum.nobi`, a small but real product: models, a thread list, a post view with `id`, settings, navigation between them, and `defroutes Forum`.
 - [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat(lang): defroutes, parameterised init, Cmd.navigate"`.
 
 ### Task 2: Codegen of routes and the pure route matcher
 
-**Files:** modify `lib/kinoko/lang/codegen*.ex` and `lib/kinoko/lang/rt*.ex`; create `lib/kinoko/lang/routes.ex`; tests `test/kinoko/lang/routes_codegen_test.exs`.
+**Files:** modify `lib/nobi/lang/codegen*.ex` and `lib/nobi/lang/rt*.ex`; create `lib/nobi/lang/routes.ex`; tests `test/nobi/lang/routes_codegen_test.exs`.
 
 **Interfaces:**
-- `__yabu__(:routes)` returns `%{routes_name => [%{segments, app, params: [{name, type}]}]}`.
+- `__nobi__(:routes)` returns `%{routes_name => [%{segments, app, params: [{name, type}]}]}`.
 - `Cmd.navigate` values are `{:cmd, {:effect, "Cmd.navigate", nil, [app_symbol, args]}}`.
-- `Kinoko.Lang.Routes.match(table_entries, path :: String.t()) :: {:ok, app, [arg_values]} | :not_found`. It is pure; it parses `Int` (i64 range), `Uuid` (canonical) and `String` (URL-decoded).
-- `Kinoko.Lang.Routes.path(table_entries, app, args) :: {:ok, String.t()} | :error`, the reverse for navigate. It URL-encodes.
+- `Nobi.Lang.Routes.match(table_entries, path :: String.t()) :: {:ok, app, [arg_values]} | :not_found`. It is pure; it parses `Int` (i64 range), `Uuid` (canonical) and `String` (URL-decoded).
+- `Nobi.Lang.Routes.path(table_entries, app, args) :: {:ok, String.t()} | :error`, the reverse for navigate. It URL-encodes.
 
 - [ ] **Step 1 (failing tests):** match the root, literals, params by type, order (first match wins), `Int` overflow and non-numeric → `:not_found`, a bad `Uuid` → `:not_found`, trailing slash handling (decide and document; recommended: `/post/1/` matches `/post/1`), and percent-decoding. `path` round-trips with `match`. Codegen exports the routes of the forum fixture.
 - [ ] **Step 2:** Implement, then `mix precommit`, then `jj commit -m "feat(lang): route tables in images, pure matcher"`.
 
-### Task 3: `Kinoko.Universe` additions
+### Task 3: `Nobi.Universe` additions
 
-**Files:** modify `lib/kinoko/universe.ex`, `lib/kinoko/code_db.ex` and `lib/kinoko/exec.ex`; tests extend `test/kinoko/universe_test.exs`.
+**Files:** modify `lib/nobi/universe.ex`, `lib/nobi/code_db.ex` and `lib/nobi/exec.ex`; tests extend `test/nobi/universe_test.exs`.
 
 **Interfaces:**
 
@@ -100,13 +100,13 @@ Universe.call(handle, symbol, args, opts) / Universe.apply(handle, fun, args, op
   - `at(u, 1)` still answers with commit 1's code after commit 2 changed it;
   - `at` with an out-of-range commit gives an error.
 - [ ] **Step 2:** Implement.
-  - The broadcast is an `Effect` from CodeDb's `update`, so it is performed after persist (piece 2 ordering). Use `Kinoko.PubSub`.
+  - The broadcast is an `Effect` from CodeDb's `update`, so it is performed after persist (piece 2 ordering). Use `Nobi.PubSub`.
   - `at` builds through `Lang` and `Cas` in the caller, never inside CodeDb state, and caches by image hash.
 - [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat: Universe apply/apps/routes/subscribe/at"`.
 
 ### Task 4: Deployments
 
-**Files:** a migration `create_deployments`, `lib/kinoko/deployment.ex`, and a boot ensure in `application.ex` (same pattern as `Registry.ensure_main`); tests `test/kinoko/deployment_test.exs`.
+**Files:** a migration `create_deployments`, `lib/nobi/deployment.ex`, and a boot ensure in `application.ex` (same pattern as `Registry.ensure_main`); tests `test/nobi/deployment_test.exs`.
 
 **Interfaces:**
 
@@ -121,32 +121,32 @@ Deployment.target(d) :: {:ok, universe_or_handle}     # head → universe name; 
 ```
 
 - [ ] **Step 1 (failing tests):** create, get, list; duplicate; bad name; unknown universe; pin/follow round trip; resolve exact host, `foo.localhost`, unknown host; `ensure_local` is idempotent; Review Focus 5 (pinned serves the old commit after a promotion; re-pin changes it).
-- [ ] **Step 2:** Implement, then `mix precommit` and `MIX_ENV=dev mix ecto.migrate`, then `jj commit -m "feat: deployments table and Kinoko.Deployment"`.
+- [ ] **Step 2:** Implement, then `mix precommit` and `MIX_ENV=dev mix ecto.migrate`, then `jj commit -m "feat: deployments table and Nobi.Deployment"`.
 
-### Task 5: `KinokoWeb.YabuHtml`
+### Task 5: `NobiWeb.NobiHtml`
 
-**Files:** `lib/kinoko_web/components/yabu_html.ex`; test `test/kinoko_web/yabu_html_test.exs`.
+**Files:** `lib/nobi_web/components/nobi_html.ex`; test `test/nobi_web/nobi_html_test.exs`.
 
-**Interfaces:** `YabuHtml.prepare(html_value) :: {rendered_tree, handlers :: %{"eN" => msg | {:change, fun}}}`, which is pure, plus a function component `<.yabu_html tree={…} />` that renders the prepared tree. Handler ids are `e0…` in render order.
+**Interfaces:** `NobiHtml.prepare(html_value) :: {rendered_tree, handlers :: %{"eN" => msg | {:change, fun}}}`, which is pure, plus a function component `<.nobi_html tree={…} />` that renders the prepared tree. Handler ids are `e0…` in render order.
 
 - [ ] **Step 1 (failing tests):**
   - allow-listed attributes pass through; anything else is dropped;
   - a plain attribute named `phx-*` or `on*` is dropped;
   - `href`/`src` with `javascript:` or `data:` is dropped, while http, https and relative URLs are kept;
   - text and attribute values are escaped, and `<script>` as text renders inert;
-  - `on-click` becomes `phx-click="yabu"` with `phx-value-h="eN"`;
+  - `on-click` becomes `phx-click="nobi"` with `phx-value-h="eN"`;
   - `on-change` gets the documented input binding;
   - nested elements work;
   - handler ids are stable for the same tree.
-- [ ] **Step 2:** Implement. Decide the `on-change` binding (recommended: `phx-change="yabu"` on the element itself plus a `name` and `phx-value-h`; check what LiveView supports on bare inputs, and wrap in a form if required) and document it. Then `mix precommit` and `jj commit -m "feat(web): safe Yabu Html rendering"`.
+- [ ] **Step 2:** Implement. Decide the `on-change` binding (recommended: `phx-change="nobi"` on the element itself plus a `name` and `phx-value-h`; check what LiveView supports on bare inputs, and wrap in a form if required) and document it. Then `mix precommit` and `jj commit -m "feat(web): safe Nobi Html rendering"`.
 
-### Task 6: `KinokoWeb.DeploymentLive` and routing
+### Task 6: `NobiWeb.DeploymentLive` and routing
 
-**Files:** `lib/kinoko_web/live/deployment_live.ex`; modify `router.ex` (reserved `/_` scope, LiveDashboard move, catch-all last); tests `test/kinoko_web/deployment_live_test.exs`.
+**Files:** `lib/nobi_web/live/deployment_live.ex`; modify `router.ex` (reserved `/_` scope, LiveDashboard move, catch-all last); tests `test/nobi_web/deployment_live_test.exs`.
 
 **Behaviour:** see the spec's "Serving" section. It is an `ElmLiveView` with `params: true`.
 - **Model:** `%{deployment, target, routes_name, app, args, model, model_sig, tree, handlers, notice, error}`.
-- **Events:** `{"yabu", %{"h" => id} = params}`. An unknown id is ignored (Review Focus 2).
+- **Events:** `{"nobi", %{"h" => id} = params}`. An unknown id is ignored (Review Focus 2).
 - **Navigate:** resolved with `Routes.path` and executed with a `patch` host effect.
 - **Commits:** handled for following deployments only.
 
@@ -168,9 +168,9 @@ Deployment.target(d) :: {:ok, universe_or_handle}     # head → universe name; 
   - Ensure `/mcp` and `/_` still work, and that LiveDashboard is reachable at `/_/dev/dashboard`.
 - [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat(web): DeploymentLive serves route tables"`.
 
-### Task 7: Console under `/_`, `mix kinoko.start`, glossary
+### Task 7: Console under `/_`, `mix nobi.start`, glossary
 
-**Files:** `lib/kinoko_web/live/console/{index,universe,deployment}_live.ex`, `lib/mix/tasks/kinoko.start.ex`, `docs/GLOSSARY.md`; tests `test/kinoko_web/console_test.exs`.
+**Files:** `lib/nobi_web/live/console/{index,universe,deployment}_live.ex`, `lib/mix/tasks/nobi.start.ex`, `docs/GLOSSARY.md`; tests `test/nobi_web/console_test.exs`.
 
 - [ ] **Step 1 (failing tests):**
   - `/_` lists universes and deployments;
@@ -178,6 +178,6 @@ Deployment.target(d) :: {:ok, universe_or_handle}     # head → universe name; 
   - `/_/d/:name` shows the deployment and its links.
   - Pages are styled with Tailwind (AGENTS.md: polished, no daisyUI components).
 - [ ] **Step 2:** Implement.
-  - `mix kinoko.start`: ensure the DB (`ecto.create` and `ecto.migrate`), `main` and `local`, then start the endpoint (`Mix.Tasks.Phx.Server` with the server enabled) and print the URLs. A test covers a pure helper, the URL banner.
+  - `mix nobi.start`: ensure the DB (`ecto.create` and `ecto.migrate`), `main` and `local`, then start the endpoint (`Mix.Tasks.Phx.Server` with the server enabled) and print the URLs. A test covers a pure helper, the URL banner.
   - Glossary: add **Route table** (`defroutes`), **Deployment**, **Routing table** and **Console**.
-- [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat: console under /_, mix kinoko.start, glossary"`.
+- [ ] **Step 3:** `mix precommit`, then `jj commit -m "feat: console under /_, mix nobi.start, glossary"`.

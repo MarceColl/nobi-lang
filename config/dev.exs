@@ -1,13 +1,20 @@
 import Config
 
-# Configure your database. KINOKO_DATA overrides the data directory
-# (default: .kinoko in the checkout).
-config :kinoko, Kinoko.Repo,
-  database:
-    Path.join(System.get_env("KINOKO_DATA") || Path.expand("../.kinoko", __DIR__), "kinoko.db"),
+# Configure your database. NOBI_DATA overrides the data directory
+# (default: .nobi in the checkout).
+config :nobi, Nobi.Repo,
+  database: Path.join(System.get_env("NOBI_DATA") || Path.expand("../.nobi", __DIR__), "nobi.db"),
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
+
+# Before the rename to Nobi the dev data lived in .kinoko/kinoko.db; while it
+# is there, starting the app logs how to move it (Nobi.Application).
+if !System.get_env("NOBI_DATA") do
+  config :nobi,
+         :legacy_dev_data,
+         {Path.expand("../.kinoko", __DIR__), Path.expand("../.nobi", __DIR__)}
+end
 
 # For development, we disable any cache and enable
 # debugging and code reloading.
@@ -15,7 +22,7 @@ config :kinoko, Kinoko.Repo,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
-config :kinoko, KinokoWeb.Endpoint,
+config :nobi, NobiWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4000")],
@@ -24,9 +31,9 @@ config :kinoko, KinokoWeb.Endpoint,
   debug_errors: true,
   secret_key_base: "4EdRsDt1bKWBrCDE2OR9z25mc1U+9GCofCFiRiAysKZ/I8oZ8HnvBAUBasLa5fzl",
   watchers: [
-    esbuild: {Esbuild, :install_and_run, [:kinoko, ~w(--sourcemap=inline --watch)]},
-    esbuild_yabu: {Esbuild, :install_and_run, [:yabu, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:kinoko, ~w(--watch)]}
+    esbuild: {Esbuild, :install_and_run, [:nobi, ~w(--sourcemap=inline --watch)]},
+    esbuild_apps: {Esbuild, :install_and_run, [:apps, ~w(--sourcemap=inline --watch)]},
+    tailwind: {Tailwind, :install_and_run, [:nobi, ~w(--watch)]}
   ]
 
 # ## SSL Support
@@ -53,22 +60,22 @@ config :kinoko, KinokoWeb.Endpoint,
 # different ports.
 
 # Watch static and templates for browser reloading.
-config :kinoko, KinokoWeb.Endpoint,
+config :nobi, NobiWeb.Endpoint,
   live_reload: [
     web_console_logger: true,
     patterns: [
       ~r"priv/static/(?!uploads/).*(js|css|png|jpeg|jpg|gif|svg)$",
       ~r"priv/gettext/.*(po)$",
-      ~r"lib/kinoko_web/(?:controllers|live|components|router)/?.*\.(ex|heex)$"
+      ~r"lib/nobi_web/(?:controllers|live|components|router)/?.*\.(ex|heex)$"
     ]
   ]
 
 # Enable dev routes for dashboard and mailbox
-config :kinoko, dev_routes: true
+config :nobi, dev_routes: true
 
-# Mount the unauthenticated /mcp endpoint (see KinokoWeb.McpController).
-# Off in a server build (KINOKO_BUILD=server) until it has auth.
-config :kinoko, mcp_enabled: true
+# Mount the unauthenticated /mcp endpoint (see NobiWeb.McpController).
+# Off in a server build (NOBI_BUILD=server) until it has auth.
+config :nobi, mcp_enabled: true
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

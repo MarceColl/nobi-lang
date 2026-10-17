@@ -1,7 +1,7 @@
-defmodule KinokoWeb.McpRaisingTools do
+defmodule NobiWeb.McpRaisingTools do
   @moduledoc """
   A tools module for the MCP tests whose tools raise or exit, to prove
-  `KinokoWeb.Mcp.Protocol` turns either into an `isError` result.
+  `NobiWeb.Mcp.Protocol` turns either into an `isError` result.
   Installed per request with `put_private(conn, :mcp_tools, __MODULE__)`.
   """
 

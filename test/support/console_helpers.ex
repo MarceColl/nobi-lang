@@ -1,4 +1,4 @@
-defmodule KinokoWeb.ConsoleHelpers do
+defmodule NobiWeb.ConsoleHelpers do
   @moduledoc "Test helpers for the `/_` console LiveViews."
 
   import ExUnit.Assertions, only: [flunk: 1]

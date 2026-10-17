@@ -1,4 +1,4 @@
-defmodule Kinoko.DataCase do
+defmodule Nobi.DataCase do
   @moduledoc """
   This module defines the setup for tests requiring
   access to the application's data layer.
@@ -18,24 +18,24 @@ defmodule Kinoko.DataCase do
 
   using do
     quote do
-      alias Kinoko.Repo
+      alias Nobi.Repo
 
       import Ecto
       import Ecto.Changeset
       import Ecto.Query
-      import Kinoko.DataCase
+      import Nobi.DataCase
     end
   end
 
   setup tags do
-    Kinoko.DataCase.setup_sandbox(tags)
+    Nobi.DataCase.setup_sandbox(tags)
     :ok
   end
 
   # Sync tests may reach a universe (some only through a default name, such
   # as "main"); none of its CodeDbs may outlive the test.
   setup tags do
-    unless tags[:async], do: Kinoko.UniverseHelpers.stop_universes_on_exit()
+    unless tags[:async], do: Nobi.UniverseHelpers.stop_universes_on_exit()
     :ok
   end
 
@@ -43,7 +43,7 @@ defmodule Kinoko.DataCase do
   Sets up the sandbox based on the test tags.
   """
   def setup_sandbox(tags) do
-    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Kinoko.Repo, shared: not tags[:async])
+    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Nobi.Repo, shared: not tags[:async])
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
 
     # Async tests only read (see the moduledoc), so they skip this.
@@ -53,7 +53,7 @@ defmodule Kinoko.DataCase do
     # "Database busy" at once), so take it now, as the first statement, where
     # busy_timeout makes it wait. The test then holds it until it ends.
     unless tags[:async],
-      do: Ecto.Adapters.SQL.query!(Kinoko.Repo, "DELETE FROM universes WHERE 0")
+      do: Ecto.Adapters.SQL.query!(Nobi.Repo, "DELETE FROM universes WHERE 0")
   end
 
   @doc """

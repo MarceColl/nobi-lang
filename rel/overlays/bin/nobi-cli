@@ -1,0 +1,7 @@
+#!/bin/sh
+# The `nobi` command from a plain release (no Burrito): runs
+# Nobi.CLI.main/1 with this script's arguments.
+#
+#   bin/nobi-cli [start] [--no-open] | mcp | version | uninstall
+set -e
+exec "$(dirname "$0")/nobi" eval 'Nobi.CLI.main(System.argv())' "$@"

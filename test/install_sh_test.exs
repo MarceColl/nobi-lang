@@ -1,4 +1,4 @@
-defmodule Kinoko.InstallShTest.FilePlug do
+defmodule Nobi.InstallShTest.FilePlug do
   @moduledoc false
   # Serves `root` (from conn.private) so the test needs no external server.
   @behaviour Plug
@@ -19,22 +19,22 @@ defmodule Kinoko.InstallShTest.FilePlug do
   end
 end
 
-defmodule Kinoko.InstallShTest do
+defmodule Nobi.InstallShTest do
   # Runs the real install.sh against a local server over a fake dist/ of tiny
   # scripts. Touches no database, so it can be async.
   use ExUnit.Case, async: true
 
   import Bitwise
 
-  alias Kinoko.InstallShTest.FilePlug
+  alias Nobi.InstallShTest.FilePlug
 
   @install Path.expand("../install.sh", __DIR__)
   # The dist task's targets (mix.exs), as install.sh names them.
-  @targets Mix.Project.config()[:releases][:kinoko][:burrito][:targets]
+  @targets Mix.Project.config()[:releases][:nobi][:burrito][:targets]
            |> Keyword.keys()
            |> Enum.map(
-             &(Mix.Tasks.Kinoko.Dist.binary_name(&1)
-               |> String.replace_prefix("kinoko-", ""))
+             &(Mix.Tasks.Nobi.Dist.binary_name(&1)
+               |> String.replace_prefix("nobi-", ""))
            )
 
   setup %{tmp_dir: tmp} do
@@ -42,10 +42,10 @@ defmodule Kinoko.InstallShTest do
     File.mkdir_p!(dist)
 
     for t <- @targets do
-      body = "#!/bin/sh\necho fake-kinoko #{t}\n"
-      File.write!(Path.join(dist, "kinoko-#{t}"), body)
+      body = "#!/bin/sh\necho fake-nobi #{t}\n"
+      File.write!(Path.join(dist, "nobi-#{t}"), body)
       sha = :crypto.hash(:sha256, body) |> Base.encode16(case: :lower)
-      File.write!(Path.join(dist, "kinoko-#{t}.sha256"), "#{sha}  kinoko-#{t}\n")
+      File.write!(Path.join(dist, "nobi-#{t}.sha256"), "#{sha}  nobi-#{t}\n")
     end
 
     server =
@@ -95,27 +95,27 @@ defmodule Kinoko.InstallShTest do
 
   defp clean_install(ctx, shell) do
     {out, 0} =
-      install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}], nil, shell)
+      install([{"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}], nil, shell)
 
-    bin = Path.join(ctx.dir, "kinoko")
+    bin = Path.join(ctx.dir, "nobi")
     assert File.regular?(bin)
     assert (File.stat!(bin).mode &&& 0o777) == 0o755
-    assert {"fake-kinoko " <> _, 0} = System.cmd(bin, [])
+    assert {"fake-nobi " <> _, 0} = System.cmd(bin, [])
     assert out =~ "is not on your PATH"
     assert out =~ ~s(export PATH="#{ctx.dir}:$PATH")
-    assert out =~ "Next: run  kinoko"
-    assert Path.wildcard(Path.join(ctx.dir, ".kinoko.*"), match_dot: true) == []
+    assert out =~ "Next: run  nobi"
+    assert Path.wildcard(Path.join(ctx.dir, ".nobi.*"), match_dot: true) == []
   end
 
   defp mismatch(ctx, shell) do
-    for t <- @targets, do: File.write!(Path.join(ctx.dist, "kinoko-#{t}"), "tampered\n")
+    for t <- @targets, do: File.write!(Path.join(ctx.dist, "nobi-#{t}"), "tampered\n")
 
     {out, status} =
-      install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}], nil, shell)
+      install([{"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}], nil, shell)
 
     assert status != 0
     assert out =~ "checksum mismatch"
-    refute File.exists?(Path.join(ctx.dir, "kinoko"))
+    refute File.exists?(Path.join(ctx.dir, "nobi"))
     assert (File.ls(ctx.dir) |> elem(1)) in [[], :enoent]
   end
 
@@ -125,7 +125,7 @@ defmodule Kinoko.InstallShTest do
 
     {out, 0} =
       System.cmd("sh", [@install],
-        env: [{"PATH", path}, {"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}],
+        env: [{"PATH", path}, {"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}],
         stderr_to_stdout: true
       )
 
@@ -134,37 +134,37 @@ defmodule Kinoko.InstallShTest do
 
   @tag :tmp_dir
   test "a failed download installs nothing", ctx do
-    File.rm!(Path.join(ctx.dist, "kinoko-macos-arm64.sha256"))
-    File.rm!(Path.join(ctx.dist, "kinoko-linux-x86_64.sha256"))
-    File.rm!(Path.join(ctx.dist, "kinoko-linux-arm64.sha256"))
-    File.rm!(Path.join(ctx.dist, "kinoko-macos-x86_64.sha256"))
+    File.rm!(Path.join(ctx.dist, "nobi-macos-arm64.sha256"))
+    File.rm!(Path.join(ctx.dist, "nobi-linux-x86_64.sha256"))
+    File.rm!(Path.join(ctx.dist, "nobi-linux-arm64.sha256"))
+    File.rm!(Path.join(ctx.dist, "nobi-macos-x86_64.sha256"))
 
-    {out, status} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}])
+    {out, status} = install([{"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}])
     assert status != 0
     assert out =~ "could not download"
-    refute File.exists?(Path.join(ctx.dir, "kinoko"))
+    refute File.exists?(Path.join(ctx.dir, "nobi"))
   end
 
   @tag :tmp_dir
   test "an existing install is left alone when the new one fails verification", ctx do
     File.mkdir_p!(ctx.dir)
-    File.write!(Path.join(ctx.dir, "kinoko"), "old")
-    for t <- @targets, do: File.write!(Path.join(ctx.dist, "kinoko-#{t}"), "tampered\n")
+    File.write!(Path.join(ctx.dir, "nobi"), "old")
+    for t <- @targets, do: File.write!(Path.join(ctx.dist, "nobi-#{t}"), "tampered\n")
 
-    {_, status} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}])
+    {_, status} = install([{"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}])
     assert status != 0
-    assert File.read!(Path.join(ctx.dir, "kinoko")) == "old"
+    assert File.read!(Path.join(ctx.dir, "nobi")) == "old"
   end
 
   @tag :tmp_dir
   test "unknown architecture and OS are refused", ctx do
     uname(ctx.stubs, "Linux", "riscv64")
-    env = [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}]
+    env = [{"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}]
 
     {out, status} = install(env, ctx.stubs)
     assert status != 0
     assert out =~ "unsupported architecture: riscv64"
-    refute File.exists?(Path.join(ctx.dir, "kinoko"))
+    refute File.exists?(Path.join(ctx.dir, "nobi"))
 
     uname(ctx.stubs, "FreeBSD", "x86_64")
     {out, status} = install(env, ctx.stubs)
@@ -174,7 +174,7 @@ defmodule Kinoko.InstallShTest do
 
   @tag :tmp_dir
   test "uname values map to the four targets", ctx do
-    env = [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}]
+    env = [{"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}]
 
     reached =
       for {os, arch, target} <- [
@@ -188,12 +188,12 @@ defmodule Kinoko.InstallShTest do
         uname(ctx.stubs, "#{os}", "#{arch}")
         stub(ctx.stubs, "sysctl", "echo 0\n")
         {_, 0} = install(env, ctx.stubs)
-        assert {out, 0} = System.cmd(Path.join(ctx.dir, "kinoko"), [])
-        assert out =~ "fake-kinoko #{target}"
+        assert {out, 0} = System.cmd(Path.join(ctx.dir, "nobi"), [])
+        assert out =~ "fake-nobi #{target}"
         target
       end
 
-    # install.sh reaches exactly the binaries `mix kinoko.dist` builds.
+    # install.sh reaches exactly the binaries `mix nobi.dist` builds.
     assert MapSet.new(reached) == MapSet.new(@targets)
     assert length(@targets) == 4
   end
@@ -204,29 +204,29 @@ defmodule Kinoko.InstallShTest do
     log = Path.join(ctx.stubs, "urls")
     uname(ctx.stubs, "Linux", "x86_64")
     stub(ctx.stubs, "curl", ~s(for a; do :; done; echo "$a" >> "#{log}"; exit 22\n))
-    result = install([{"KINOKO_BIN_DIR", ctx.dir} | env], ctx.stubs)
+    result = install([{"NOBI_BIN_DIR", ctx.dir} | env], ctx.stubs)
     {result, if(File.exists?(log), do: File.read!(log), else: "")}
   end
 
   @tag :tmp_dir
-  test "KINOKO_VERSION forms the release URL", ctx do
+  test "NOBI_VERSION forms the release URL", ctx do
     {{_, status}, urls} =
-      url_log(ctx, [{"KINOKO_REPO", "acme/kinoko"}, {"KINOKO_VERSION", "v1.2.3"}])
+      url_log(ctx, [{"NOBI_REPO", "acme/nobi"}, {"NOBI_VERSION", "v1.2.3"}])
 
     assert status != 0
-    assert urls =~ "https://github.com/acme/kinoko/releases/download/v1.2.3/kinoko-linux-x86_64"
+    assert urls =~ "https://github.com/acme/nobi/releases/download/v1.2.3/nobi-linux-x86_64"
   end
 
   @tag :tmp_dir
   test "the default version is latest/download", ctx do
-    {{_, _}, urls} = url_log(ctx, [{"KINOKO_REPO", "acme/kinoko"}])
-    assert urls =~ "https://github.com/acme/kinoko/releases/latest/download/kinoko-linux-x86_64"
+    {{_, _}, urls} = url_log(ctx, [{"NOBI_REPO", "acme/nobi"}])
+    assert urls =~ "https://github.com/acme/nobi/releases/latest/download/nobi-linux-x86_64"
   end
 
   @tag :tmp_dir
-  test "KINOKO_BASE_URL overrides everything, trailing slash included", ctx do
-    {{_, _}, urls} = url_log(ctx, [{"KINOKO_BASE_URL", "http://example.test/x/"}])
-    assert urls =~ "http://example.test/x/kinoko-linux-x86_64"
+  test "NOBI_BASE_URL overrides everything, trailing slash included", ctx do
+    {{_, _}, urls} = url_log(ctx, [{"NOBI_BASE_URL", "http://example.test/x/"}])
+    assert urls =~ "http://example.test/x/nobi-linux-x86_64"
   end
 
   @tag :tmp_dir
@@ -260,15 +260,15 @@ defmodule Kinoko.InstallShTest do
       System.cmd("/bin/sh", [@install],
         env: [
           {"PATH", bin},
-          {"KINOKO_BASE_URL", ctx.base},
-          {"KINOKO_BIN_DIR", ctx.dir}
+          {"NOBI_BASE_URL", ctx.base},
+          {"NOBI_BIN_DIR", ctx.dir}
         ],
         stderr_to_stdout: true
       )
 
     assert status == 0, out
     assert File.read!(wget) =~ "-q -O"
-    assert File.exists?(Path.join(ctx.dir, "kinoko"))
+    assert File.exists?(Path.join(ctx.dir, "nobi"))
   end
 
   # A PATH with sh's basics and the given wget stub, no curl.
@@ -300,8 +300,8 @@ defmodule Kinoko.InstallShTest do
     System.cmd("/bin/sh", [@install],
       env: [
         {"PATH", busybox},
-        {"KINOKO_BASE_URL", "https://example.test"},
-        {"KINOKO_BIN_DIR", ctx.dir}
+        {"NOBI_BASE_URL", "https://example.test"},
+        {"NOBI_BIN_DIR", ctx.dir}
       ],
       stderr_to_stdout: true
     )
@@ -320,8 +320,8 @@ defmodule Kinoko.InstallShTest do
     System.cmd("/bin/sh", [@install],
       env: [
         {"PATH", gnu},
-        {"KINOKO_BASE_URL", "https://example.test"},
-        {"KINOKO_BIN_DIR", ctx.dir}
+        {"NOBI_BASE_URL", "https://example.test"},
+        {"NOBI_BIN_DIR", ctx.dir}
       ],
       stderr_to_stdout: true
     )
@@ -337,14 +337,14 @@ defmodule Kinoko.InstallShTest do
 
     {out, status} =
       install(
-        [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}, {"TMPDIR", tmpdir}],
+        [{"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}, {"TMPDIR", tmpdir}],
         ctx.stubs
       )
 
     assert status != 0
     assert out =~ "cannot install"
-    assert Path.wildcard(Path.join(ctx.dir, ".kinoko.*"), match_dot: true) == []
-    refute File.exists?(Path.join(ctx.dir, "kinoko"))
+    assert Path.wildcard(Path.join(ctx.dir, ".nobi.*"), match_dot: true) == []
+    refute File.exists?(Path.join(ctx.dir, "nobi"))
     assert File.ls!(tmpdir) == []
   end
 
@@ -357,12 +357,12 @@ defmodule Kinoko.InstallShTest do
 
     {_, status} =
       install(
-        [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}, {"TMPDIR", tmpdir}],
+        [{"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}, {"TMPDIR", tmpdir}],
         ctx.stubs
       )
 
     assert status == 130
-    assert Path.wildcard(Path.join(ctx.dir, ".kinoko.*"), match_dot: true) == []
+    assert Path.wildcard(Path.join(ctx.dir, ".nobi.*"), match_dot: true) == []
     assert File.ls!(tmpdir) == []
   end
 
@@ -382,7 +382,7 @@ defmodule Kinoko.InstallShTest do
         "#{lines - 3}",
         @install
       ],
-      env: [{"PATH", path}, {"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}],
+      env: [{"PATH", path}, {"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}],
       stderr_to_stdout: true
     )
 
@@ -391,7 +391,7 @@ defmodule Kinoko.InstallShTest do
   end
 
   @tag :tmp_dir
-  test "without KINOKO_BIN_DIR or HOME it refuses before downloading", ctx do
+  test "without NOBI_BIN_DIR or HOME it refuses before downloading", ctx do
     log = Path.join(ctx.stubs, "urls")
     stub(ctx.stubs, "curl", ~s(echo "$@" >> "#{log}"; exit 22\n))
 
@@ -400,13 +400,13 @@ defmodule Kinoko.InstallShTest do
         env: [
           {"PATH", ctx.stubs <> ":" <> System.get_env("PATH")},
           {"HOME", nil},
-          {"KINOKO_BASE_URL", ctx.base}
+          {"NOBI_BASE_URL", ctx.base}
         ],
         stderr_to_stdout: true
       )
 
     assert status != 0
-    assert out =~ "KINOKO_BIN_DIR"
+    assert out =~ "NOBI_BIN_DIR"
     refute File.exists?(log)
   end
 
@@ -417,7 +417,7 @@ defmodule Kinoko.InstallShTest do
     stub(ctx.stubs, "curl", ~s(echo "$@" >> "#{log}"; exit 22\n))
 
     install(
-      [{"KINOKO_BASE_URL", "https://example.test"}, {"KINOKO_BIN_DIR", ctx.dir}],
+      [{"NOBI_BASE_URL", "https://example.test"}, {"NOBI_BIN_DIR", ctx.dir}],
       ctx.stubs
     )
 
@@ -425,7 +425,7 @@ defmodule Kinoko.InstallShTest do
     File.rm!(log)
 
     install(
-      [{"KINOKO_BASE_URL", "http://example.test"}, {"KINOKO_BIN_DIR", ctx.dir}],
+      [{"NOBI_BASE_URL", "http://example.test"}, {"NOBI_BIN_DIR", ctx.dir}],
       ctx.stubs
     )
 
@@ -436,8 +436,8 @@ defmodule Kinoko.InstallShTest do
   test "an arm64 Mac under Rosetta gets the arm64 binary", ctx do
     uname(ctx.stubs, "Darwin", "x86_64")
     stub(ctx.stubs, "sysctl", "echo 1\n")
-    {_, 0} = install([{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}], ctx.stubs)
-    assert {out, 0} = System.cmd(Path.join(ctx.dir, "kinoko"), [])
+    {_, 0} = install([{"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}], ctx.stubs)
+    assert {out, 0} = System.cmd(Path.join(ctx.dir, "nobi"), [])
     assert out =~ "macos-arm64"
   end
 
@@ -449,19 +449,19 @@ defmodule Kinoko.InstallShTest do
       System.cmd("sh", [@install],
         env: [
           {"PATH", path},
-          {"KINOKO_BASE_URL", ctx.base},
-          {"KINOKO_BIN_DIR", ctx.dir <> "/"}
+          {"NOBI_BASE_URL", ctx.base},
+          {"NOBI_BIN_DIR", ctx.dir <> "/"}
         ],
         stderr_to_stdout: true
       )
 
     refute out =~ "not on your PATH"
-    assert File.exists?(Path.join(ctx.dir, "kinoko"))
+    assert File.exists?(Path.join(ctx.dir, "nobi"))
   end
 
   @tag :tmp_dir
   test "the PATH hint is fish_add_path for fish and export otherwise", ctx do
-    env = [{"KINOKO_BASE_URL", ctx.base}, {"KINOKO_BIN_DIR", ctx.dir}]
+    env = [{"NOBI_BASE_URL", ctx.base}, {"NOBI_BIN_DIR", ctx.dir}]
     {out, 0} = install([{"SHELL", "/usr/local/bin/fish"} | env])
     assert out =~ "fish_add_path #{ctx.dir}"
     refute out =~ "export PATH"

@@ -1,6 +1,6 @@
-defmodule Kinoko.PersistentCounter do
+defmodule Nobi.PersistentCounter do
   @moduledoc """
-  A `Kinoko.PersistentElmGenServer` counter used in tests.
+  A `Nobi.PersistentElmGenServer` counter used in tests.
 
   `init/1` takes keyword options: `:count` to start from and `:notify`, a pid
   told `:init_ran` (as an effect) so tests can see whether `init/1` ran.
@@ -8,8 +8,8 @@ defmodule Kinoko.PersistentCounter do
   of the state, so a reboot is observable in both the state and the mailbox.
   """
 
-  use Kinoko.PersistentElmGenServer
-  alias Kinoko.Elm.Effect, as: Fx
+  use Nobi.PersistentElmGenServer
+  alias Nobi.Elm.Effect, as: Fx
 
   @impl true
   def init(nil), do: init([])

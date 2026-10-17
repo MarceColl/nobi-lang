@@ -1,11 +1,11 @@
-defmodule Kinoko.MixProject do
+defmodule Nobi.MixProject do
   use Mix.Project
 
   @version "0.1.0"
 
   def project do
     [
-      app: :kinoko,
+      app: :nobi,
       version: @version,
       elixir: "~> 1.15",
       build_path: build_path(),
@@ -24,7 +24,7 @@ defmodule Kinoko.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {Kinoko.Application, []},
+      mod: {Nobi.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end
@@ -35,43 +35,43 @@ defmodule Kinoko.MixProject do
     ]
   end
 
-  # KINOKO_BUILD (local | server) fixes the compile-time `:mcp_enabled` of a
+  # NOBI_BUILD (local | server) fixes the compile-time `:mcp_enabled` of a
   # prod build (config/prod.exs). Mix does not see an env var change, so each
   # build compiles into its own directory: `_build/prod` (local) and
   # `_build/server/prod` (server).
   #
-  # `mix kinoko.dist` (KINOKO_DIST=1) builds in `_build/dist`, so its
+  # `mix nobi.dist` (NOBI_DIST=1) builds in `_build/dist`, so its
   # Burrito-flavoured release never replaces the plain one in `_build/prod`.
   defp build_path do
     cond do
-      Mix.env() == :prod and System.get_env("KINOKO_BUILD") == "server" -> "_build/server"
-      Mix.env() == :prod and System.get_env("KINOKO_DIST") == "1" -> "_build/dist"
+      Mix.env() == :prod and System.get_env("NOBI_BUILD") == "server" -> "_build/server"
+      Mix.env() == :prod and System.get_env("NOBI_DIST") == "1" -> "_build/dist"
       true -> "_build"
     end
   end
 
-  # `MIX_ENV=prod mix release` builds the local `kinoko` release: the console
+  # `MIX_ENV=prod mix release` builds the local `nobi` release: the console
   # and the MCP are compiled in (`:mcp_enabled`, set in config/prod.exs from
-  # KINOKO_BUILD, default local). `bin/kinoko-cli` (rel/overlays) runs the
-  # `kinoko` command, Kinoko.CLI.main/1.
+  # NOBI_BUILD, default local). `bin/nobi-cli` (rel/overlays) runs the
+  # `nobi` command, Nobi.CLI.main/1.
   #
-  # `mix kinoko.dist` sets KINOKO_DIST=1 to wrap that same release with
-  # Burrito into one binary per target (see Mix.Tasks.Kinoko.Dist). The
+  # `mix nobi.dist` sets NOBI_DIST=1 to wrap that same release with
+  # Burrito into one binary per target (see Mix.Tasks.Nobi.Dist). The
   # binary boots the `start` script with `rel/burrito/vm.args.eex`, which
-  # hands argv to Kinoko.CLI.main/1; `kinoko: :load` keeps the boot from
-  # starting Kinoko itself, so `kinoko version` starts and creates nothing.
-  # `rel/burrito` is its own templates dir, so `rel/overlays` (bin/kinoko-cli)
+  # hands argv to Nobi.CLI.main/1; `nobi: :load` keeps the boot from
+  # starting Nobi itself, so `nobi version` starts and creates nothing.
+  # `rel/burrito` is its own templates dir, so `rel/overlays` (bin/nobi-cli)
   # is not in the binary: the binary is the CLI.
   #
-  # The dist release version is `<version>+<commit>` (KINOKO_COMMIT): Burrito
+  # The dist release version is `<version>+<commit>` (NOBI_COMMIT): Burrito
   # unpacks into a directory named after it and never unpacks again over an
-  # existing one, so every build must have its own. `kinoko version` still
-  # prints the mix.exs version and the commit (Kinoko.Build).
+  # existing one, so every build must have its own. `nobi version` still
+  # prints the mix.exs version and the commit (Nobi.Build).
   #
-  # The dist build only takes the ERTS the task verified: KINOKO_DIST_ERTS is
+  # The dist build only takes the ERTS the task verified: NOBI_DIST_ERTS is
   # the pinned tarball for the target in BURRITO_TARGET (Burrito's
-  # `custom_erts`), and Kinoko.Dist.PinnedRuntime refuses a build without it
-  # and supplies the pinned musl runtime (KINOKO_DIST_MUSL) for Linux.
+  # `custom_erts`), and Nobi.Dist.PinnedRuntime refuses a build without it
+  # and supplies the pinned musl runtime (NOBI_DIST_MUSL) for Linux.
   defp releases do
     base = [
       include_executables_for: [:unix],
@@ -79,33 +79,33 @@ defmodule Kinoko.MixProject do
       burrito: [targets: burrito_targets()]
     ]
 
-    kinoko =
-      if System.get_env("KINOKO_DIST") == "1",
+    nobi =
+      if System.get_env("NOBI_DIST") == "1",
         do:
           Keyword.merge(base,
-            version: "#{@version}+#{System.get_env("KINOKO_COMMIT") || "unknown"}",
+            version: "#{@version}+#{System.get_env("NOBI_COMMIT") || "unknown"}",
             steps: [:assemble, &Burrito.wrap/1],
-            applications: [kinoko: :load],
+            applications: [nobi: :load],
             rel_templates_path: "rel/burrito",
             burrito: [
               targets: dist_targets(System.get_env("BURRITO_TARGET"), System.get_env()),
-              extra_steps: [fetch: [pre: [Kinoko.Dist.PinnedRuntime]]]
+              extra_steps: [fetch: [pre: [Nobi.Dist.PinnedRuntime]]]
             ]
           ),
         else: base
 
-    [kinoko: kinoko]
+    [nobi: nobi]
   end
 
   defp dist_targets(target, env) do
     for {name, opts} <- burrito_targets() do
-      if Atom.to_string(name) == target and env["KINOKO_DIST_ERTS"],
-        do: {name, opts ++ [custom_erts: env["KINOKO_DIST_ERTS"]]},
+      if Atom.to_string(name) == target and env["NOBI_DIST_ERTS"],
+        do: {name, opts ++ [custom_erts: env["NOBI_DIST_ERTS"]]},
         else: {name, opts}
     end
   end
 
-  # The Burrito targets, `<os>_<arch>` (the binary is `kinoko-<os>-<arch>`).
+  # The Burrito targets, `<os>_<arch>` (the binary is `nobi-<os>-<arch>`).
   # Linux targets run Burrito's precompiled musl ERTS plus its musl runtime.
   defp burrito_targets do
     [
@@ -168,11 +168,11 @@ defmodule Kinoko.MixProject do
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["compile", "tailwind kinoko", "esbuild kinoko", "esbuild yabu"],
+      "assets.build": ["compile", "tailwind nobi", "esbuild nobi", "esbuild apps"],
       "assets.deploy": [
-        "tailwind kinoko --minify",
-        "esbuild kinoko --minify",
-        "esbuild yabu --minify",
+        "tailwind nobi --minify",
+        "esbuild nobi --minify",
+        "esbuild apps --minify",
         "phx.digest"
       ],
       precommit: ["compile --warning-as-errors", "deps.unlock --unused", "format", "test"]

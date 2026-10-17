@@ -1,4 +1,4 @@
-defmodule Kinoko.Repo.Migrations.AddModuleToElmStates do
+defmodule Nobi.Repo.Migrations.AddModuleToElmStates do
   use Ecto.Migration
 
   # The module that wrote each row, as its name string (never turned back

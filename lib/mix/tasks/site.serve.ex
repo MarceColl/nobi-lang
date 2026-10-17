@@ -7,7 +7,7 @@ defmodule Mix.Tasks.Site.Serve do
       mix site.serve
 
   Serves `site/dist` on http://localhost:4124 with Bandit and `Plug.Static`,
-  without starting Kinoko itself. The module is also the Plug it serves.
+  without starting Nobi itself. The module is also the Plug it serves.
   """
 
   use Mix.Task

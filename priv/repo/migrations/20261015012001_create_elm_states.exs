@@ -1,4 +1,4 @@
-defmodule Kinoko.Repo.Migrations.CreateElmStates do
+defmodule Nobi.Repo.Migrations.CreateElmStates do
   use Ecto.Migration
 
   def change do

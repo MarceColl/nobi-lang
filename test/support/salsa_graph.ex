@@ -1,7 +1,7 @@
-defmodule Kinoko.Lang.SalsaGraph do
+defmodule Nobi.Lang.SalsaGraph do
   @moduledoc """
   A random query graph for the salsa model test (`Graph` and `Fresh` in
-  `crates/yabu/tests/salsa.rs`). Query `i` runs the steps `env[i]`, mixing
+  `crates/nobi/tests/salsa.rs`). Query `i` runs the steps `env[i]`, mixing
   what each read gives into a small value, so many changes compute an equal
   one (early cutoff).
 
@@ -13,9 +13,9 @@ defmodule Kinoko.Lang.SalsaGraph do
   while being evaluated is a cycle, and a query fails with the first error a
   query it asked met, even one it ignored.
   """
-  @behaviour Kinoko.Lang.Salsa
+  @behaviour Nobi.Lang.Salsa
 
-  alias Kinoko.Lang.Salsa
+  alias Nobi.Lang.Salsa
 
   @impl true
   def compute(q, r), do: body(Salsa.env(r), q, r, &Salsa.input/2, &Salsa.ask/2)

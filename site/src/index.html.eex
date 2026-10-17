@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Kinoko</title>
+  <title>Nobi</title>
   <meta name="description" content="A local runtime for web apps built by coding agents.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
@@ -17,9 +17,9 @@
 <a href="#main" class="skip">Skip to content</a>
 
 <header class="shell grid12 site-header">
-  <a href="#top" class="wordmark" aria-label="Kinoko, back to the top">
+  <a href="#top" class="wordmark" aria-label="Nobi, back to the top">
     <svg class="glyph" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M12 13v8"/><path d="M12 21c-3 0-5-1.5-7-3"/><path d="M12 21c3 0 5-1.5 7-3"/><path d="M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z"/></svg>
-    <span>kinoko</span>
+    <span>nobi</span>
   </a>
   <p class="meta"><span class="num">v<%= @version %></span><span>macOS · Linux</span></p>
 </header>
@@ -28,9 +28,9 @@
 
 <section id="top" class="grid12 intro" aria-labelledby="title">
   <div class="prose-col">
-    <h1 id="title" class="t-display">Kinoko</h1>
+    <h1 id="title" class="t-display">Nobi</h1>
     <p class="t-lede tagline">A local runtime for web apps built by coding agents.</p>
-    <p class="t-body intro-body">Connect Claude Code (or any MCP client) to Kinoko and ask it to build an app. The agent writes it; Kinoko runs it on your machine with its own database and an admin console.</p>
+    <p class="t-body intro-body">Connect Claude Code (or any MCP client) to Nobi and ask it to build an app. The agent writes it; Nobi runs it on your machine with its own database and an admin console.</p>
   </div>
 </section>
 
@@ -46,20 +46,20 @@
       </div>
     </li>
     <li id="step-start">
-      <h3 class="t-heading"><strong>Start Kinoko.</strong> It opens the console in your browser.</h3>
+      <h3 class="t-heading"><strong>Start Nobi.</strong> It opens the console in your browser.</h3>
       <div class="cmd">
         <span class="prompt" aria-hidden="true">$</span>
-        <code class="cmd-text">kinoko</code>
+        <code class="cmd-text">nobi</code>
       </div>
     </li>
     <li id="step-connect">
       <h3 class="t-heading"><strong>Connect your agent</strong></h3>
       <div class="cmd">
         <span class="prompt" aria-hidden="true">$</span>
-        <code id="mcp-add" class="cmd-text">claude mcp add --transport http kinoko http://localhost:4000/mcp</code>
+        <code id="mcp-add" class="cmd-text">claude mcp add --transport http nobi http://localhost:4000/mcp</code>
         <button type="button" class="copy" data-copy="#mcp-add" aria-label="Copy the claude mcp add command">Copy</button>
       </div>
-      <p class="t-body aside">Other clients: <code class="inline">kinoko mcp</code> prints the config.</p>
+      <p class="t-body aside">Other clients: <code class="inline">nobi mcp</code> prints the config.</p>
     </li>
     <li id="step-ask">
       <h3 class="t-heading"><strong>Ask for an app</strong></h3>
@@ -67,14 +67,14 @@
       <figure id="agent-run" class="run">
         <div class="run-scroll" tabindex="0" role="region" aria-labelledby="agent-run-caption">
           <table class="run-table" role="table">
-            <caption id="agent-run-caption" class="t-label"><span class="run-title">What the agent did</span> <span class="run-sub">Kinoko tool calls, from a recorded run</span></caption>
+            <caption id="agent-run-caption" class="t-label"><span class="run-title">What the agent did</span> <span class="run-sub">Nobi tool calls, from a recorded run</span></caption>
             <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Tool</th><th scope="col" role="columnheader">Argument</th><th scope="col" role="columnheader">Result</th></tr></thead>
             <tbody role="rowgroup">
 <%= for call <- @agent_run.calls do %>              <tr role="row"><th scope="row" role="rowheader"><code><%= call.name %></code></th> <td role="cell"><%= if call.arg != "" do %><code><%= call.arg %></code><% end %></td> <td role="cell" class="<%= call.class %>"><code><%= call.result %></code></td></tr>
 <% end %>            </tbody>
           </table>
         </div>
-        <figcaption class="t-caption run-note">The agent's summary: “<%= @agent_run.summary %>” Recorded with Kinoko on port 4123.</figcaption>
+        <figcaption class="t-caption run-note">The agent's summary: “<%= @agent_run.summary %>” Recorded with Nobi on port 4123.</figcaption>
       </figure>
     </li>
     <li id="step-open">
@@ -90,8 +90,8 @@
 <section id="example" class="grid12 section" aria-labelledby="example-title">
   <h2 id="example-title" class="t-title rail">An example app</h2>
   <figure class="body-col code-fig">
-    <figcaption class="t-label code-name"><code>counter.yabu</code></figcaption>
-    <div class="code"><pre class="gutter num" aria-hidden="true"><%= Enum.map_join(1..@counter.lines, "\n", &Integer.to_string/1) %></pre><pre class="src" tabindex="0" aria-label="counter.yabu"><code><%= @counter.html %></code></pre></div>
+    <figcaption class="t-label code-name"><code>counter.nobi</code></figcaption>
+    <div class="code"><pre class="gutter num" aria-hidden="true"><%= Enum.map_join(1..@counter.lines, "\n", &Integer.to_string/1) %></pre><pre class="src" tabindex="0" aria-label="counter.nobi"><code><%= @counter.html %></code></pre></div>
   </figure>
 </section>
 
@@ -108,7 +108,7 @@
 </main>
 
 <footer class="shell grid12 site-footer">
-  <svg class="glyph" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" role="img" aria-label="Kinoko"><path d="M12 13v8"/><path d="M12 21c-3 0-5-1.5-7-3"/><path d="M12 21c3 0 5-1.5 7-3"/><path d="M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z"/></svg>
+  <svg class="glyph" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" role="img" aria-label="Nobi"><path d="M12 13v8"/><path d="M12 21c-3 0-5-1.5-7-3"/><path d="M12 21c3 0 5-1.5 7-3"/><path d="M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z"/></svg>
   <p class="t-caption">Set in Geist and Geist Mono, under the SIL Open Font License.</p>
 </footer>
 </body>

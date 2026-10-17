@@ -1,7 +1,0 @@
-#!/bin/sh
-# The `kinoko` command from a plain release (no Burrito): runs
-# Kinoko.CLI.main/1 with this script's arguments.
-#
-#   bin/kinoko-cli [start] [--no-open] | mcp | version | uninstall
-set -e
-exec "$(dirname "$0")/kinoko" eval 'Kinoko.CLI.main(System.argv())' "$@"

@@ -1,0 +1,1925 @@
+[
+ {
+  "file": "counter.nobi",
+  "calls": [
+   {
+    "name": "Counter.init",
+    "args": [],
+    "answer": {
+     "value": {
+      "$tup": [
+       {
+        "$t": "Counter.Model",
+        "count": 0
+       },
+       {
+        "$c": "none"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "name": "Counter.update",
+    "args": [
+     {
+      "$v": "Counter.Msg.Decrement",
+      "a": []
+     },
+     {
+      "$t": "Counter.Model",
+      "count": 95
+     }
+    ],
+    "answer": {
+     "value": {
+      "$tup": [
+       {
+        "$t": "Counter.Model",
+        "count": 94
+       },
+       {
+        "$c": "none"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "name": "Counter.view",
+    "args": [
+     {
+      "$t": "Counter.Model",
+      "count": 2
+     }
+    ],
+    "answer": {
+     "value": {
+      "$h": "div",
+      "at": [
+       [
+        "class",
+        "counter"
+       ]
+      ],
+      "ch": [
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Counter.Msg.Decrement",
+           "a": []
+          }
+         ]
+        ],
+        "ch": [
+         "-"
+        ]
+       },
+       {
+        "$h": "span",
+        "at": [],
+        "ch": [
+         2
+        ]
+       },
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Counter.Msg.Increment",
+           "a": []
+          }
+         ]
+        ],
+        "ch": [
+         "+"
+        ]
+       },
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Counter.Msg.Add",
+           "a": [
+            10
+           ]
+          }
+         ]
+        ],
+        "ch": [
+         "+10"
+        ]
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "traces": [
+   {
+    "app": "Counter",
+    "init": {
+     "value": {
+      "$tup": [
+       {
+        "$t": "Counter.Model",
+        "count": 0
+       },
+       {
+        "$c": "none"
+       }
+      ]
+     }
+    },
+    "view": {
+     "value": {
+      "$h": "div",
+      "at": [
+       [
+        "class",
+        "counter"
+       ]
+      ],
+      "ch": [
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Counter.Msg.Decrement",
+           "a": []
+          }
+         ]
+        ],
+        "ch": [
+         "-"
+        ]
+       },
+       {
+        "$h": "span",
+        "at": [],
+        "ch": [
+         0
+        ]
+       },
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Counter.Msg.Increment",
+           "a": []
+          }
+         ]
+        ],
+        "ch": [
+         "+"
+        ]
+       },
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Counter.Msg.Add",
+           "a": [
+            10
+           ]
+          }
+         ]
+        ],
+        "ch": [
+         "+10"
+        ]
+       }
+      ]
+     }
+    },
+    "updates": [
+     {
+      "msg": {
+       "$v": "Counter.Msg.Increment",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Counter.Model",
+          "count": 1
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Counter.Msg.Decrement",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Counter.Model",
+          "count": 0
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "steps": [
+     {
+      "msg": {
+       "$v": "Counter.Msg.Increment",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Counter.Model",
+          "count": 1
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Counter.Msg.Increment",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Counter.Model",
+          "count": 2
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Counter.Msg.Add",
+       "a": [
+        5
+       ]
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Counter.Model",
+          "count": 7
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Counter.Msg.Decrement",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Counter.Model",
+          "count": 6
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "by": "interpreter"
+   }
+  ],
+  "tests": {}
+ },
+ {
+  "file": "notes.nobi",
+  "calls": [
+   {
+    "name": "Notes.init",
+    "args": [],
+    "answer": {
+     "value": {
+      "$tup": [
+       {
+        "$t": "Notes.Model",
+        "saved": 0
+       },
+       {
+        "$c": "none"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "name": "Notes.update",
+    "args": [
+     {
+      "$v": "Notes.Msg.Save",
+      "a": [
+       "hello"
+      ]
+     },
+     {
+      "$t": "Notes.Model",
+      "saved": 95
+     }
+    ],
+    "answer": {
+     "error": "a function escaped into value position"
+    }
+   },
+   {
+    "name": "Notes.view",
+    "args": [
+     {
+      "$t": "Notes.Model",
+      "saved": 2
+     }
+    ],
+    "answer": {
+     "value": {
+      "$h": "div",
+      "at": [
+       [
+        "class",
+        "notes"
+       ]
+      ],
+      "ch": [
+       {
+        "$h": "span",
+        "at": [
+         [
+          "class",
+          "count"
+         ]
+        ],
+        "ch": [
+         2
+        ]
+       },
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Notes.Msg.Save",
+           "a": [
+            "quicknote"
+           ]
+          }
+         ]
+        ],
+        "ch": [
+         "save"
+        ]
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "traces": [
+   {
+    "app": "Notes",
+    "init": {
+     "value": {
+      "$tup": [
+       {
+        "$t": "Notes.Model",
+        "saved": 0
+       },
+       {
+        "$c": "none"
+       }
+      ]
+     }
+    },
+    "view": {
+     "value": {
+      "$h": "div",
+      "at": [
+       [
+        "class",
+        "notes"
+       ]
+      ],
+      "ch": [
+       {
+        "$h": "span",
+        "at": [
+         [
+          "class",
+          "count"
+         ]
+        ],
+        "ch": [
+         0
+        ]
+       },
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Notes.Msg.Save",
+           "a": [
+            "quicknote"
+           ]
+          }
+         ]
+        ],
+        "ch": [
+         "save"
+        ]
+       }
+      ]
+     }
+    },
+    "updates": [],
+    "steps": [
+     {
+      "msg": {
+       "$v": "Notes.Msg.Save",
+       "a": [
+        "hello"
+       ]
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Notes.Model",
+          "saved": 0
+         },
+         {
+          "$c": "store.insert",
+          "model": "Notes.Note",
+          "value": {
+           "$t": "Notes.Note",
+           "title": "hello",
+           "body": "written"
+          },
+          "cb": {
+           "$fn": "<lambda>"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Notes.Msg.Saved",
+       "a": [
+        "11111111-1111-4111-a111-111111111111"
+       ]
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Notes.Model",
+          "saved": 1
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "by": "compiler"
+   }
+  ],
+  "tests": {}
+ },
+ {
+  "file": "split.nobi",
+  "calls": [
+   {
+    "name": "Split.init",
+    "args": [],
+    "answer": {
+     "error": "a function escaped into value position"
+    }
+   },
+   {
+    "name": "Split.payers",
+    "args": [
+     []
+    ],
+    "answer": {
+     "value": []
+    }
+   },
+   {
+    "name": "Split.total",
+    "args": [
+     []
+    ],
+    "answer": {
+     "value": 0
+    }
+   },
+   {
+    "name": "Split.paid_by",
+    "args": [
+     [],
+     "猫"
+    ],
+    "answer": {
+     "value": 0
+    }
+   },
+   {
+    "name": "Split.balance",
+    "args": [
+     [],
+     "猫"
+    ],
+    "answer": {
+     "error": "division by zero"
+    }
+   },
+   {
+    "name": "Split.shares",
+    "args": [
+     []
+    ],
+    "answer": {
+     "value": []
+    }
+   },
+   {
+    "name": "Split.money",
+    "args": [
+     2
+    ],
+    "answer": {
+     "value": "0.02"
+    }
+   },
+   {
+    "name": "Split.update",
+    "args": [
+     {
+      "$v": "Split.Msg.Add",
+      "a": []
+     },
+     {
+      "$t": "Split.Model",
+      "expenses": [
+       {
+        "$t": "Split.Expense",
+        "payer": "猫",
+        "what": "猫",
+        "cents": 10
+       },
+       {
+        "$t": "Split.Expense",
+        "payer": "猫",
+        "what": "猫",
+        "cents": 87
+       }
+      ],
+      "payer": "a",
+      "what": "a",
+      "amount": "猫",
+      "error": "猫"
+     }
+    ],
+    "answer": {
+     "value": {
+      "$tup": [
+       {
+        "$t": "Split.Model",
+        "expenses": [
+         {
+          "$t": "Split.Expense",
+          "payer": "猫",
+          "what": "猫",
+          "cents": 10
+         },
+         {
+          "$t": "Split.Expense",
+          "payer": "猫",
+          "what": "猫",
+          "cents": 87
+         }
+        ],
+        "payer": "a",
+        "what": "a",
+        "amount": "猫",
+        "error": "How much, in cents?"
+       },
+       {
+        "$c": "none"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "name": "Split.view_expense",
+    "args": [
+     {
+      "$t": "Split.Expense",
+      "payer": "",
+      "what": "hello",
+      "cents": 31
+     }
+    ],
+    "answer": {
+     "value": {
+      "$h": "li",
+      "at": [
+       [
+        "class",
+        "expense"
+       ]
+      ],
+      "ch": [
+       {
+        "$h": "span",
+        "at": [
+         [
+          "class",
+          "who"
+         ]
+        ],
+        "ch": [
+         ""
+        ]
+       },
+       {
+        "$h": "span",
+        "at": [
+         [
+          "class",
+          "what"
+         ]
+        ],
+        "ch": [
+         "hello"
+        ]
+       },
+       {
+        "$h": "span",
+        "at": [
+         [
+          "class",
+          "amount"
+         ]
+        ],
+        "ch": [
+         "0.31"
+        ]
+       }
+      ]
+     }
+    }
+   },
+   {
+    "name": "Split.view_share",
+    "args": [
+     {
+      "$t": "Split.Share",
+      "who": "",
+      "owes": 69
+     }
+    ],
+    "answer": {
+     "value": {
+      "$h": "li",
+      "at": [
+       [
+        "class",
+        "share owes"
+       ]
+      ],
+      "ch": [
+       {
+        "$h": "span",
+        "at": [
+         [
+          "class",
+          "who"
+         ]
+        ],
+        "ch": [
+         ""
+        ]
+       },
+       {
+        "$h": "span",
+        "at": [
+         [
+          "class",
+          "amount"
+         ]
+        ],
+        "ch": [
+         "0.69"
+        ]
+       }
+      ]
+     }
+    }
+   },
+   {
+    "name": "Split.view",
+    "args": [
+     {
+      "$t": "Split.Model",
+      "expenses": [],
+      "payer": "hello",
+      "what": "a",
+      "amount": "猫",
+      "error": "a"
+     }
+    ],
+    "answer": {
+     "value": {
+      "$h": "div",
+      "at": [
+       [
+        "class",
+        "split"
+       ]
+      ],
+      "ch": [
+       {
+        "$h": "h1",
+        "at": [],
+        "ch": [
+         "Ski trip"
+        ]
+       },
+       {
+        "$h": "form",
+        "at": [
+         [
+          "class",
+          "entry"
+         ]
+        ],
+        "ch": [
+         {
+          "$h": "input",
+          "at": [
+           [
+            "value",
+            "hello"
+           ],
+           [
+            "on-change",
+            {
+             "$fn": "Split.Msg.SetPayer"
+            }
+           ],
+           [
+            "placeholder",
+            "Who paid"
+           ]
+          ],
+          "ch": []
+         },
+         {
+          "$h": "input",
+          "at": [
+           [
+            "value",
+            "a"
+           ],
+           [
+            "on-change",
+            {
+             "$fn": "Split.Msg.SetWhat"
+            }
+           ],
+           [
+            "placeholder",
+            "What for"
+           ]
+          ],
+          "ch": []
+         },
+         {
+          "$h": "input",
+          "at": [
+           [
+            "value",
+            "猫"
+           ],
+           [
+            "on-change",
+            {
+             "$fn": "Split.Msg.SetAmount"
+            }
+           ],
+           [
+            "placeholder",
+            "Cents"
+           ]
+          ],
+          "ch": []
+         },
+         {
+          "$h": "button",
+          "at": [
+           [
+            "on-click",
+            {
+             "$v": "Split.Msg.Add",
+             "a": []
+            }
+           ]
+          ],
+          "ch": [
+           "Add"
+          ]
+         }
+        ]
+       },
+       {
+        "$h": "p",
+        "at": [
+         [
+          "class",
+          "error"
+         ]
+        ],
+        "ch": [
+         "a"
+        ]
+       },
+       {
+        "$h": "h2",
+        "at": [],
+        "ch": [
+         "Expenses"
+        ]
+       },
+       {
+        "$h": "ul",
+        "at": [
+         [
+          "class",
+          "expenses"
+         ]
+        ],
+        "ch": [
+         []
+        ]
+       },
+       {
+        "$h": "h2",
+        "at": [],
+        "ch": [
+         "Total"
+        ]
+       },
+       {
+        "$h": "p",
+        "at": [
+         [
+          "class",
+          "total"
+         ]
+        ],
+        "ch": [
+         "0.00"
+        ]
+       },
+       {
+        "$h": "h2",
+        "at": [],
+        "ch": [
+         "Who owes what"
+        ]
+       },
+       {
+        "$h": "ul",
+        "at": [
+         [
+          "class",
+          "shares"
+         ]
+        ],
+        "ch": [
+         []
+        ]
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "traces": [
+   {
+    "app": "Split",
+    "init": {
+     "value": {
+      "$tup": [
+       {
+        "$t": "Split.Model",
+        "expenses": [],
+        "payer": "",
+        "what": "",
+        "amount": "",
+        "error": ""
+       },
+       {
+        "$c": "store.list",
+        "model": "Split.Expense",
+        "cb": {
+         "$fn": "<lambda>"
+        }
+       }
+      ]
+     }
+    },
+    "view": {
+     "value": {
+      "$h": "div",
+      "at": [
+       [
+        "class",
+        "split"
+       ]
+      ],
+      "ch": [
+       {
+        "$h": "h1",
+        "at": [],
+        "ch": [
+         "Ski trip"
+        ]
+       },
+       {
+        "$h": "form",
+        "at": [
+         [
+          "class",
+          "entry"
+         ]
+        ],
+        "ch": [
+         {
+          "$h": "input",
+          "at": [
+           [
+            "value",
+            ""
+           ],
+           [
+            "on-change",
+            {
+             "$fn": "Split.Msg.SetPayer"
+            }
+           ],
+           [
+            "placeholder",
+            "Who paid"
+           ]
+          ],
+          "ch": []
+         },
+         {
+          "$h": "input",
+          "at": [
+           [
+            "value",
+            ""
+           ],
+           [
+            "on-change",
+            {
+             "$fn": "Split.Msg.SetWhat"
+            }
+           ],
+           [
+            "placeholder",
+            "What for"
+           ]
+          ],
+          "ch": []
+         },
+         {
+          "$h": "input",
+          "at": [
+           [
+            "value",
+            ""
+           ],
+           [
+            "on-change",
+            {
+             "$fn": "Split.Msg.SetAmount"
+            }
+           ],
+           [
+            "placeholder",
+            "Cents"
+           ]
+          ],
+          "ch": []
+         },
+         {
+          "$h": "button",
+          "at": [
+           [
+            "on-click",
+            {
+             "$v": "Split.Msg.Add",
+             "a": []
+            }
+           ]
+          ],
+          "ch": [
+           "Add"
+          ]
+         }
+        ]
+       },
+       {
+        "$h": "p",
+        "at": [
+         [
+          "class",
+          "error"
+         ]
+        ],
+        "ch": [
+         ""
+        ]
+       },
+       {
+        "$h": "h2",
+        "at": [],
+        "ch": [
+         "Expenses"
+        ]
+       },
+       {
+        "$h": "ul",
+        "at": [
+         [
+          "class",
+          "expenses"
+         ]
+        ],
+        "ch": [
+         []
+        ]
+       },
+       {
+        "$h": "h2",
+        "at": [],
+        "ch": [
+         "Total"
+        ]
+       },
+       {
+        "$h": "p",
+        "at": [
+         [
+          "class",
+          "total"
+         ]
+        ],
+        "ch": [
+         "0.00"
+        ]
+       },
+       {
+        "$h": "h2",
+        "at": [],
+        "ch": [
+         "Who owes what"
+        ]
+       },
+       {
+        "$h": "ul",
+        "at": [
+         [
+          "class",
+          "shares"
+         ]
+        ],
+        "ch": [
+         []
+        ]
+       }
+      ]
+     }
+    },
+    "updates": [
+     {
+      "msg": {
+       "$v": "Split.Msg.Add",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Split.Model",
+          "expenses": [],
+          "payer": "",
+          "what": "",
+          "amount": "",
+          "error": "How much, in cents?"
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "steps": [
+     {
+      "msg": {
+       "$v": "Split.Msg.SetPayer",
+       "a": [
+        "ana"
+       ]
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Split.Model",
+          "expenses": [],
+          "payer": "ana",
+          "what": "",
+          "amount": "",
+          "error": ""
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Split.Msg.SetWhat",
+       "a": [
+        "lift pass"
+       ]
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Split.Model",
+          "expenses": [],
+          "payer": "ana",
+          "what": "lift pass",
+          "amount": "",
+          "error": ""
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Split.Msg.SetAmount",
+       "a": [
+        "6000"
+       ]
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Split.Model",
+          "expenses": [],
+          "payer": "ana",
+          "what": "lift pass",
+          "amount": "6000",
+          "error": ""
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Split.Msg.Add",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Split.Model",
+          "expenses": [],
+          "payer": "ana",
+          "what": "",
+          "amount": "",
+          "error": ""
+         },
+         {
+          "$c": "store.insert",
+          "model": "Split.Expense",
+          "value": {
+           "$t": "Split.Expense",
+           "payer": "ana",
+           "what": "lift pass",
+           "cents": 6000
+          },
+          "cb": {
+           "$fn": "<lambda>"
+          }
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Split.Msg.Loaded",
+       "a": [
+        [
+         {
+          "$t": "Split.Expense",
+          "id": "11111111-1111-4111-a111-111111111111",
+          "payer": "ana",
+          "what": "lift pass",
+          "cents": 6000
+         }
+        ]
+       ]
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Split.Model",
+          "expenses": [
+           {
+            "$t": "Split.Expense",
+            "id": "11111111-1111-4111-a111-111111111111",
+            "payer": "ana",
+            "what": "lift pass",
+            "cents": 6000
+           }
+          ],
+          "payer": "ana",
+          "what": "",
+          "amount": "",
+          "error": ""
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Split.Msg.SetAmount",
+       "a": [
+        "abc"
+       ]
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Split.Model",
+          "expenses": [
+           {
+            "$t": "Split.Expense",
+            "id": "11111111-1111-4111-a111-111111111111",
+            "payer": "ana",
+            "what": "lift pass",
+            "cents": 6000
+           }
+          ],
+          "payer": "ana",
+          "what": "",
+          "amount": "abc",
+          "error": ""
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Split.Msg.Add",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Split.Model",
+          "expenses": [
+           {
+            "$t": "Split.Expense",
+            "id": "11111111-1111-4111-a111-111111111111",
+            "payer": "ana",
+            "what": "lift pass",
+            "cents": 6000
+           }
+          ],
+          "payer": "ana",
+          "what": "",
+          "amount": "abc",
+          "error": "How much, in cents?"
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "by": "compiler"
+   }
+  ],
+  "tests": {
+   "Split.money_prints_cents": [],
+   "Split.splits_what_was_paid": [],
+   "Split.handles_an_empty_trip": []
+  }
+ },
+ {
+  "file": "todo.nobi",
+  "calls": [
+   {
+    "name": "Todo.init",
+    "args": [],
+    "answer": {
+     "value": {
+      "$tup": [
+       {
+        "$t": "Todo.Model",
+        "items": [],
+        "input": "",
+        "next_id": 1
+       },
+       {
+        "$c": "none"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "name": "Todo.toggle_item",
+    "args": [
+     [],
+     95
+    ],
+    "answer": {
+     "value": []
+    }
+   },
+   {
+    "name": "Todo.update",
+    "args": [
+     {
+      "$v": "Todo.Msg.ClearDone",
+      "a": []
+     },
+     {
+      "$t": "Todo.Model",
+      "items": [
+       {
+        "$t": "Todo.Item",
+        "id": 83,
+        "text": "猫",
+        "done": true
+       },
+       {
+        "$t": "Todo.Item",
+        "id": 86,
+        "text": "猫",
+        "done": false
+       }
+      ],
+      "input": "a",
+      "next_id": 31
+     }
+    ],
+    "answer": {
+     "value": {
+      "$tup": [
+       {
+        "$t": "Todo.Model",
+        "items": [
+         {
+          "$t": "Todo.Item",
+          "id": 86,
+          "text": "猫",
+          "done": false
+         }
+        ],
+        "input": "a",
+        "next_id": 31
+       },
+       {
+        "$c": "none"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "name": "Todo.view_item",
+    "args": [
+     {
+      "$t": "Todo.Item",
+      "id": 2,
+      "text": "hello",
+      "done": true
+     }
+    ],
+    "answer": {
+     "value": {
+      "$h": "li",
+      "at": [
+       [
+        "class",
+        "done"
+       ]
+      ],
+      "ch": [
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Todo.Msg.Toggle",
+           "a": [
+            2
+           ]
+          }
+         ]
+        ],
+        "ch": [
+         "hello"
+        ]
+       }
+      ]
+     }
+    }
+   },
+   {
+    "name": "Todo.view",
+    "args": [
+     {
+      "$t": "Todo.Model",
+      "items": [],
+      "input": "hello",
+      "next_id": 31
+     }
+    ],
+    "answer": {
+     "value": {
+      "$h": "div",
+      "at": [
+       [
+        "class",
+        "todo"
+       ]
+      ],
+      "ch": [
+       {
+        "$h": "input",
+        "at": [
+         [
+          "value",
+          "hello"
+         ],
+         [
+          "on-change",
+          {
+           "$fn": "Todo.Msg.SetInput"
+          }
+         ]
+        ],
+        "ch": []
+       },
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Todo.Msg.AddItem",
+           "a": []
+          }
+         ]
+        ],
+        "ch": [
+         "Add"
+        ]
+       },
+       {
+        "$h": "ul",
+        "at": [],
+        "ch": [
+         []
+        ]
+       },
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Todo.Msg.ClearDone",
+           "a": []
+          }
+         ]
+        ],
+        "ch": [
+         "Clear done"
+        ]
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "traces": [
+   {
+    "app": "Todo",
+    "init": {
+     "value": {
+      "$tup": [
+       {
+        "$t": "Todo.Model",
+        "items": [],
+        "input": "",
+        "next_id": 1
+       },
+       {
+        "$c": "none"
+       }
+      ]
+     }
+    },
+    "view": {
+     "value": {
+      "$h": "div",
+      "at": [
+       [
+        "class",
+        "todo"
+       ]
+      ],
+      "ch": [
+       {
+        "$h": "input",
+        "at": [
+         [
+          "value",
+          ""
+         ],
+         [
+          "on-change",
+          {
+           "$fn": "Todo.Msg.SetInput"
+          }
+         ]
+        ],
+        "ch": []
+       },
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Todo.Msg.AddItem",
+           "a": []
+          }
+         ]
+        ],
+        "ch": [
+         "Add"
+        ]
+       },
+       {
+        "$h": "ul",
+        "at": [],
+        "ch": [
+         []
+        ]
+       },
+       {
+        "$h": "button",
+        "at": [
+         [
+          "on-click",
+          {
+           "$v": "Todo.Msg.ClearDone",
+           "a": []
+          }
+         ]
+        ],
+        "ch": [
+         "Clear done"
+        ]
+       }
+      ]
+     }
+    },
+    "updates": [
+     {
+      "msg": {
+       "$v": "Todo.Msg.AddItem",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Todo.Model",
+          "items": [],
+          "input": "",
+          "next_id": 1
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Todo.Msg.ClearDone",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Todo.Model",
+          "items": [],
+          "input": "",
+          "next_id": 1
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "steps": [
+     {
+      "msg": {
+       "$v": "Todo.Msg.SetInput",
+       "a": [
+        "milk"
+       ]
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Todo.Model",
+          "items": [],
+          "input": "milk",
+          "next_id": 1
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Todo.Msg.AddItem",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Todo.Model",
+          "items": [
+           {
+            "$t": "Todo.Item",
+            "id": 1,
+            "text": "milk",
+            "done": false
+           }
+          ],
+          "input": "",
+          "next_id": 2
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Todo.Msg.SetInput",
+       "a": [
+        "eggs"
+       ]
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Todo.Model",
+          "items": [
+           {
+            "$t": "Todo.Item",
+            "id": 1,
+            "text": "milk",
+            "done": false
+           }
+          ],
+          "input": "eggs",
+          "next_id": 2
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Todo.Msg.AddItem",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Todo.Model",
+          "items": [
+           {
+            "$t": "Todo.Item",
+            "id": 1,
+            "text": "milk",
+            "done": false
+           },
+           {
+            "$t": "Todo.Item",
+            "id": 2,
+            "text": "eggs",
+            "done": false
+           }
+          ],
+          "input": "",
+          "next_id": 3
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Todo.Msg.Toggle",
+       "a": [
+        1
+       ]
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Todo.Model",
+          "items": [
+           {
+            "$t": "Todo.Item",
+            "id": 1,
+            "text": "milk",
+            "done": true
+           },
+           {
+            "$t": "Todo.Item",
+            "id": 2,
+            "text": "eggs",
+            "done": false
+           }
+          ],
+          "input": "",
+          "next_id": 3
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "msg": {
+       "$v": "Todo.Msg.ClearDone",
+       "a": []
+      },
+      "answer": {
+       "value": {
+        "$tup": [
+         {
+          "$t": "Todo.Model",
+          "items": [
+           {
+            "$t": "Todo.Item",
+            "id": 2,
+            "text": "eggs",
+            "done": false
+           }
+          ],
+          "input": "",
+          "next_id": 3
+         },
+         {
+          "$c": "none"
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "by": "interpreter"
+   }
+  ],
+  "tests": {}
+ }
+]

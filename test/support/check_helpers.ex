@@ -1,4 +1,4 @@
-defmodule Kinoko.Lang.CheckHelpers do
+defmodule Nobi.Lang.CheckHelpers do
   @moduledoc """
   What the checker's test files share (ported from the Rust crate's
   `tests/checking/mod.rs`): TS's `checkAll`, `firstError` and `expectAllOk`,
@@ -7,8 +7,8 @@ defmodule Kinoko.Lang.CheckHelpers do
 
   import ExUnit.Assertions
 
-  alias Kinoko.Lang.{Ast, Format, Parser}
-  alias Kinoko.Lang.Types.{Check, Extract, Stdlib}
+  alias Nobi.Lang.{Ast, Format, Parser}
+  alias Nobi.Lang.Types.{Check, Extract, Stdlib}
 
   @msg """
   deftype M.Msg do Inc | Dec | Set(Int) end

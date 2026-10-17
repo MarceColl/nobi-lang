@@ -1,10 +1,10 @@
-defmodule Kinoko.Repo.Migrations.UniqueDeploymentHosts do
+defmodule Nobi.Repo.Migrations.UniqueDeploymentHosts do
   use Ecto.Migration
 
   # Hosts were not checked before: a deployment could list localhost (and
   # take `/` from `local`) or another's `<name>.localhost`. Drop such rows,
   # then make each host one deployment's. Self-contained: it must mean the
-  # same whatever Kinoko.Deployment becomes.
+  # same whatever Nobi.Deployment becomes.
   def up do
     repair(repo())
     drop index(:deployment_hosts, [:host])

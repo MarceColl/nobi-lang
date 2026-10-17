@@ -1,11 +1,11 @@
-defmodule Kinoko.PersistentCached do
+defmodule Nobi.PersistentCached do
   @moduledoc """
-  A `Kinoko.PersistentElmGenServer` with a volatile `:cache` field:
+  A `Nobi.PersistentElmGenServer` with a volatile `:cache` field:
   `durable/1` drops it, and `decode/1` rebuilds it as `{:rebuilt, count}`.
   """
 
-  use Kinoko.PersistentElmGenServer
-  alias Kinoko.Elm.Effect, as: Fx
+  use Nobi.PersistentElmGenServer
+  alias Nobi.Elm.Effect, as: Fx
 
   @impl true
   def init(_), do: {%{count: 0, cache: nil}, Fx.none()}
