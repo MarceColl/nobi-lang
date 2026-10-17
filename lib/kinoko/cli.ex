@@ -130,19 +130,29 @@ defmodule Kinoko.CLI do
 
   @doc """
   What `kinoko uninstall` prints, given the `binary`, the unpacked Burrito
-  runtime `cache` (`nil` outside Burrito: nothing to list) and the `data`
-  directory.
+  runtime `cache` and the `runtimes` pattern that matches every build's
+  (both `nil` outside Burrito: nothing to list), and the `data` directory.
   """
-  @spec uninstall_text(%{binary: String.t(), cache: String.t() | nil, data: String.t()}) ::
-          String.t()
-  def uninstall_text(%{binary: binary, cache: cache, data: data}) do
+  @spec uninstall_text(%{
+          required(:binary) => String.t(),
+          required(:cache) => String.t() | nil,
+          optional(:runtimes) => String.t() | nil,
+          required(:data) => String.t()
+        }) :: String.t()
+  def uninstall_text(%{binary: binary, cache: cache, data: data} = paths) do
     cache_line = if cache, do: "  #{cache}    its unpacked runtime (Burrito cache)\n", else: ""
+
+    runtimes_line =
+      case paths[:runtimes] do
+        nil -> ""
+        runtimes -> "  #{runtimes}    the runtimes of every kinoko build run here\n"
+      end
 
     """
     To remove Kinoko, stop it and delete:
 
       #{binary}    the kinoko binary
-    #{cache_line}  #{data}    your data: the database, every app's data, the secret
+    #{cache_line}#{runtimes_line}  #{data}    your data: the database, every app's data, the secret
 
     kinoko uninstall deletes nothing itself. Deleting the data directory
     deletes your work for good.
@@ -152,17 +162,19 @@ defmodule Kinoko.CLI do
   @doc """
   The paths `kinoko uninstall` lists, from the environment. Under Burrito
   (`__BURRITO` set) the wrapper sets `__BURRITO_BIN_PATH` to the binary and
-  `RELEASE_ROOT` to its unpacked runtime: one directory per version,
-  `<base>/.burrito/kinoko_erts-<erts>_<version>`, where `<base>` is
+  `RELEASE_ROOT` to its unpacked runtime: one directory per build,
+  `<base>/.burrito/kinoko_erts-<erts>_<version>+<commit>`, where `<base>` is
   `$KINOKO_INSTALL_DIR`, else `~/Library/Application Support` (macOS) or
-  `$XDG_DATA_HOME`, else `~/.local/share` (Linux). The `.burrito` directory
-  itself is shared with other Burrito apps, so only Kinoko's is listed.
-  Outside Burrito the release's own script is the binary, and there is no
-  cache.
+  `$XDG_DATA_HOME`, else `~/.local/share` (Linux). Earlier builds leave
+  their own directories next to it, so `runtimes` is the pattern
+  `<base>/.burrito/kinoko_erts-*`. The `.burrito` directory itself is
+  shared with other Burrito apps, so only Kinoko's are listed. Outside
+  Burrito the release's own script is the binary, and there is no cache.
   """
   @spec uninstall_paths(Kinoko.Local.env()) :: %{
           binary: String.t(),
           cache: String.t() | nil,
+          runtimes: String.t() | nil,
           data: String.t()
         }
   def uninstall_paths(env) do
@@ -174,7 +186,14 @@ defmodule Kinoko.CLI do
         {if(root, do: Path.join(root, "bin/kinoko"), else: "kinoko"), nil}
       end
 
-    %{binary: binary, cache: cache, data: Kinoko.Local.data_dir(:local, env)}
+    runtimes = if cache, do: Path.join(Path.dirname(cache), "kinoko_erts-*")
+
+    %{
+      binary: binary,
+      cache: cache,
+      runtimes: runtimes,
+      data: Kinoko.Local.data_dir(:local, env)
+    }
   end
 
   @doc "The start-up banner for the endpoint at `base_url`."
@@ -196,7 +215,9 @@ defmodule Kinoko.CLI do
 
   @doc """
   `kinoko start`: refuses a taken port, then `Kinoko.Release.start/0`
-  (migrate, serve, `main` and `local`), then `announce/1`.
+  (migrate, serve, `main` and `local`), then, under Burrito, the
+  `Kinoko.ParentWatch` that stops Kinoko when the wrapper dies, then
+  `announce/1`.
   """
   @spec start(keyword()) :: :ok
   def start(opts) do
@@ -204,6 +225,7 @@ defmodule Kinoko.CLI do
 
     case Kinoko.Release.start() do
       :ok ->
+        Kinoko.ParentWatch.maybe_start(System.get_env())
         announce(opts)
 
       {:error, reason} ->

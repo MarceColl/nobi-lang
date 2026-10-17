@@ -1,10 +1,12 @@
 defmodule Kinoko.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+
   def project do
     [
       app: :kinoko,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.15",
       build_path: build_path(),
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -37,10 +39,15 @@ defmodule Kinoko.MixProject do
   # prod build (config/prod.exs). Mix does not see an env var change, so each
   # build compiles into its own directory: `_build/prod` (local) and
   # `_build/server/prod` (server).
+  #
+  # `mix kinoko.dist` (KINOKO_DIST=1) builds in `_build/dist`, so its
+  # Burrito-flavoured release never replaces the plain one in `_build/prod`.
   defp build_path do
-    if Mix.env() == :prod and System.get_env("KINOKO_BUILD") == "server",
-      do: "_build/server",
-      else: "_build"
+    cond do
+      Mix.env() == :prod and System.get_env("KINOKO_BUILD") == "server" -> "_build/server"
+      Mix.env() == :prod and System.get_env("KINOKO_DIST") == "1" -> "_build/dist"
+      true -> "_build"
+    end
   end
 
   # `MIX_ENV=prod mix release` builds the local `kinoko` release: the console
@@ -55,6 +62,16 @@ defmodule Kinoko.MixProject do
   # starting Kinoko itself, so `kinoko version` starts and creates nothing.
   # `rel/burrito` is its own templates dir, so `rel/overlays` (bin/kinoko-cli)
   # is not in the binary: the binary is the CLI.
+  #
+  # The dist release version is `<version>+<commit>` (KINOKO_COMMIT): Burrito
+  # unpacks into a directory named after it and never unpacks again over an
+  # existing one, so every build must have its own. `kinoko version` still
+  # prints the mix.exs version and the commit (Kinoko.Build).
+  #
+  # The dist build only takes the ERTS the task verified: KINOKO_DIST_ERTS is
+  # the pinned tarball for the target in BURRITO_TARGET (Burrito's
+  # `custom_erts`), and Kinoko.Dist.PinnedRuntime refuses a build without it
+  # and supplies the pinned musl runtime (KINOKO_DIST_MUSL) for Linux.
   defp releases do
     base = [
       include_executables_for: [:unix],
@@ -66,17 +83,30 @@ defmodule Kinoko.MixProject do
       if System.get_env("KINOKO_DIST") == "1",
         do:
           Keyword.merge(base,
+            version: "#{@version}+#{System.get_env("KINOKO_COMMIT") || "unknown"}",
             steps: [:assemble, &Burrito.wrap/1],
             applications: [kinoko: :load],
-            rel_templates_path: "rel/burrito"
+            rel_templates_path: "rel/burrito",
+            burrito: [
+              targets: dist_targets(System.get_env("BURRITO_TARGET"), System.get_env()),
+              extra_steps: [fetch: [pre: [Kinoko.Dist.PinnedRuntime]]]
+            ]
           ),
         else: base
 
     [kinoko: kinoko]
   end
 
+  defp dist_targets(target, env) do
+    for {name, opts} <- burrito_targets() do
+      if Atom.to_string(name) == target and env["KINOKO_DIST_ERTS"],
+        do: {name, opts ++ [custom_erts: env["KINOKO_DIST_ERTS"]]},
+        else: {name, opts}
+    end
+  end
+
   # The Burrito targets, `<os>_<arch>` (the binary is `kinoko-<os>-<arch>`).
-  # Linux targets are musl (Burrito's precompiled ERTS plus its musl runtime).
+  # Linux targets run Burrito's precompiled musl ERTS plus its musl runtime.
   defp burrito_targets do
     [
       macos_arm64: [os: :darwin, cpu: :aarch64],

@@ -86,6 +86,19 @@ defmodule Kinoko.CLITest do
     assert text =~ "/home/u/.kinoko"
   end
 
+  test "uninstall_text/1 names every build's runtime under Burrito" do
+    text =
+      CLI.uninstall_text(%{
+        binary: "/b/kinoko",
+        cache: "/h/.burrito/kinoko_erts-16.1.1_0.1.0+abc",
+        runtimes: "/h/.burrito/kinoko_erts-*",
+        data: "/d"
+      })
+
+    assert text =~ "/h/.burrito/kinoko_erts-16.1.1_0.1.0+abc"
+    assert text =~ "/h/.burrito/kinoko_erts-*"
+  end
+
   test "uninstall_text/1 without a Burrito cache lists no cache line" do
     text = CLI.uninstall_text(%{binary: "/r/bin/kinoko", cache: nil, data: "/d"})
     assert text =~ "/r/bin/kinoko"
@@ -104,6 +117,7 @@ defmodule Kinoko.CLITest do
       assert CLI.uninstall_paths(env) == %{
                binary: "/home/u/.local/bin/kinoko",
                cache: "/home/u/.local/share/.burrito/kinoko_erts-16.1_0.1.0",
+               runtimes: "/home/u/.local/share/.burrito/kinoko_erts-*",
                data: "/home/u/k"
              }
     end
@@ -114,6 +128,7 @@ defmodule Kinoko.CLITest do
       assert CLI.uninstall_paths(env) == %{
                binary: "/opt/kinoko/bin/kinoko",
                cache: nil,
+               runtimes: nil,
                data: "/home/u/k"
              }
     end
