@@ -126,6 +126,10 @@ defmodule KinokoWeb.YabuHtmlTest do
       assert wired? == expected, "on-#{event} on <#{tag}>: wired #{wired?}, checker #{expected}"
     end
 
+    # A form inside a form: its on-submit is not wired (the checker refuses it).
+    inner = el("form", [{"on-submit", msg}])
+    assert elem(render(el("form", [], [el("div", [], [inner])])), 1) == %{}
+
     for event <- ~w(input dblclick mouseover change2),
         do: assert(elem(render(el("input", [{"on-" <> event, msg}])), 1) == %{})
   end

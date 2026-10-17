@@ -43,20 +43,23 @@ defmodule Kinoko.Lang.Types.JsxApp do
   expression and carries no annotation. Returns `{typed, ctx}`.
   """
   def synth_jsx(ctx, {:jsx, _, _} = e) do
-    {typed, sends, ctx} = element(ctx, e)
+    {typed, sends, ctx} = element(ctx, e, false)
     {put_ann(typed, html(sends), nil), ctx}
   end
 
-  defp element(ctx, {:jsx, m, [tag, attrs, children]}) do
+  # `in_form?`: an ancestor in this JSX is a <form>. The renderer turns a
+  # form nested in another into a <div> and drops its on-submit.
+  defp element(ctx, {:jsx, m, [tag, attrs, children]}, in_form?) do
     {sends, ctx} = Ctx.fresh(ctx)
-    {attrs, ctx} = Enum.map_reduce(attrs, ctx, &attr(&2, &1, tag, sends))
-    {children, ctx} = Enum.map_reduce(children, ctx, &child(&2, &1, sends))
+    {attrs, ctx} = Enum.map_reduce(attrs, ctx, &attr(&2, &1, {tag, in_form?}, sends))
+    nested? = in_form? or tag == "form"
+    {children, ctx} = Enum.map_reduce(children, ctx, &child(&2, &1, nested?, sends))
     {{:jsx, m, [tag, attrs, children]}, sends, ctx}
   end
 
   defp attr(ctx, {:text, _, _} = a, _tag, _sends), do: {a, ctx}
 
-  defp attr(ctx, {:event, event, x}, tag, sends) do
+  defp attr(ctx, {:event, event, x}, {tag, in_form?}, sends) do
     {s, ctx} = Check.synth(ctx, x)
 
     ctx =
@@ -66,6 +69,13 @@ defmodule Kinoko.Lang.Types.JsxApp do
 
         @events[event] != :any and tag not in @events[event] ->
           Ctx.error(ctx, "bad-event", wrong_tag(event, tag))
+
+        event == "submit" and in_form? ->
+          message =
+            "on-submit on a <form> inside another <form> is never sent: the inner form " <>
+              "renders as a <div>; put on-submit on the outer form"
+
+          Ctx.error(ctx, "bad-event", message)
 
         event == "change" ->
           check_change_handler(ctx, x, s, sends)
@@ -116,15 +126,15 @@ defmodule Kinoko.Lang.Types.JsxApp do
     Ctx.error(ctx, "mismatch", message)
   end
 
-  defp child(ctx, {:text, _} = c, _sends), do: {c, ctx}
+  defp child(ctx, {:text, _} = c, _in_form?, _sends), do: {c, ctx}
 
-  defp child(ctx, {:expr, x}, sends) do
+  defp child(ctx, {:expr, x}, _in_form?, sends) do
     {s, ctx} = synth_child(ctx, x, sends)
     {{:expr, s}, ctx}
   end
 
-  defp child(ctx, {:element, inner}, sends) do
-    {typed, inner_sends, ctx} = element(ctx, inner)
+  defp child(ctx, {:element, inner}, in_form?, sends) do
+    {typed, inner_sends, ctx} = element(ctx, inner, in_form?)
     {_, ctx} = Ctx.unify_quoting(ctx, html(inner_sends), html(sends), fn -> Quote.expr(inner) end)
     {{:element, typed}, ctx}
   end

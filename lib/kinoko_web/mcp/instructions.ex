@@ -231,6 +231,8 @@ defmodule KinokoWeb.Mcp.Instructions do
     checker changed under it). `symbols` and `list_universes` say so and
     `health` lists why; eval and test answer `[degraded]` until a patch that
     fixes every listed reason promotes (it must make the whole image check).
+    Code with an on-* event the page never wired (on-input, say) now degrades
+    this way: move it to a supported event.
   - Cmd values (effects) are data to `eval`: it shows the Cmd a function
     returns and runs nothing. A deployment serving the app runs them
     (Cmd.store.*, Cmd.time.now in Unix milliseconds, Cmd.random.int,

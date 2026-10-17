@@ -1179,6 +1179,20 @@ defmodule Kinoko.Lang.CheckTest do
     end
   end
 
+  test "on-submit on a form nested in another form is refused (it would never be sent)" do
+    src =
+      @msg_e <>
+        "def E.v() : Html<E.Msg> do <form on-submit={E.Msg.Go}><div><form on-submit={E.Msg.Go}></form></div></form> end"
+
+    assert [{"bad-event", message}] = found(src)
+    assert message =~ "inside another <form> is never sent"
+
+    all_ok(
+      @msg_e <>
+        "def E.v() : Html<E.Msg> do <div><form on-submit={E.Msg.Go}></form><form on-submit={E.Msg.Go}></form></div> end"
+    )
+  end
+
   test "on-input is refused and points to on-change" do
     for handler <- ["E.Msg.Set", "E.Msg.Go"] do
       src = @msg_e <> "def E.v() : Html<E.Msg> do <input on-input={#{handler}} /> end"
