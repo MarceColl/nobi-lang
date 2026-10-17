@@ -4,27 +4,267 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Kinoko: the Yabu language and its code database</title>
+  <meta name="description" content="Kinoko is a code database and runtime for Yabu, a small typed language for web apps with Elm's architecture and Elixir's syntax, on the BEAM.">
+  <meta name="theme-color" content="#F2F1EC">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235B4B96' stroke-width='1.5'%3E%3Cpath d='M12 13v8M12 21c-3 0-5-1.5-7-3M12 21c3 0 5-1.5 7-3'/%3E%3Cpath d='M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z' fill='%23E4DFF3'/%3E%3C/svg%3E">
+  <link rel="preload" href="fonts/newsreader-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="site.css">
   <script src="copy.js" defer></script>
 </head>
-<%!-- Skeleton (landing task 1): proves the samples, verdicts and styling reach the page. Task 2 builds the real sections. --%>
 <body class="bg-paper font-sans text-body antialiased">
-  <main class="mx-auto max-w-4xl px-4 py-16">
-    <header id="hero">
-      <h1 class="font-display text-5xl text-ink">Kinoko</h1>
-      <p class="mt-2 text-dim">Version <%= @version %> · macOS · Linux</p>
-      <div class="mt-6 flex items-center gap-3 rounded-xl border border-line bg-card p-4 font-mono text-sm">
-        <code id="install" class="min-w-0 flex-1 overflow-x-auto whitespace-pre">curl -fsSL <%= @install_url %> | bash</code>
-        <button type="button" class="rounded-lg border border-line px-3 py-1 text-ink hover:bg-tint" data-copy="#install" aria-label="Copy the install command">Copy</button>
+<a href="#main" class="skip">Skip to content</a>
+
+<header class="wrap flex h-16 items-center gap-6">
+  <a href="#top" class="flex items-center gap-2 text-ink" aria-label="Kinoko, back to the top">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B4B96" stroke-width="1.5" aria-hidden="true"><path d="M12 13v8"/><path d="M12 21c-3 0-5-1.5-7-3"/><path d="M12 21c3 0 5-1.5 7-3"/><path d="M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z" fill="#E4DFF3"/></svg>
+    <span class="text-[15px] font-bold tracking-[-.01em]">kinoko</span>
+  </a>
+  <nav class="ml-auto flex items-center gap-5 text-[14px]" aria-label="Project">
+    <a class="navlink" href="<%= @source_url %>">Source</a>
+    <a class="navlink" href="<%= @releases_url %>">Releases</a>
+    <a class="navlink hidden sm:inline" href="<%= @glossary_url %>">Glossary</a>
+  </nav>
+</header>
+
+<main id="main">
+
+<%!-- 1. Hero --%>
+<section id="top" class="wrap pt-12 pb-16 sm:pt-20 lg:pt-20 lg:pb-24" aria-labelledby="hero-title">
+  <h1 id="hero-title" class="hero-title font-display text-ink">Every change typechecks,<br class="hidden md:inline"> or&nbsp;it stays staged.</h1>
+  <div class="mt-10 grid gap-10 lg:mt-14 lg:grid-cols-12 lg:gap-12">
+    <p class="lede lg:col-span-5">Kinoko is a code database and runtime for Yabu, a small typed language for web apps: Elm's architecture, Elixir's syntax, running on the BEAM. You or your agent stage a patch. It is promoted only when the whole program still typechecks; otherwise you get the exact reasons.</p>
+    <div class="lg:col-span-7">
+      <div class="card install">
+        <div class="install-row">
+          <span class="prompt" aria-hidden="true">$</span>
+          <code id="install" class="install-cmd">curl -fsSL <%= @install_url %> | bash</code>
+          <button type="button" class="copy" data-copy="#install" aria-label="Copy the install command">Copy</button>
+        </div>
+        <div class="install-row border-t border-row-line">
+          <span class="prompt" aria-hidden="true">$</span>
+          <code class="install-cmd">kinoko</code>
+        </div>
       </div>
-    </header>
-<%= for {id, title, sample, verdict} <- @sections do %>
-    <section id="<%= id %>" class="mt-12">
-      <h2 class="font-display text-3xl text-ink"><%= title %></h2>
-      <pre class="mt-4 overflow-x-auto rounded-xl border border-line bg-card p-4 font-mono text-sm text-ink"><code><%= sample %></code></pre>
-      <pre class="mt-2 overflow-x-auto rounded-lg bg-sand p-3 font-mono text-xs text-body"><code><%= verdict %></code></pre>
-    </section>
-<% end %>
-  </main>
+      <div class="mt-4 flex flex-wrap items-center gap-2 text-[13px]">
+        <span class="chip chip-violet">v<%= @version %></span>
+        <span class="chip chip-plain">macOS · Linux</span>
+        <span class="text-dim">arm64 and x86_64. <code class="inline">kinoko</code> creates its database, serves on localhost:4000 and opens the console.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<%!-- 2. See it run --%>
+<section id="see-it-run" class="band" aria-labelledby="run-title">
+  <div class="wrap grid gap-10 lg:grid-cols-12 lg:gap-12">
+    <div class="prose lg:col-span-4">
+      <h2 id="run-title" class="h2">See it run</h2>
+      <p>One session with the release binary, from install to an agent's first patch. The patch is the counter from the next section, sent to the MCP endpoint as a <code class="inline">tools/call</code>. Kinoko answers in one line, and an <code class="inline">eval</code> shows the decrement stopping at zero.</p>
+      <p class="note">Recorded from <code class="inline">kinoko-macos-arm64</code>. There is no public release yet, so the installer was served from a local web server. Environment setup and server logs are trimmed; nothing is added.</p>
+    </div>
+    <figure class="lg:col-span-8">
+      <div class="card overflow-hidden">
+        <div class="titlebar">
+          <span class="text-[13px] font-semibold text-ink">Terminal</span>
+          <span class="truncate text-[12.5px] text-dim">install, start, connect, stage</span>
+          <span class="ml-auto hidden font-mono text-[11.5px] text-dim sm:inline">PORT=4123</span>
+        </div>
+        <pre class="term" tabindex="0" aria-label="Terminal session"><code><%= for {kind, text} <- @session do %><%= case kind do %><% :cmd -> %><span class="tok-prompt">$</span> <span class="tok-cmd"><%= text %></span><% :ok -> %><span class="tok-ok"><%= text %></span><% :out -> %><%= text %><% end %>
+<% end %></code></pre>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<%!-- 3. The Elm architecture, Elixir syntax --%>
+<section id="elm-architecture" class="band" aria-labelledby="tea-title">
+  <div class="wrap grid gap-10 lg:grid-cols-12 lg:gap-12">
+    <div class="prose lg:col-span-4">
+      <h2 id="tea-title" class="h2">The Elm architecture, Elixir syntax</h2>
+      <p>A Yabu app is one loop. <code class="inline">init</code> gives the first model. <code class="inline">update</code> turns a message and a model into the next model. <code class="inline">view</code> draws the model as HTML, styled with Tailwind classes. <code class="inline">defapp</code> wires the three together.</p>
+      <dl class="notes">
+        <div><dt><code class="inline">defmodel</code></dt><dd>A model is plain data. Construction lists every field: <code class="inline">%Counter.Model{count: 0}</code>.</dd></div>
+        <div><dt><code class="inline">deftype</code></dt><dd>Messages are a sum type, and a <code class="inline">case</code> must cover every variant.</dd></div>
+        <div><dt><code class="inline">always</code></dt><dd>An invariant, checked whenever it runs: in an <code class="inline">eval</code> or a test.</dd></div>
+      </dl>
+      <p>Every name is fully qualified, so <code class="inline">Counter.update</code> means the same thing wherever it appears. Yabu has no comments; the notes on this page are ours.</p>
+      <p>A product is several small apps over shared stores, not one app with a router inside. <code class="inline">defroutes</code> maps URL paths to apps, and <code class="inline">Cmd.navigate</code> moves between them.</p>
+    </div>
+    <div class="flex flex-col gap-6 lg:col-span-8">
+      <figure class="card overflow-hidden">
+        <div class="titlebar">
+          <span class="font-mono text-[12.5px] font-medium text-ink">counter.yabu</span>
+          <span class="chip chip-mint ml-auto"><%= @counter_verdict %></span>
+        </div>
+        <div class="code"><pre class="gutter" aria-hidden="true"><%= Enum.map_join(1..@counter.lines, "\n", &Integer.to_string/1) %></pre><pre class="src" tabindex="0" aria-label="counter.yabu"><code><%= @counter.html %></code></pre></div>
+      </figure>
+      <figure class="app-frame">
+        <div class="titlebar">
+          <span class="text-[13px] font-semibold text-ink">Counter</span>
+          <span class="truncate text-[12.5px] text-dim">what view draws for the first model</span>
+        </div>
+        <div class="flex justify-center bg-tint px-4 py-10 sm:py-14" role="img" aria-label="The counter app: a minus button, the count 0, and a plus button">
+          <div class="flex items-center gap-4 rounded-xl border border-stone-300 bg-white p-6">
+            <span class="rounded-lg px-3 py-1 text-xl text-ink">-</span>
+            <span class="w-12 text-center text-3xl font-semibold tabular-nums text-ink">0</span>
+            <span class="rounded-lg bg-violet-700 px-3 py-1 text-xl text-white">+</span>
+          </div>
+        </div>
+        <figcaption class="figcap">Recreated on this page with the classes from <code class="inline">Counter.view</code>.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<%!-- 4. Code is a database --%>
+<section id="code-database" class="band" aria-labelledby="db-title">
+  <div class="wrap grid gap-10 lg:grid-cols-12 lg:gap-12">
+    <div class="prose lg:col-span-4">
+      <h2 id="db-title" class="h2">Code is a database</h2>
+      <p>Kinoko stores each declaration on its own, addressed by its content. A declaration's CID is the sha256 of its canonical text, so reformatting it changes nothing, and the same declaration always has the same CID.</p>
+      <p>You change code by staging a patch. If the whole committed program still typechecks, the patch is promoted. If it does not, the patch stays staged, changes nothing, and carries one reason per problem.</p>
+    </div>
+    <div class="flex flex-col gap-6 lg:col-span-8">
+      <figure class="card overflow-hidden">
+        <div class="titlebar">
+          <span class="text-[13px] font-semibold text-ink">Committed</span>
+          <span class="truncate text-[12.5px] text-dim">after <span class="font-mono"><%= @counter_verdict %></span></span>
+          <span class="chip chip-mint ml-auto">typechecks</span>
+        </div>
+        <ul class="symbols">
+<%= for {cid, symbol} <- @cids do %>          <li><span class="dot" aria-hidden="true"></span><span class="font-mono text-[13px] text-ink"><%= symbol %></span><span class="ml-auto font-mono text-[12px] text-dim">sha256 <%= cid %></span></li>
+<% end %>        </ul>
+      </figure>
+      <figure class="card overflow-hidden">
+        <div class="titlebar">
+          <span class="font-mono text-[12.5px] font-medium text-ink">Counter.label</span>
+          <span class="chip chip-amber">staged</span>
+        </div>
+        <div class="p-4">
+          <div class="blocked" role="group" aria-labelledby="blocked-title">
+            <span id="blocked-title" class="text-[13px] font-semibold text-red-text">Blocked</span>
+<%= for r <- @mistake_reasons do %>            <span class="font-mono text-[12.5px] text-red-text"><%= r.name %> [<%= r.code %>] <%= r.message %></span>
+<% end %>          </div>
+        </div>
+      </figure>
+      <p class="figcap">The CIDs and the reason come from a fresh universe; the test suite checks them against a live run.</p>
+    </div>
+  </div>
+</section>
+
+<%!-- 5. A compiler that explains itself --%>
+<section id="explains-itself" class="band" aria-labelledby="explain-title">
+  <div class="wrap grid gap-10 lg:grid-cols-12 lg:gap-12">
+    <div class="prose lg:col-span-4">
+      <h2 id="explain-title" class="h2">A compiler that explains itself</h2>
+      <p>A common slip: joining a string and an <code class="inline">Int</code>. The verdict names the declaration, the kind of error and the expression at fault, in plain text that a person or an agent can act on.</p>
+      <p>The fix is <code class="inline">String.from_int(count)</code>. Restage the same patch id and it promotes.</p>
+    </div>
+    <div class="flex flex-col gap-6 lg:col-span-8">
+      <figure class="card overflow-hidden">
+        <div class="titlebar">
+          <span class="font-mono text-[12.5px] font-medium text-ink">mistake.yabu</span>
+        </div>
+        <div class="code"><pre class="gutter" aria-hidden="true"><%= Enum.map_join(1..@mistake.lines, "\n", &Integer.to_string/1) %></pre><pre class="src" tabindex="0" aria-label="mistake.yabu"><code><%= @mistake.html %></code></pre></div>
+      </figure>
+      <figure class="card overflow-hidden">
+        <div class="titlebar">
+          <span class="text-[13px] font-semibold text-ink">Verdict</span>
+          <span class="truncate text-[12.5px] text-dim">as <span class="font-mono">stage_patch</span> prints it</span>
+        </div>
+        <pre class="term" tabindex="0" aria-label="The printed verdict"><code><%= for {class, line} <- @mistake_verdict do %><span class="<%= class %>"><%= line %></span>
+<% end %></code></pre>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<%!-- 6. The BEAM, with data that persists --%>
+<section id="persists" class="band" aria-labelledby="persist-title">
+  <div class="wrap grid gap-10 lg:grid-cols-12 lg:gap-12">
+    <div class="prose lg:col-span-4">
+      <h2 id="persist-title" class="h2">The BEAM, with data that persists</h2>
+      <p>The model is session state. Durable data goes through <code class="inline">Cmd.store</code>. A model that declares <code class="inline">id : Uuid</code> is stored, and the store mints the id, so you never write it.</p>
+      <dl class="notes">
+        <div><dt><code class="inline">Cmd.store</code></dt><dd><code class="inline">update</code> returns effects as data. The runtime runs them and sends the result back as a message.</dd></div>
+        <div><dt><code class="inline">= 0</code></dt><dd>Models grow by adding fields. A new field needs a default, which rows stored before it read back as; a new field without one is refused. Construction still lists every field.</dd></div>
+        <div><dt>BEAM</dt><dd>Each open page runs its app's loop in its own Erlang process, served by Phoenix LiveView.</dd></div>
+        <div><dt>SQLite</dt><dd>The code and every app's rows are SQLite files in one data directory. There is no database server to set up.</dd></div>
+      </dl>
+    </div>
+    <div class="flex flex-col gap-6 lg:col-span-8">
+      <figure class="card overflow-hidden">
+        <div class="titlebar">
+          <span class="font-mono text-[12.5px] font-medium text-ink">store.yabu</span>
+          <span class="chip chip-mint ml-auto"><%= @store_verdict %></span>
+        </div>
+        <div class="code"><pre class="gutter" aria-hidden="true"><%= Enum.map_join(1..@store.lines, "\n", &Integer.to_string/1) %></pre><pre class="src" tabindex="0" aria-label="store.yabu"><code><%= @store.html %></code></pre></div>
+      </figure>
+      <p class="figcap">Staged on top of a <code class="inline">Board.Topic</code> without <code class="inline">replies</code>, it promotes as an evolution of the stored model.</p>
+    </div>
+  </div>
+</section>
+
+<%!-- 7. Agents drive it --%>
+<section id="agents" class="band" aria-labelledby="agents-title">
+  <div class="wrap grid gap-10 lg:grid-cols-12 lg:gap-12">
+    <div class="prose lg:col-span-4">
+      <h2 id="agents-title" class="h2">Agents drive it</h2>
+      <p>Kinoko serves MCP at <code class="inline">/mcp</code>. When an agent connects, the server's instructions give it the syntax, the loop and the whole standard library. Then it works the loop you would.</p>
+      <p><code class="inline">create_universe</code> gives an agent its own code database to try things in, away from <code class="inline">main</code>.</p>
+    </div>
+    <div class="flex flex-col gap-6 lg:col-span-8">
+      <ol class="loop">
+        <li><span class="step" aria-hidden="true">1</span><div><h3>Look</h3><p><code class="inline">symbols</code> lists every committed signature, <code class="inline">read</code> shows one declaration's source, and <code class="inline">history</code> shows what was promoted.</p></div></li>
+        <li><span class="step" aria-hidden="true">2</span><div><h3>Stage</h3><p><code class="inline">stage_patch</code> sends Yabu source under a patch id.</p></div></li>
+        <li><span class="step" aria-hidden="true">3</span><div><h3>Read the verdict</h3><p><code class="inline">promoted: id</code>, or <code class="inline">staged: id</code> with one reason per line. Fix it and restage the same id; <code class="inline">list_staged</code> shows what is waiting.</p></div></li>
+        <li><span class="step" aria-hidden="true">4</span><div><h3>Prove it</h3><p><code class="inline">eval</code> runs an expression against the committed code, and <code class="inline">test</code> runs a <code class="inline">deftest</code>.</p></div></li>
+      </ol>
+      <div class="card install">
+        <div class="install-row">
+          <span class="prompt" aria-hidden="true">$</span>
+          <code id="mcp-add" class="install-cmd">claude mcp add --transport http kinoko http://localhost:4000/mcp</code>
+          <button type="button" class="copy" data-copy="#mcp-add" aria-label="Copy the claude mcp add command">Copy</button>
+        </div>
+      </div>
+      <p class="figcap"><code class="inline">kinoko mcp</code> prints this line for your port, and a JSON config for other clients.</p>
+    </div>
+  </div>
+</section>
+
+<%!-- 8. Get started --%>
+<section id="get-started" class="band" aria-labelledby="start-title">
+  <div class="wrap">
+    <div class="closing">
+      <h2 id="start-title" class="h2">Get started</h2>
+      <p class="mt-4 max-w-[60ch]">One binary for macOS and Linux. The installer checks the download's sha256, never uses sudo and never edits your shell files.</p>
+      <div class="card install mt-8">
+        <div class="install-row">
+          <span class="prompt" aria-hidden="true">$</span>
+          <code id="install-again" class="install-cmd">curl -fsSL <%= @install_url %> | bash</code>
+          <button type="button" class="copy" data-copy="#install-again" aria-label="Copy the install command">Copy</button>
+        </div>
+        <div class="install-row border-t border-row-line">
+          <span class="prompt" aria-hidden="true">$</span>
+          <code class="install-cmd">kinoko</code>
+        </div>
+      </div>
+      <ul class="mt-8 flex flex-wrap gap-3">
+        <li><a class="btn btn-primary" href="<%= @source_url %>">Read the source</a></li>
+        <li><a class="btn" href="<%= @releases_url %>">Releases</a></li>
+        <li><a class="btn" href="<%= @glossary_url %>">Glossary</a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="wrap flex flex-wrap items-center gap-x-6 gap-y-2 py-10 text-[13px] text-dim">
+  <span>Kinoko <%= @version %></span>
+  <a class="navlink" href="<%= @source_url %>">Source</a>
+  <a class="navlink" href="<%= @releases_url %>">Releases</a>
+  <span class="sm:ml-auto">Set in Newsreader, Chivo and IBM Plex Mono, under the SIL Open Font License.</span>
+</footer>
 </body>
 </html>

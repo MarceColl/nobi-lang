@@ -84,6 +84,30 @@ defmodule Kinoko.Site.SamplesTest do
 
       assert message == "type mismatch: expected String, got Int in `count`"
     end
+
+    test "mistake.yabu promotes once its Int goes through String.from_int" do
+      u = fresh_universe("site")
+      assert {:staged, _} = Universe.stage(u, "mistake", sample("mistake.yabu"))
+
+      fixed = String.replace(sample("mistake.yabu"), ", count)", ", String.from_int(count))")
+      assert {:promoted, ["mistake"]} = Universe.stage(u, "mistake", fixed)
+    end
+  end
+
+  describe "content addresses (kept as a fixture)" do
+    # The page shows each committed counter declaration with the first
+    # eight hex digits of its CID, as the console's code header does.
+    test "counter.yabu's committed declarations and their CIDs match the fixture" do
+      u = fresh_universe("site")
+      assert {:promoted, ["counter"]} = Universe.stage(u, "counter", sample("counter.yabu"))
+
+      text =
+        u
+        |> Universe.symbols()
+        |> Enum.map_join("\n", &"sha256 #{String.slice(&1.cid, 0, 8)}  #{&1.symbol}")
+
+      assert_fixture("counter-cids.txt", text)
+    end
   end
 
   describe "printed verdicts (MCP stage_patch, kept as fixtures)" do

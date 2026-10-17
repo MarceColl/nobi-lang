@@ -14,7 +14,12 @@ def Counter.update(msg : Counter.Msg, model : Counter.Model) : (Counter.Model, C
   always(model.count >= 0)
   case msg do
     Counter.Msg.Increment -> (%Counter.Model{model | count: model.count + 1}, Cmd.none())
-    Counter.Msg.Decrement -> (%Counter.Model{model | count: if model.count > 0 do model.count - 1 else 0 end}, Cmd.none())
+    Counter.Msg.Decrement ->
+      if model.count > 0 do
+        (%Counter.Model{model | count: model.count - 1}, Cmd.none())
+      else
+        (model, Cmd.none())
+      end
   end
 end
 

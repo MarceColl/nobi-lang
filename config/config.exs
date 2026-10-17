@@ -77,11 +77,11 @@ config :tailwind,
     ),
     cd: Path.expand("..", __DIR__)
   ],
-  # The static homepage (mix site.build): site/src -> site/dist.
+  # The static homepage (mix site.build): site/src -> site/dist. The build
+  # passes --output (the dist directory it writes).
   site: [
     args: ~w(
       --input=site/src/site.css
-      --output=site/dist/site.css
     ),
     cd: Path.expand("..", __DIR__)
   ]
