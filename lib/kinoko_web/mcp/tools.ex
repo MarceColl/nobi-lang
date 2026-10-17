@@ -346,7 +346,7 @@ defmodule KinokoWeb.Mcp.Tools do
   # any other host could never reach the deployment.
   defp local_hosts(hosts) do
     case {Application.get_env(:kinoko, :mode),
-          Enum.reject(hosts, &KinokoWeb.LocalHost.local_host?(strip_port(&1)))} do
+          Enum.reject(hosts, &KinokoWeb.LocalHost.local_host?(Deployment.strip_port(&1)))} do
       {:local, [host | _]} ->
         {:error,
          "host #{Jason.encode!(host)} cannot be served: local mode serves only localhost " <>
@@ -357,8 +357,6 @@ defmodule KinokoWeb.Mcp.Tools do
     end
   end
 
-  defp strip_port(host), do: String.replace(host, ~r/:\d+$/, "")
-
   defp host_refusal(:bad_host, _name),
     do:
       "a host is not a DNS name: each dot-separated label is a-z, 0-9 and inner '-', " <>
@@ -366,7 +364,7 @@ defmodule KinokoWeb.Mcp.Tools do
 
   defp host_refusal(:reserved_host, name),
     do:
-      "localhost, 127.0.0.1 and [::1] belong to the built-in `local` deployment " <>
+      "localhost, 127.x.x.x, 0.0.0.0 and [::1] belong to the built-in `local` deployment " <>
         "(it serves `defroutes Main`). Leave them out: #{name} is at " <>
         "http://#{name}.localhost:#{port()}/."
 

@@ -105,6 +105,15 @@ defmodule Kinoko.DeploymentTest do
     test "loopback names are local's: reserved" do
       u = fresh_universe()
 
+      for host <-
+            ~w(::1 [::1] [::1]:4000 127.1.2.3 127.255.255.255 127.0.0.1:80 0.0.0.0 0.0.0.0:4000),
+          do:
+            assert(
+              {:error, :reserved_host} = Deployment.create(dname(), u, "Main", hosts: [host])
+            )
+
+      assert :ok = Deployment.create(dname(), u, "Main", hosts: ["127.example.com"])
+
       for host <- [
             "localhost",
             "LOCALHOST:4000",
@@ -180,6 +189,73 @@ defmodule Kinoko.DeploymentTest do
       assert {:ok, %{name: "local"}} = Deployment.resolve("localhost")
       assert {:ok, %{name: "local"}} = Deployment.resolve("127.0.0.1")
       assert {:ok, %{name: "local"}} = Deployment.resolve("local.localhost")
+    end
+  end
+
+  test "strip_port: after ] or as the only colon; ::1 keeps its colons" do
+    assert Deployment.strip_port("a.com:80") == "a.com"
+    assert Deployment.strip_port("a.com") == "a.com"
+    assert Deployment.strip_port("[::1]:4000") == "[::1]"
+    assert Deployment.strip_port("[::1]") == "[::1]"
+    assert Deployment.strip_port("::1") == "::1"
+    assert Deployment.strip_port("a.com:x") == "a.com:x"
+  end
+
+  describe "repair_hosts (rows from before hosts were checked)" do
+    # Writes host rows past create/4's checks, as older code could.
+    defp seed_hosts(rows) do
+      Kinoko.Repo.insert_all(
+        "deployment_hosts",
+        for({d, host, pos} <- rows, do: %{deployment: d, host: host, position: pos})
+      )
+    end
+
+    test "drops loopback and foreign *.localhost hosts, keeps the rest" do
+      u = fresh_universe()
+      a = dname()
+      b = dname()
+      :ok = Deployment.create(a, u, "Main")
+      :ok = Deployment.create(b, u, "Main")
+
+      seed_hosts([
+        {a, "localhost", 0},
+        {b, "127.0.0.9", 0},
+        {a, "#{b}.localhost", 1},
+        {a, "#{a}.localhost", 2},
+        {b, "ok.example.com", 1}
+      ])
+
+      assert Deployment.repair_hosts() == 3
+      own = "#{a}.localhost"
+      assert {:ok, %{hosts: [^own]}} = Deployment.get(a)
+      assert {:ok, %{hosts: ["ok.example.com"]}} = Deployment.get(b)
+    end
+
+    test "a host claimed twice stays with the deployment resolve served" do
+      u = fresh_universe()
+      a = "a-#{System.unique_integer([:positive])}"
+      b = "b-#{System.unique_integer([:positive])}"
+      :ok = Deployment.create(a, u, "Main")
+      :ok = Deployment.create(b, u, "Main")
+      # The unique index is what forbids this now; the sandbox rolls the drop back.
+      Kinoko.Repo.query!("DROP INDEX deployment_hosts_host_index")
+      seed_hosts([{b, "dup.example.com", 0}, {a, "dup.example.com", 0}])
+
+      assert Deployment.repair_hosts() == 1
+      assert {:ok, %{name: ^a}} = Deployment.resolve("dup.example.com")
+      assert {:ok, %{hosts: []}} = Deployment.get(b)
+    end
+
+    test "ensure_local takes localhost back from a deployment that held it" do
+      u = fresh_universe()
+      x = dname()
+      :ok = Deployment.create(x, u, "Main")
+      seed_hosts([{x, "localhost", 0}])
+
+      log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = Deployment.ensure_local() end)
+      assert log =~ "removed 1 host"
+      assert {:ok, %{name: "local"}} = Deployment.resolve("localhost")
+      assert {:ok, %{hosts: []}} = Deployment.get(x)
     end
   end
 

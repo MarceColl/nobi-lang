@@ -24,7 +24,7 @@ defmodule Kinoko.Deployment do
   alias Kinoko.{Repo, Universe}
   alias Kinoko.Universe.Registry
 
-  @loopback_hosts ["localhost", "127.0.0.1", "[::1]", "::1"]
+  @loopback_hosts ["localhost", "[::1]", "::1", "0.0.0.0"]
 
   @type t :: %{
           name: String.t(),
@@ -142,7 +142,7 @@ defmodule Kinoko.Deployment do
   defp refused_host(name, hosts, loopback?) do
     Enum.find_value(hosts, fn host ->
       cond do
-        host in @loopback_hosts ->
+        loopback?(host) ->
           if loopback?, do: nil, else: :reserved_host
 
         not dns_name?(host) ->
@@ -156,6 +156,17 @@ defmodule Kinoko.Deployment do
       end
     end)
   end
+
+  # localhost, ::1, 0.0.0.0 and all of 127.0.0.0/8: names of this machine.
+  defp loopback?(host) do
+    host in @loopback_hosts or
+      case String.split(host, ".") do
+        ["127", _, _, _] = parts -> Enum.all?(parts, &octet?/1)
+        _ -> false
+      end
+  end
+
+  defp octet?(s), do: s =~ ~r/\A\d{1,3}\z/ and String.to_integer(s) <= 255
 
   defp dns_name?(host) do
     byte_size(host) <= 253 and
@@ -248,9 +259,63 @@ defmodule Kinoko.Deployment do
     :ok = Registry.ensure_main()
 
     case create("local", "main", "Main", [hosts: @local_hosts], true) do
-      :ok -> :ok
-      {:error, :exists} -> :ok
+      :ok ->
+        :ok
+
+      {:error, :exists} ->
+        :ok
+
+      # Another deployment lists a loopback name (a row from before hosts
+      # were checked): give them back to `local`.
+      {:error, :host_taken} ->
+        require Logger
+        removed = repair_hosts(Repo)
+
+        Logger.warning(
+          "Deployment.ensure_local: removed #{removed} host(s) other deployments held"
+        )
+
+        case create("local", "main", "Main", [hosts: @local_hosts], true) do
+          :ok -> :ok
+          {:error, :exists} -> :ok
+        end
     end
+  end
+
+  @doc """
+  Deletes the `deployment_hosts` rows `create/4` would refuse today, from
+  rows written before it checked hosts: loopback names (localhost, ::1,
+  0.0.0.0, 127.0.0.0/8) on any deployment but `local`, a `*.localhost`
+  other than the deployment's own `<name>.localhost`, and every second
+  claim of a host (the one `resolve/1` served, the first by deployment
+  name, stays). Returns how many rows went. The migration that makes hosts
+  unique runs it first, with its own repo.
+  """
+  @spec repair_hosts(module()) :: non_neg_integer()
+  def repair_hosts(repo \\ Repo) do
+    [
+      """
+      DELETE FROM deployment_hosts
+      WHERE deployment <> 'local'
+        AND (host IN ('localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0')
+             OR (host GLOB '127.*' AND host NOT GLOB '*[^0-9.]*'))
+      """,
+      """
+      DELETE FROM deployment_hosts
+      WHERE host LIKE '%.localhost' AND host <> deployment || '.localhost'
+      """,
+      """
+      DELETE FROM deployment_hosts
+      WHERE EXISTS (
+        SELECT 1 FROM deployment_hosts o
+        WHERE o.host = deployment_hosts.host
+          AND (o.deployment < deployment_hosts.deployment
+               OR (o.deployment = deployment_hosts.deployment
+                   AND o.position < deployment_hosts.position)))
+      """
+    ]
+    |> Enum.map(&repo.query!(&1).num_rows)
+    |> Enum.sum()
   end
 
   @doc false
@@ -327,9 +392,21 @@ defmodule Kinoko.Deployment do
   end
 
   # Hosts compare lowercase, without a port and without a trailing dot
-  # (`App.Example.com.:4000` is `app.example.com`).
+  # (`App.Example.com.:4000` is `app.example.com`). A port follows `]` in
+  # a bracketed IPv6 host, or is the only colon: `::1` keeps its colons.
   defp normalize_host(host) do
-    host |> String.downcase() |> String.replace(~r/:\d+$/, "") |> String.trim_trailing(".")
+    host |> String.downcase() |> strip_port() |> String.trim_trailing(".")
+  end
+
+  @doc false
+  # `host` without its `:port`, if it has one (see `normalize_host/1`).
+  def strip_port("[" <> _ = host), do: String.replace(host, ~r/\](:\d+)\z/, "]")
+
+  def strip_port(host) do
+    case String.split(host, ":") do
+      [name, port] -> if port =~ ~r/\A\d+\z/, do: name, else: host
+      _ -> host
+    end
   end
 
   # The deployments `query` selects, each with its hosts in their given order.
