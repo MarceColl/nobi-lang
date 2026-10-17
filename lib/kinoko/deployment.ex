@@ -288,8 +288,9 @@ defmodule Kinoko.Deployment do
   0.0.0.0, 127.0.0.0/8) on any deployment but `local`, a `*.localhost`
   other than the deployment's own `<name>.localhost`, and every second
   claim of a host (the one `resolve/1` served, the first by deployment
-  name, stays). Returns how many rows went. The migration that makes hosts
-  unique runs it first, with its own repo.
+  name, stays). Returns how many rows went. The migration that made hosts
+  unique holds its own copy of this repair (a migration never calls app
+  code), so it means the same whatever this becomes.
   """
   @spec repair_hosts(module()) :: non_neg_integer()
   def repair_hosts(repo \\ Repo) do

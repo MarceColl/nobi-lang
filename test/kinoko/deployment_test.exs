@@ -246,6 +246,32 @@ defmodule Kinoko.DeploymentTest do
       assert {:ok, %{hosts: []}} = Deployment.get(b)
     end
 
+    test "the migration's own repair drops the same bad rows" do
+      [{mod, _}] =
+        Code.require_file("priv/repo/migrations/20261017160000_unique_deployment_hosts.exs")
+        |> Enum.filter(fn {m, _} -> m == Kinoko.Repo.Migrations.UniqueDeploymentHosts end)
+
+      u = fresh_universe()
+      a = "a-#{System.unique_integer([:positive])}"
+      b = "b-#{System.unique_integer([:positive])}"
+      :ok = Deployment.create(a, u, "Main")
+      :ok = Deployment.create(b, u, "Main")
+      Kinoko.Repo.query!("DROP INDEX deployment_hosts_host_index")
+
+      seed_hosts([
+        {a, "localhost", 0},
+        {b, "127.0.0.9", 0},
+        {a, "#{b}.localhost", 1},
+        {b, "dup.example.com", 1},
+        {a, "dup.example.com", 2},
+        {b, "ok.example.com", 2}
+      ])
+
+      assert mod.repair(Kinoko.Repo) == 4
+      assert {:ok, %{hosts: ["dup.example.com"]}} = Deployment.get(a)
+      assert {:ok, %{hosts: ["ok.example.com"]}} = Deployment.get(b)
+    end
+
     test "ensure_local takes localhost back from a deployment that held it" do
       u = fresh_universe()
       x = dname()
