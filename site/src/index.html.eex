@@ -41,7 +41,7 @@
       <div class="card install">
         <div class="install-row">
           <span class="prompt" aria-hidden="true">$</span>
-          <code id="install" class="install-cmd">curl -fsSL <%= @install_url %> | sh</code>
+          <code id="install" class="install-cmd install-wrap">curl -fsSL <%= String.replace(@install_url, "/releases/", "/releases/<wbr>") %> | sh</code>
           <button type="button" class="copy" data-copy="#install" aria-label="Copy the install command">Copy</button>
         </div>
       </div>

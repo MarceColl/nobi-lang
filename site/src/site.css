@@ -225,6 +225,10 @@ figure.card, figure { margin: 0; min-width: 0; }
 .install-row { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 6px 8px 6px 16px; min-width: 0; }
 .prompt { font-family: var(--k-mono); color: var(--k-violet); flex: none; }
 .install-cmd { flex: 1; min-width: 0; overflow-x: auto; white-space: pre; font-size: 14px; color: var(--k-ink); padding-block: 6px; scrollbar-width: thin; }
+/* From 640px the install command wraps (at its <wbr> after /releases/, or a
+   space) so all of it shows; the copied text stays one line. Below, it
+   scrolls inside its frame. */
+@media (min-width: 640px) { .install-wrap { white-space: normal; overflow-x: visible; overflow-wrap: anywhere; line-height: 1.6; } }
 .copy {
   flex: none; height: 32px; padding: 0 14px; border-radius: 6px;
   border: 1px solid var(--k-violet-btn-border); background: var(--k-violet-chip); color: var(--k-violet);
