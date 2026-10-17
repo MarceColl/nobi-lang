@@ -8,7 +8,7 @@ defmodule KinokoWeb.McpTest do
   @g "def A.g() : Int do\n  1\nend"
   @f "def A.f() : Int do\n  A.g()\nend"
 
-  @tool_names ~w(list_universes create_universe stage_patch unstage list_staged read symbols eval test history health list_deployments create_deployment guide)
+  @tool_names ~w(list_universes create_universe stage_patch unstage list_staged read symbols eval test history health list_deployments create_deployment guide send)
 
   # ---------- helpers ----------
 

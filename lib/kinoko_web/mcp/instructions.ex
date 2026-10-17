@@ -156,8 +156,8 @@ defmodule KinokoWeb.Mcp.Instructions do
   declaration form, events and forms, stored data, and the whole stdlib.
 
   Code lives in UNIVERSES (named code databases). Every tool but
-  `list_universes`, `create_universe`, `list_deployments` and `guide` takes an
-  optional `universe` (default "main", which is shared).
+  `list_universes`, `create_universe`, `list_deployments`, `send` and `guide`
+  takes an optional `universe` (default "main", which is shared).
 
   The language is Yabu: defmodel / deftype / def / deftest / defapp / defroutes.
   An app is one Elm-style loop: init() -> (Model, Cmd<Msg>), update(msg, model)
@@ -200,6 +200,8 @@ defmodule KinokoWeb.Mcp.Instructions do
   3. `promoted: ids` is committed. `staged: id` is NOT success: fix each
      `- symbol [code] message` reason and restage THE SAME id.
   4. Prove it: `eval` an expression (`value : type`), `test` a deftest.
+     `send` opens a path on a deployment and sends Msgs: effects RUN FOR
+     REAL (it WRITES that deployment's data) and you see each result.
 
   SERVING YOUR APP
   `defroutes Main` is served at http://localhost:<port>/ by the built-in
@@ -284,6 +286,17 @@ defmodule KinokoWeb.Mcp.Instructions do
     (Cmd.store.*, Cmd.time.now in Unix milliseconds, Cmd.random.int,
     Cmd.navigate); Cmd.blob.*
     and Cmd.ai.* are not available yet.
+  - `send` (deployment, path, messages) runs them for real, as a page would:
+    it opens `path` (its route's app, init with the URL's params), then sends
+    each message, a Yabu expression of that app's Msg type
+    (`Counter.Msg.Add(10)`), to update. Every effect runs, store writes
+    included, ON THAT DEPLOYMENT'S REAL DATA, and callbacks go back into
+    update until nothing is left (at most 50 effects per message, 20
+    messages per send). It
+    answers each effect's result or error, the model after each step, and
+    the final view's text and links. Use it to prove a flow: post a row,
+    see it listed. A Uuid in a message comes from text:
+    `case Uuid.parse("<uuid>") do Option.Some(id) -> App.Msg.Open(id) Option.None -> App.Msg.Noop end`.
 
   STORED DATA (Cmd.store.*): the Model is session state and is gone on reload;
   durable rows go to the store. Each DEPLOYMENT has its own data (staging and

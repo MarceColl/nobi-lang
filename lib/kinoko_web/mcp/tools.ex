@@ -3,8 +3,10 @@ defmodule KinokoWeb.Mcp.Tools do
   The MCP tools: each maps its arguments onto one `Kinoko.Universe`
   function and answers agent-readable text.
 
-  Every tool but `guide`, `list_universes`, `create_universe` and
-  `list_deployments` takes an optional `universe` (default `"main"`). `create_deployment` takes
+  Every tool but `guide`, `list_universes`, `create_universe`,
+  `list_deployments` and `send` takes an optional `universe` (default
+  `"main"`); `send` names a deployment, which names its universe and runs
+  the app through `Kinoko.Deployment.Runner` (its effects really run). `create_deployment` takes
   one too: a deployment serves one universe, and like every other tool it
   acts on main unless told otherwise. `list_deployments` lists them all,
   whatever universe each serves. The deployment tools go through
@@ -20,6 +22,7 @@ defmodule KinokoWeb.Mcp.Tools do
   """
 
   alias Kinoko.{Deployment, Exec, Universe}
+  alias Kinoko.Deployment.Runner
   alias Kinoko.Lang.Format
 
   @default_universe "main"
@@ -106,10 +109,32 @@ defmodule KinokoWeb.Mcp.Tools do
          items: %{type: "string"},
          description: "Extra host names that reach it (optional; <name>.localhost needs none)."
        }
-     }, ["name", "routes"]}
+     }, ["name", "routes"]},
+    {"send",
+     "Run a deployed app for real and report what happened. Opens `path` on the deployment " <>
+       "the way a page load does (its route's app, init with the URL's params), then sends " <>
+       "each message to update. EFFECTS REALLY RUN: Cmd.store.* WRITES THE DEPLOYMENT'S REAL " <>
+       "DATA (rows stay, as if a user did it), time and random are real, callbacks go back " <>
+       "into update until nothing is left. Answers, per step, each effect with its result " <>
+       "or error and the model after it, then the final model and the view's text and " <>
+       "links. Use it to prove a flow works (post a row, read it back with list).",
+     %{
+       deployment: %{type: "string", description: "The deployment's name (list_deployments)."},
+       path: %{
+         type: "string",
+         description: "The URL path to open, e.g. / or /post/<uuid>, as a browser would."
+       },
+       messages: %{
+         type: "array",
+         items: %{type: "string"},
+         description:
+           "Yabu expressions, each of the opened app's Msg type, sent in order " <>
+             "(e.g. Forum.Msg.Title(\"Hi\")), at most 20. Empty or absent: init only."
+       }
+     }, ["deployment", "path"]}
   ]
 
-  @no_universe ["guide", "list_universes", "create_universe", "list_deployments"]
+  @no_universe ["guide", "list_universes", "create_universe", "list_deployments", "send"]
 
   @doc "Every tool, as `tools/list` gives it."
   @spec list() :: [map()]
@@ -313,6 +338,17 @@ defmodule KinokoWeb.Mcp.Tools do
     end
   end
 
+  defp run("send", args) do
+    with {:ok, name} <- string(args, "deployment"),
+         {:ok, path} <- string(args, "path"),
+         {:ok, messages} <- strings(args, "messages") do
+      case Runner.run(name, path, messages) do
+        {:ok, report} -> send_text(report)
+        {:error, message} -> {:error, "error: " <> message}
+      end
+    end
+  end
+
   ## Deployments
 
   # The route table must be committed in the universe: a deployment of a
@@ -417,6 +453,118 @@ defmodule KinokoWeb.Mcp.Tools do
       _ -> URI.parse(KinokoWeb.Endpoint.url()).port
     end
   end
+
+  ## send
+
+  @value_max 300
+  @model_max 1_500
+  @view_max 800
+  @links_max 12
+  @effects_shown 20
+  @reply_max 20_000
+
+  # The run, step by step. An error anywhere (an effect, an update, the
+  # cap, the view) makes the answer an error; the trace is kept.
+  defp send_text(report) do
+    args =
+      if report.args == [],
+        do: "",
+        else: "(#{Enum.map_join(report.args, ", ", &Runner.show(&1, 60))})"
+
+    head =
+      "send: #{report.deployment} #{report.path} -> #{report.app}#{args}. Effects ran for " <>
+        "real: store writes are in #{report.deployment}'s data."
+
+    steps = report.steps |> Enum.map(&step_text/1) |> Enum.join("\n\n")
+    {view, view_error} = view_text(report)
+    tail = Enum.join(["final model: " <> Runner.show(report.model, @model_max) | view], "\n\n")
+
+    text =
+      Enum.join([head, cut_steps(steps, @reply_max - String.length(head <> tail)), tail], "\n\n")
+
+    failed? =
+      view_error or
+        Enum.any?(report.steps, fn st -> st.error != nil or Enum.any?(st.effects, & &1.error) end)
+
+    if failed?, do: {:error, text}, else: {:ok, text}
+  end
+
+  defp failures(entries), do: Enum.count(entries, & &1.error)
+
+  # The whole answer stays under @reply_max characters: the steps are cut
+  # (saying so), never the final model and view.
+  defp cut_steps(steps, room) do
+    room = max(room, 1_000)
+
+    if String.length(steps) > room,
+      do:
+        String.slice(steps, 0, room) <>
+          "\n… steps cut at #{@reply_max} characters in all: send fewer messages at a " <>
+          "time to see every step.",
+      else: steps
+  end
+
+  defp step_text(step) do
+    label = if step.msg == :init, do: "[init]", else: "[send] #{step.msg}"
+
+    effects =
+      case step.effects do
+        [] -> ["  no effects"]
+        entries -> entries |> Enum.take(@effects_shown) |> Enum.map(&("  " <> effect_text(&1)))
+      end
+
+    hidden = length(step.effects) - @effects_shown
+
+    effects =
+      if hidden > 0,
+        do: effects ++ ["  … #{hidden} more effects (#{failures(step.effects)} failed in all)"],
+        else: effects
+
+    error = if step.error, do: ["  ERROR: " <> step.error], else: []
+    model = ["  model: " <> Runner.show(step.model, @model_max)]
+    Enum.join([label | effects] ++ error ++ model, "\n")
+  end
+
+  defp effect_text(%{error: error} = e) when is_binary(error),
+    do: "#{e.effect} -> ERROR: #{error}"
+
+  defp effect_text(%{note: note} = e) when is_binary(note),
+    do: "#{e.effect} -> #{e.value} (#{note})"
+
+  defp effect_text(e) do
+    msg = if e.msg == nil, do: "", else: " => " <> Runner.show(e.msg, @value_max)
+    "#{e.effect} -> #{Runner.show(e.value, @value_max)}#{msg}"
+  end
+
+  defp view_text(%{view: {:ok, html}, entries: entries}) do
+    {tree, _handlers} = KinokoWeb.YabuHtml.prepare(html, 0, entries)
+    text = KinokoWeb.YabuHtml.plain_text(tree)
+
+    text =
+      if String.length(text) > @view_max, do: String.slice(text, 0, @view_max) <> "…", else: text
+
+    links =
+      case KinokoWeb.YabuHtml.links(tree) do
+        [] ->
+          []
+
+        links ->
+          shown =
+            links
+            |> Enum.take(@links_max)
+            |> Enum.map_join(", ", fn {href, t} -> "#{href} (#{String.slice(t, 0, 40)})" end)
+
+          more =
+            if length(links) > @links_max, do: ", … #{length(links) - @links_max} more", else: ""
+
+          ["view links: " <> shown <> more]
+      end
+
+    {["view text: " <> text | links], false}
+  end
+
+  defp view_text(%{view: {:error, why}}), do: {["view: ERROR: " <> why], true}
+  defp view_text(_report), do: {[], false}
 
   ## Text
 

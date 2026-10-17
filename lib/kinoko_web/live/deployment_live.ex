@@ -61,6 +61,10 @@ defmodule KinokoWeb.DeploymentLive do
 
   ## Effects
 
+  A cmd is read by `Kinoko.Deployment.Effects`, the interpreter the MCP
+  `send` tool (`Kinoko.Deployment.Runner`) shares, and each effect is
+  lowered to a LiveView effect:
+
     * `Cmd.none`, `Cmd.batch`: performed here.
     * `Cmd.time.now(cb)` and `Cmd.random.int(lo, hi, cb)`:
       `Kinoko.Elm.Effect.now/1` / `random/2`, whose task applies `cb`
@@ -126,7 +130,8 @@ defmodule KinokoWeb.DeploymentLive do
 
   require Logger
 
-  alias Kinoko.{Data, Deployment, Universe}
+  alias Kinoko.{Deployment, Universe}
+  alias Kinoko.Deployment.Effects
   alias Kinoko.Elm.Effect, as: Fx
   alias Kinoko.Lang.Routes
   alias KinokoWeb.YabuHtml
@@ -153,11 +158,6 @@ defmodule KinokoWeb.DeploymentLive do
   # Error codes whose message is meant for the app's author.
   @shown_codes ~w(runtime timeout heap degraded unavailable unloaded no_such_commit host) ++
                  ~w(store too-many-rows not-found)
-
-  @store_ops ~w(insert list get update delete tx)
-  @store_writes ~w(insert update delete tx)
-
-  @none {:var, "Option", "None", []}
 
   # What a step reads.
   @ctx_keys [:name, :path, :deployment, :target, :entries, :subscribed?, :page, :render] ++
@@ -412,34 +412,35 @@ defmodule KinokoWeb.DeploymentLive do
 
   ## Effects (pure)
 
-  # `origin` is the code the cmd came from (the step's image, else its
-  # target): store effects read their models' signatures from it.
-  defp lower(m, {:cmd, cmd}, origin), do: lower_bare(m, cmd, origin)
+  # The cmd's effects (`Kinoko.Deployment.Effects`, the interpreter the
+  # headless runner shares), each lowered to the LiveView effect that
+  # performs it. `origin` is the code the cmd came from (the step's image,
+  # else its target): store effects read their models' signatures from it.
+  defp lower(m, cmd, origin) do
+    case Effects.flatten(cmd) do
+      {:ok, effects} ->
+        {fx, m} =
+          Enum.map_reduce(effects, m, fn effect, m ->
+            m |> lower_effect(effect, origin) |> swap()
+          end)
 
-  defp lower(m, _other, _origin),
-    do: {fail(m, "#{m.app} returned a command that is not a Cmd"), Fx.none()}
+        {m, Fx.batch(fx)}
 
-  defp lower_bare(m, :none, _origin), do: {m, Fx.none()}
-
-  defp lower_bare(m, {:batch, cmds}, origin) when is_list(cmds) do
-    {fx, m} = Enum.map_reduce(cmds, m, fn cmd, m -> m |> lower_bare(cmd, origin) |> swap() end)
-    {m, Fx.batch(fx)}
+      :error ->
+        {fail(m, "#{m.app} returned a command that is not a Cmd"), Fx.none()}
+    end
   end
 
-  defp lower_bare(m, {:effect, "Cmd.time.now", _, [cb]}, _origin) do
+  defp lower_effect(m, {:now, cb}, _origin) do
     reply = callback(m, cb)
     {m, Fx.now(&reply.(DateTime.to_unix(&1, :millisecond)))}
   end
 
-  defp lower_bare(m, {:effect, "Cmd.random.int", _, [lo, hi, cb]}, _origin)
-       when is_integer(lo) and is_integer(hi) and lo <= hi,
-       do: {m, Fx.random(lo..hi//1, callback(m, cb))}
+  defp lower_effect(m, {:random, lo, hi, cb}, _origin),
+    do: {m, Fx.random(lo..hi//1, callback(m, cb))}
 
-  defp lower_bare(m, {:effect, "Cmd.random.int", _, _}, _origin),
-    do: {fail(m, "Cmd.random.int needs lo ≤ hi"), Fx.none()}
-
-  defp lower_bare(m, {:effect, "Cmd.navigate", _, [app | args]}, _origin) when is_binary(app) do
-    case navigate_path(m.entries, app, args) do
+  defp lower_effect(m, {:navigate, app, args}, _origin) do
+    case Effects.path(m.entries, app, args) do
       {:ok, path} ->
         {m, Fx.patch(path)}
 
@@ -449,44 +450,34 @@ defmodule KinokoWeb.DeploymentLive do
     end
   end
 
-  defp lower_bare(m, {:effect, "Cmd.store." <> op = name, model, args}, origin)
-       when op in @store_ops do
+  defp lower_effect(m, {:store, op, _model, _args} = effect, origin) do
     cond do
-      model == nil and op != "tx" ->
-        {fail(m, "#{name}: the stored model it works on never settled, so nothing was run"),
-         Fx.none()}
-
       m.deployment == nil ->
-        {fail(m, "#{name} needs a deployment to store into"), Fx.none()}
+        {fail(m, "Cmd.store.#{op} needs a deployment to store into"), Fx.none()}
 
-      op in @store_writes and not m.connected? ->
+      op in Effects.writes() and not m.connected? ->
         {m, Fx.none()}
 
       true ->
         gen = m.gen
 
         {%{m | storing: m.storing + 1},
-         Fx.task(store(m, origin, op, model, args), fn
+         Fx.task(store(m, origin, effect), fn
            {:ok, msg} -> msg
-           {:error, crash} -> {:stored, gen, {:error, {:store_crashed, name, crash}}}
+           {:error, crash} -> {:stored, gen, {:error, {:store_crashed, "Cmd.store.#{op}", crash}}}
          end)}
     end
   end
 
-  defp lower_bare(m, {:effect, name, _, _}, _origin) when is_binary(name),
+  defp lower_effect(m, {:unavailable, name}, _origin),
     do: {%{m | notice: "#{name} is not available yet"}, Fx.none()}
 
-  defp lower_bare(m, _other, _origin),
+  defp lower_effect(m, {:error, :unknown}, _origin),
     do: {fail(m, "#{m.app} returned an unknown command"), Fx.none()}
 
-  defp swap({a, b}), do: {b, a}
+  defp lower_effect(m, {:error, message}, _origin), do: {fail(m, message), Fx.none()}
 
-  # `Routes.path/3` raises when the args do not fit the route's params.
-  defp navigate_path(entries, app, args) do
-    Routes.path(entries, app, args)
-  rescue
-    ArgumentError -> :error
-  end
+  defp swap({a, b}), do: {b, a}
 
   # The effect's `to_msg`, run in its task. It closes over the target, the
   # mount and the callback only: they are bound here, so the closure never
@@ -496,74 +487,26 @@ defmodule KinokoWeb.DeploymentLive do
 
   ## Store effects (run in their task)
 
-  # The effect's task: the deployment's data file, the models table of the
-  # code that issued it, the operation, then the callback applied through
-  # `Universe.apply/4`. Its msg is a callback result like any effect's, so
-  # it waits its turn in the queue and is dropped for a replaced mount. A
-  # failed operation delivers `{:error, e}` (the banner) and no msg, except
-  # `tx`, whose callback receives `Result.Err(message)`. Like `callback/2`,
-  # it closes over the deployment's name, the target, the mount and the
-  # effect only, never the model.
-  defp store(%{deployment: %{name: name}, target: target, gen: gen}, origin, op, model, args) do
+  # The effect's task: the operation (`Effects.run_store/5`, on the
+  # deployment's data file with the models of the code that issued it),
+  # then the callback applied through `Universe.apply/4`. Its msg is a
+  # callback result like any effect's, so it waits its turn in the queue
+  # and is dropped for a replaced mount. A failed operation delivers
+  # `{:error, e}` (the banner) and no msg, except `tx`, whose callback
+  # receives `Result.Err(message)`. Like `callback/2`, it closes over the
+  # deployment's name, the target, the mount and the effect only, never
+  # the model.
+  defp store(%{deployment: %{name: name}, target: target, gen: gen}, origin, effect) do
+    {:store, op, model, args} = effect
+
     fn ->
       result =
-        with {:ok, repo} <- open_data(name),
-             {:ok, image} <- Universe.image(origin || target),
-             {:ok, models} <- models(image),
-             {:ok, value, cb} <- store_op(op, repo, image, model, models, args) do
-          Universe.apply(target, cb, [value], [])
-        end
+        with {:ok, value, cb} <- Effects.run_store(name, origin || target, op, model, args),
+             do: Universe.apply(target, cb, [value], [])
 
       {:stored, gen, result}
     end
   end
-
-  defp open_data(name) do
-    case Data.open(name) do
-      {:ok, repo} ->
-        {:ok, repo}
-
-      {:error, reason} ->
-        Logger.error("DeploymentLive: cannot open the data of #{name}: #{inspect(reason)}")
-        {:error, %{code: "unavailable", message: "this deployment's data cannot be opened"}}
-    end
-  end
-
-  # What the store types rows by: the image's models and deftypes.
-  defp models(image) do
-    {:ok, %{models: image.module.__yabu__(:models), types: image.module.__yabu__(:types)}}
-  rescue
-    UndefinedFunctionError ->
-      {:error, %{code: "unloaded", message: "the code this effect came from was unloaded"}}
-  end
-
-  defp store_op("insert", repo, _image, model, models, [row, cb]),
-    do: with({:ok, id} <- Data.insert(repo, model, models, row), do: {:ok, id, cb})
-
-  defp store_op("list", repo, _image, model, models, [cb]),
-    do: with({:ok, rows} <- Data.list(repo, model, models), do: {:ok, rows, cb})
-
-  defp store_op("get", repo, _image, model, models, [id, cb]),
-    do: with({:ok, row} <- Data.get(repo, model, models, id), do: {:ok, option(row), cb})
-
-  defp store_op("update", repo, _image, model, models, [id, row, cb]),
-    do: with({:ok, id} <- Data.update(repo, model, models, id, row), do: {:ok, id, cb})
-
-  defp store_op("delete", repo, _image, model, models, [id, cb]),
-    do: with({:ok, row} <- Data.delete(repo, model, models, id), do: {:ok, option(row), cb})
-
-  defp store_op("tx", repo, image, _model, _models, [body, cb]) do
-    case Data.Tx.run(repo, image, body) do
-      {:ok, {ids, r}} -> {:ok, {:var, "Result", "Ok", [{ids, r}]}, cb}
-      {:error, message} -> {:ok, {:var, "Result", "Err", [message]}, cb}
-    end
-  end
-
-  defp store_op(op, _repo, _image, _model, _models, _args),
-    do: {:error, "Cmd.store.#{op} got arguments of the wrong shape"}
-
-  defp option(nil), do: @none
-  defp option(row), do: {:var, "Option", "Some", [row]}
 
   ## Steps (run off-process; each returns the fields that change)
 

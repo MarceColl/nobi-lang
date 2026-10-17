@@ -309,6 +309,39 @@ defmodule KinokoWeb.YabuHtml do
     end
   end
 
+  # ---------- reading ----------
+
+  @doc "A prepared tree's text, whitespace collapsed: what a reader sees."
+  @spec plain_text(tuple | nil) :: String.t()
+  def plain_text(tree) do
+    tree
+    |> texts([])
+    |> Enum.reverse()
+    |> Enum.join(" ")
+    |> String.split()
+    |> Enum.join(" ")
+  end
+
+  defp texts({:text, s}, acc), do: [s | acc]
+  defp texts({:change, el}, acc), do: texts(el, acc)
+  defp texts({:el, _tag, _attrs, kids}, acc), do: Enum.reduce(kids, acc, &texts/2)
+  defp texts(_other, acc), do: acc
+
+  @doc "A prepared tree's links: each `<a>`'s href and text, in order."
+  @spec links(tuple | nil) :: [{String.t(), String.t()}]
+  def links(tree), do: tree |> anchors([]) |> Enum.reverse()
+
+  defp anchors({:el, "a", attrs, _kids} = el, acc) do
+    case List.keyfind(attrs, "href", 0) do
+      {"href", href} when is_binary(href) -> [{href, plain_text(el)} | acc]
+      _ -> acc
+    end
+  end
+
+  defp anchors({:change, el}, acc), do: anchors(el, acc)
+  defp anchors({:el, _tag, _attrs, kids}, acc), do: Enum.reduce(kids, acc, &anchors/2)
+  defp anchors(_other, acc), do: acc
+
   # ---------- rendering ----------
 
   attr :tree, :any, required: true, doc: "the tree from `prepare/1`"
