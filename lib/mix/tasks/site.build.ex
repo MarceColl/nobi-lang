@@ -25,8 +25,10 @@ defmodule Mix.Tasks.Site.Build do
   @site "site"
   @fonts "priv/static/fonts"
 
-  # The GitHub repository the page links to and installs from. install.sh has
-  # none configured yet (KINOKO_REPO=OWNER/kinoko): set both before publishing.
+  # The GitHub repository the page links to and installs from: set it before
+  # publishing. The install line fetches install.sh from the latest release,
+  # where the release workflow has stamped this repository into it (the copy
+  # on the main branch keeps the OWNER/kinoko default and refuses to run).
   @repo "OWNER/kinoko"
 
   # Keywords the console colours at the start of a line (and a trailing `do`).
@@ -68,7 +70,7 @@ defmodule Mix.Tasks.Site.Build do
     EEx.eval_file(Path.join([site, "src", "index.html.eex"]),
       assigns: [
         version: Mix.Project.config()[:version],
-        install_url: "https://raw.githubusercontent.com/#{@repo}/main/install.sh",
+        install_url: install_url(),
         source_url: "https://github.com/#{@repo}",
         releases_url: "https://github.com/#{@repo}/releases",
         glossary_url: "https://github.com/#{@repo}/blob/main/docs/GLOSSARY.md",
@@ -84,6 +86,10 @@ defmodule Mix.Tasks.Site.Build do
       ]
     )
   end
+
+  @doc "The install script's URL: the latest release's stamped `install.sh`."
+  @spec install_url() :: String.t()
+  def install_url, do: "https://github.com/#{@repo}/releases/latest/download/install.sh"
 
   defp read(site, parts),
     do: [site | parts] |> Path.join() |> File.read!() |> String.trim_trailing()

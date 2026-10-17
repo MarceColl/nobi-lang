@@ -34,6 +34,14 @@ defmodule Kinoko.Site.BuildTest do
     end
 
     assert html =~ ~s(data-copy="#install")
+
+    # The release asset, which the release workflow stamps with the
+    # repository; main's install.sh refuses to run.
+    assert Build.install_url() =~
+             ~r{^https://github\.com/[^/]+/[^/]+/releases/latest/download/install\.sh$}
+
+    assert html =~ "curl -fsSL #{Build.install_url()} | bash"
+    refute html =~ "raw.githubusercontent.com"
     assert html =~ Mix.Project.config()[:version]
   end
 
@@ -43,7 +51,7 @@ defmodule Kinoko.Site.BuildTest do
     for [_, url] <- Regex.scan(~r/(?:src|href)="([^"]+)"/, html),
         not String.starts_with?(url, ["#", "data:"]) do
       assert url =~ ~r/^[a-z0-9.\/-]+$/ or
-               url =~ ~r{^https://(github\.com|raw\.githubusercontent\.com)/},
+               url =~ ~r{^https://github\.com/},
              "unexpected reference #{url}"
     end
 

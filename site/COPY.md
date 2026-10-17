@@ -10,8 +10,9 @@ Every sentence on the page (`site/src/index.html.eex`), with the feature that ba
 | Hero | It is promoted only when the whole program still typechecks; otherwise you get the exact reasons. | `stage_patch` description and `staged_text/2` in `lib/kinoko_web/mcp/tools.ex`; `site/samples/verdicts/mistake.txt` |
 | Hero | arm64 and x86_64. | `dist/kinoko-{macos,linux}-{arm64,x86_64}`; platform detection in `install.sh` |
 | Hero | `kinoko` creates its database, serves on localhost:4000 and opens the console. | `Kinoko.CLI` usage (`start`: create and migrate, start, open the console) and `port/1` (default 4000), `lib/kinoko/cli.ex` |
+| Hero | Install line: `curl -fsSL https://github.com/<repo>/releases/latest/download/install.sh \| bash`. | `Mix.Tasks.Site.Build.install_url/0` (`@repo`); `.github/workflows/release.yml` stamps the repository into the release's `install.sh` (main's copy keeps `OWNER/kinoko` and refuses to run); `test/site/site_build_test.exs` |
 | Hero | Badges: version, macOS · Linux. | `mix.exs` `@version`; `install.sh` supported OSes |
-| See it run | One session with the release binary, from install to an agent's first patch. | `site/samples/session.txt`, recorded from `dist/kinoko-macos-arm64` (see the task 2 report) |
+| See it run | One session with the release binary, from install to a first patch over MCP. | `site/samples/session.txt`, recorded from `dist/kinoko-macos-arm64` (see the task 2 report) |
 | See it run | The patch is the counter from the next section, sent to the MCP endpoint as a `tools/call`. | `stage.json` in the recording: `site/samples/counter.yabu` as `tools/call stage_patch` |
 | See it run | Kinoko answers in one line, and an `eval` shows the decrement stopping at zero. | `session.txt` last two commands (`promoted: counter`; `Counter.update(Counter.Msg.Decrement, %Counter.Model{count: 0})` gives `count: 0`) |
 | See it run | Recorded from `kinoko-macos-arm64`. | the recording |
@@ -27,9 +28,9 @@ Every sentence on the page (`site/src/index.html.eex`), with the feature that ba
 | Elm architecture | Yabu has no comments; the notes on this page are ours. | `Kinoko.Lang.Parser.program("# hi ...")` is `{:error, %{code: "parse", message: "unexpected character '#'"}}` (probe, 2026-10-17); `lib/kinoko/lang/lexer.ex` |
 | Elm architecture | A product is several small apps over shared stores, not one app with a router inside. | `KinokoWeb.Mcp.Instructions`; `test/fixtures/yabu/forum.yabu` (Threads, Post, Settings apps) |
 | Elm architecture | `defroutes` maps URL paths to apps, and `Cmd.navigate` moves between them. | `KinokoWeb.Mcp.Instructions` (defroutes, Cmd.navigate); `forum.yabu` |
-| Elm architecture | Recreated on this page with the classes from `Counter.view`. | the figure's markup copies the classes of `counter.yabu` lines 27-30 |
+| Elm architecture | Recreated on this page with the classes from `Counter.view`. | the figure's markup copies the classes of `counter.yabu` lines 31-38 |
 | Code is a database | Kinoko stores each declaration on its own, addressed by its content. | `docs/GLOSSARY.md` (Declaration, CID); `Kinoko.Universe.symbols/1` returns a CID per symbol |
-| Code is a database | A declaration's CID is the sha256 of its canonical text, so reformatting it changes nothing, and the same declaration always has the same CID. | `docs/GLOSSARY.md` (Canonical text: "whitespace never changes it"; CID); `lib/kinoko/lang/cid.ex` (`sha256("yabu/1\n" <> canonical text)`) |
+| Code is a database | A declaration's CID is the sha256 of its versioned canonical text, so reformatting it changes nothing, and the same declaration always has the same CID. | `docs/GLOSSARY.md` (Canonical text: "whitespace never changes it"; CID); `lib/kinoko/lang/cid.ex` (`sha256("yabu/1\n" <> canonical text)`) |
 | Code is a database | You change code by staging a patch. | `stage_patch`, `lib/kinoko_web/mcp/tools.ex` |
 | Code is a database | If the whole committed program still typechecks, the patch is promoted. | `stage_patch` description |
 | Code is a database | If it does not, the patch stays staged, changes nothing, and carries one reason per problem. | `stage_patch` ("stays staged (inert)"); `reason_lines/1` |
@@ -43,7 +44,7 @@ Every sentence on the page (`site/src/index.html.eex`), with the feature that ba
 | Persists | A model that declares `id : Uuid` is stored, and the store mints the id, so you never write it. | `KinokoWeb.Mcp.Instructions` ("A STORED model is a defmodel with `id : Uuid` ... Never write `id`"); `Kinoko.Data.insert/4` mints a v4 Uuid |
 | Persists | `update` returns effects as data. The runtime runs them and sends the result back as a message. | `KinokoWeb.Mcp.Instructions` ("Cmd values (effects) are data ... A deployment serving the app runs them"); `lib/kinoko/elm_genserver.ex` |
 | Persists | Models grow by adding fields. | `KinokoWeb.Mcp.Instructions` (evolution); `samples_test.exs` (store over store_v1 promotes) |
-| Persists | A new field needs a default, which rows stored before it read back as; a new field without one is refused. | `test/kinoko/data_test.exs` "rows written under v1 read under v2 with defaults"; `samples_test.exs` "a new field without a default is refused" (`model-evolution`) |
+| Persists | A new field needs a default (or is an `Option`), which rows stored before it read back as; a new field without one is refused. | `test/kinoko/data_test.exs` "rows written under v1 read under v2 with defaults", "Option round-trips; NULL is None for an Option"; `KinokoWeb.Mcp.Instructions` ("An Option<T> field takes no default (absent reads as Option.None)"); `samples_test.exs` "a new field without a default is refused" (`model-evolution`) |
 | Persists | Construction still lists every field. | `KinokoWeb.Mcp.Instructions`; `store.yabu` writes `replies: 0` |
 | Persists | Each open page runs its app's loop in its own Erlang process, served by Phoenix LiveView. | `KinokoWeb.DeploymentLive` (one LiveView process per connection, "one model per connection") |
 | Persists | The code and every app's rows are SQLite files in one data directory. | `AGENTS.md` (Database); `Kinoko.Data` ("one SQLite file per deployment at `<data dir>/data/<deployment>.db`") |

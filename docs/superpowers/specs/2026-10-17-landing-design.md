@@ -35,10 +35,10 @@ The structure comes from `docs/design/kinoko-marketing/LANGUAGE-SITES-RESEARCH.m
    - `Cmd.store`;
    - add-only evolution (`replies : Int = 0`);
    - one SQLite file per deployment, with no setup.
-7. **Agents drive it.** The MCP loop: look → stage → read the verdict → prove (`simulate`/`eval`/`store_query`), with `claude mcp add …`.
-8. **Get started.** The install block again, then links to the source, releases and the guide (the MCP guides).
+7. **Agents drive it.** The MCP loop: look → stage → read the verdict → prove (`eval`/`test`, the tools this server has; see `lib/kinoko_web/mcp/tools.ex`), with `claude mcp add …`.
+8. **Get started.** The install block again, then links to the source, releases and the guide. Until guides exist, the guide link points to `docs/GLOSSARY.md`.
 
-The footer has the licence, source and releases.
+The footer has the source and releases. The licence line waits on a LICENSE file in the repository; until then the footer names only the fonts' licence (OFL).
 
 ## Constraints
 
