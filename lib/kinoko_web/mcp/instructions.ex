@@ -258,6 +258,8 @@ defmodule KinokoWeb.Mcp.Instructions do
     type (list, get, delete), so pass a Msg constructor
     (`Cmd.store.list(Counter.Msg.Loaded)` with `Loaded(List<Counter.Snapshot>)`).
     A failed operation shows the page's error banner and sends no msg.
+    A page's first HTML runs init's reads, never its writes: what init
+    writes shows once the page connects.
   - Read-modify-write is a TRANSACTION closure, run atomically (concurrent
     ones never lose an update):
       Cmd.store.tx(fn (s : Store) -> (List<Tx.Op>, r) end,

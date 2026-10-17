@@ -81,7 +81,13 @@ defmodule KinokoWeb.DeploymentLive do
       (`nil`, from a lone expression) is refused with a banner. While a
       store task runs the page is busy too (progress bar, `aria-busy`):
       its answer arrives as `{:stored, gen, result}`, which ends the wait
-      even for a replaced mount, then queues as a callback.
+      even for a replaced mount, then queues as a callback. A write
+      (`insert`, `update`, `delete`, `tx`) runs only in the connected
+      mount: the static render runs the mount's reads, `time.now` and
+      `random.int` inline (`inline_mount`), so its HTML already holds them,
+      but skips its writes, which the connected mount then runs once. So
+      the first HTML never reflects init's own writes (nor what a callback
+      of one would do): those appear once the page connects.
     * Anything else (`Cmd.blob.*`, `Cmd.ai.*`): a notice, "`<effect>` is
       not available yet".
 
@@ -149,6 +155,7 @@ defmodule KinokoWeb.DeploymentLive do
                  ~w(store too-many-rows not-found)
 
   @store_ops ~w(insert list get update delete tx)
+  @store_writes ~w(insert update delete tx)
 
   @none {:var, "Option", "None", []}
 
@@ -165,6 +172,9 @@ defmodule KinokoWeb.DeploymentLive do
        page: :loading,
        # From the signed session (`KinokoWeb.DeploymentStatus.session/1`).
        name: string_or_nil(session["deployment"]),
+       # True only in the connected mount (`KinokoWeb.ElmLiveView` says so):
+       # store writes wait for it, and a session that does not say is not.
+       connected?: session["elm_connected?"] == true,
        host: string_or_nil(session["host"]),
        path: "/",
        deployment: nil,
@@ -448,6 +458,9 @@ defmodule KinokoWeb.DeploymentLive do
 
       m.deployment == nil ->
         {fail(m, "#{name} needs a deployment to store into"), Fx.none()}
+
+      op in @store_writes and not m.connected? ->
+        {m, Fx.none()}
 
       true ->
         gen = m.gen

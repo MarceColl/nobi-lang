@@ -34,6 +34,9 @@ defmodule KinokoWeb.ElmLiveView do
   LiveView mounts twice: a disconnected render, then the connected process.
   `init/2` runs both times, but only the connected mount performs process
   effects (http, timers, ...); host effects like `navigate` apply to both.
+  `init/2`'s session carries `"elm_connected?"`, which mount this is (set
+  here, never by the client), for a view whose inline effects must not run
+  twice.
 
   ## Options
 
@@ -121,7 +124,7 @@ defmodule KinokoWeb.ElmLiveView do
       Runtime.init(
         module,
         {:init, params},
-        fn -> module.init(params, session) end,
+        fn -> module.init(params, Map.put(session, "elm_connected?", connected?(socket))) end,
         [
           perform: connected?(socket),
           inline: if(inline?, do: @inline_budget, else: 0)
