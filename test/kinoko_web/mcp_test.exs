@@ -8,7 +8,7 @@ defmodule KinokoWeb.McpTest do
   @g "def A.g() : Int do\n  1\nend"
   @f "def A.f() : Int do\n  A.g()\nend"
 
-  @tool_names ~w(list_universes create_universe stage_patch unstage list_staged read symbols eval test history health)
+  @tool_names ~w(list_universes create_universe stage_patch unstage list_staged read symbols eval test history health list_deployments create_deployment)
 
   # ---------- helpers ----------
 
@@ -345,7 +345,8 @@ defmodule KinokoWeb.McpTest do
             {"eval", %{"expression" => "1"}},
             {"test", %{"symbol" => "A.t"}},
             {"history", %{}},
-            {"health", %{}}
+            {"health", %{}},
+            {"create_deployment", %{"name" => "d", "routes" => "Main"}}
           ] do
         assert err!(conn, tool, Map.put(args, "universe", nope)) =~ "no such universe: #{nope}"
         assert err!(conn, tool, Map.put(args, "universe", "Not A Name")) =~ "bad universe name"
@@ -516,6 +517,106 @@ defmodule KinokoWeb.McpTest do
       assert ok!(conn, "health", %{"universe" => u}) =~ "is healthy"
       refute ok!(conn, "list_universes", %{}) =~ "DEGRADED"
       assert ok!(conn, "eval", %{"universe" => u, "expression" => "A.f()"}) == "1 : Int"
+    end
+  end
+
+  describe "deployments" do
+    @describetag :tmp_dir
+    setup %{tmp_dir: dir}, do: isolated_data(dir)
+
+    # `u` with the instructions' example promoted (route table `Main`).
+    defp with_example(conn, u) do
+      example = KinokoWeb.Mcp.Instructions.example()
+
+      "promoted: ex" =
+        ok!(conn, "stage_patch", %{"universe" => u, "id" => "ex", "source" => example})
+
+      u
+    end
+
+    defp port, do: KinokoWeb.Endpoint.config(:http)[:port]
+
+    test "create_deployment serves the route table at <name>.localhost", %{conn: conn, u: u} do
+      with_example(conn, u)
+
+      text =
+        ok!(conn, "create_deployment", %{"name" => u, "routes" => "Main", "universe" => u})
+
+      assert text =~ "http://#{u}.localhost:#{port()}/"
+
+      assert {:ok, %{name: ^u, universe: ^u, routes: "Main", commit: nil}} =
+               Kinoko.Deployment.resolve("#{u}.localhost")
+
+      html = %{build_conn() | host: "#{u}.localhost"} |> get("/") |> html_response(200)
+      assert html =~ "clicks: 0"
+    end
+
+    test "create_deployment takes extra hosts and defaults to main", %{conn: conn} do
+      stop_on_exit("main")
+      with_example(conn, "main")
+      name = "d-#{System.unique_integer([:positive])}"
+
+      text =
+        ok!(conn, "create_deployment", %{
+          "name" => name,
+          "routes" => "Main",
+          "hosts" => ["forum.example.test"]
+        })
+
+      assert text =~ "http://#{name}.localhost:#{port()}/"
+      assert text =~ "http://forum.example.test:#{port()}/"
+
+      assert {:ok, %{name: ^name, universe: "main"}} =
+               Kinoko.Deployment.resolve("forum.example.test")
+    end
+
+    test "create_deployment errors are plain and actionable", %{conn: conn, u: u} do
+      with_example(conn, u)
+      args = %{"name" => u, "routes" => "Main", "universe" => u}
+      ok!(conn, "create_deployment", args)
+
+      assert err!(conn, "create_deployment", args) =~ "deployment #{u} already exists"
+
+      assert err!(conn, "create_deployment", %{args | "name" => "Bad Name"}) =~
+               "bad deployment name: \"Bad Name\""
+
+      assert err!(conn, "create_deployment", %{args | "name" => "x2", "universe" => "nope-zz"}) =~
+               "no such universe: nope-zz"
+
+      text = err!(conn, "create_deployment", %{args | "name" => "x3", "routes" => "Forum.Routes"})
+      assert text =~ "no route table Forum.Routes"
+      assert text =~ "defroutes Forum.Routes"
+      assert text =~ "Main"
+
+      assert err!(conn, "create_deployment", %{"name" => "x4"}) =~
+               "missing required argument `routes`"
+
+      assert err!(conn, "create_deployment", Map.put(args, "hosts", "a.test")) =~
+               "argument `hosts` must be an array of strings"
+
+      assert Kinoko.Deployment.get("x3") == :error
+    end
+
+    test "list_deployments shows each deployment's routes, head and URLs", %{conn: conn, u: u} do
+      with_example(conn, u)
+
+      ok!(conn, "create_deployment", %{
+        "name" => u,
+        "routes" => "Main",
+        "universe" => u,
+        "hosts" => ["c.example.test"]
+      })
+
+      text = ok!(conn, "list_deployments", %{})
+      [line] = text |> String.split("\n") |> Enum.filter(&String.starts_with?(&1, u <> ":"))
+      assert line =~ "universe #{u}"
+      assert line =~ "routes Main"
+      assert line =~ "follows head"
+      assert line =~ "http://#{u}.localhost:#{port()}/"
+      assert line =~ "http://c.example.test:#{port()}/"
+
+      :ok = Kinoko.Deployment.pin(u, 1)
+      assert ok!(conn, "list_deployments", %{}) =~ ~r/^#{u}: .*pinned to commit 1/m
     end
   end
 

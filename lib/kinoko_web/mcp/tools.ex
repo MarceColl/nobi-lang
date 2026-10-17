@@ -3,8 +3,13 @@ defmodule KinokoWeb.Mcp.Tools do
   The MCP tools: each maps its arguments onto one `Kinoko.Universe`
   function and answers agent-readable text.
 
-  Every tool but `list_universes` and `create_universe` takes an optional
-  `universe` (default `"main"`).
+  Every tool but `list_universes`, `create_universe` and `list_deployments`
+  takes an optional `universe` (default `"main"`). `create_deployment` takes
+  one too: a deployment serves one universe, and like every other tool it
+  acts on main unless told otherwise. `list_deployments` lists them all,
+  whatever universe each serves. The deployment tools go through
+  `Kinoko.Deployment` (the table) and `Kinoko.Universe.routes/1` (whether the
+  route table exists), never the database or a process.
 
   `call/2` answers `{:ok, %{content: [%{type: "text", text: ...}], isError: bool}}`,
   or `{:error, :unknown_tool}`. `isError` is true when the tool could not
@@ -14,7 +19,7 @@ defmodule KinokoWeb.Mcp.Tools do
   by one `- symbol [code] message` line per reason.
   """
 
-  alias Kinoko.{Exec, Universe}
+  alias Kinoko.{Deployment, Exec, Universe}
   alias Kinoko.Lang.Format
 
   @default_universe "main"
@@ -70,10 +75,34 @@ defmodule KinokoWeb.Mcp.Tools do
      "Whether the universe is healthy, or DEGRADED: its committed code no longer typechecks " <>
        "(the checker changed under it). A degraded universe reads and stages as ever, but " <>
        "eval and test refuse until a patch that makes the whole image typecheck promotes.", %{},
-     []}
+     []},
+    {"list_deployments",
+     "Every deployment (a served address of a universe's route table): its universe, route " <>
+       "table, whether it follows the universe's head or is pinned, and its URLs.", %{}, []},
+    {"create_deployment",
+     "Serve a committed route table (a `defroutes`) of the universe at its own address: " <>
+       "http://<name>.localhost:<port>/, plus any `hosts`. It follows the universe's head, so " <>
+       "each promotion is live at once. `defroutes Main` is already served at " <>
+       "http://localhost:<port>/ by the built-in `local` deployment.",
+     %{
+       name: %{
+         type: "string",
+         description:
+           "The deployment's name, matching #{@name_rule}; it serves at <name>.localhost."
+       },
+       routes: %{
+         type: "string",
+         description: "The committed route table to serve, e.g. Forum.Routes or Main."
+       },
+       hosts: %{
+         type: "array",
+         items: %{type: "string"},
+         description: "Extra host names that reach it (optional; <name>.localhost needs none)."
+       }
+     }, ["name", "routes"]}
   ]
 
-  @no_universe ["list_universes", "create_universe"]
+  @no_universe ["list_universes", "create_universe", "list_deployments"]
 
   @doc "Every tool, as `tools/list` gives it."
   @spec list() :: [map()]
@@ -247,6 +276,95 @@ defmodule KinokoWeb.Mcp.Tools do
         {:error, error} ->
           universe_error(error, u)
       end
+    end
+  end
+
+  defp run("list_deployments", _args) do
+    case Deployment.list() do
+      [] -> {:ok, "no deployments"}
+      deployments -> {:ok, Enum.map_join(deployments, "\n", &deployment_line/1)}
+    end
+  end
+
+  defp run("create_deployment", args) do
+    with {:ok, u} <- universe(args),
+         {:ok, name} <- string(args, "name"),
+         {:ok, routes} <- string(args, "routes"),
+         {:ok, hosts} <- strings(args, "hosts"),
+         :ok <- route_table(u, routes) do
+      case Deployment.create(name, u, routes, hosts: hosts) do
+        :ok -> {:ok, created_text(name)}
+        {:error, :exists} -> {:error, "deployment #{name} already exists (list_deployments)"}
+        {:error, :bad_name} -> {:error, bad_deployment_name(name, hosts)}
+        {:error, :no_such_universe} -> universe_error(:no_such_universe, u)
+        {:error, error} -> universe_error(error, u)
+      end
+    end
+  end
+
+  ## Deployments
+
+  # The route table must be committed in the universe: a deployment of a
+  # missing one serves nothing but an error page.
+  defp route_table(u, routes) do
+    case Universe.routes(u) do
+      %{^routes => _} ->
+        :ok
+
+      tables when is_map(tables) ->
+        committed =
+          case tables |> Map.keys() |> Enum.sort() do
+            [] -> "none"
+            names -> Enum.join(names, ", ")
+          end
+
+        {:error,
+         "no route table #{routes} in #{u}'s committed code (committed route tables: " <>
+           "#{committed}). Define it with `defroutes #{routes} do \"/\" -> App end` " <>
+           "(stage_patch; it must promote), then create the deployment."}
+
+      {:error, error} ->
+        universe_error(error, u)
+    end
+  end
+
+  defp bad_deployment_name(name, []),
+    do: "bad deployment name: #{Jason.encode!(name)} (names match #{@name_rule})"
+
+  defp bad_deployment_name(name, _hosts),
+    do:
+      "bad deployment name: #{Jason.encode!(name)} (names match #{@name_rule}), " <>
+        "or a bad host name"
+
+  defp created_text(name) do
+    {:ok, d} = Deployment.get(name)
+
+    Enum.join(
+      [
+        "created: deployment #{name} serves route table #{d.routes} of universe #{d.universe}, " <>
+          "following its head (each promotion is live at once).",
+        "URL: #{localhost_url(name)}"
+        | Enum.map(d.hosts, &"also: #{host_url(&1)}")
+      ],
+      "\n"
+    )
+  end
+
+  defp deployment_line(d) do
+    head = if d.commit, do: "pinned to commit #{d.commit}", else: "follows head"
+    urls = [localhost_url(d.name) | Enum.map(d.hosts, &host_url/1)]
+    "#{d.name}: universe #{d.universe}, routes #{d.routes}, #{head}; #{Enum.join(urls, " ")}"
+  end
+
+  defp localhost_url(name), do: host_url(name <> ".localhost")
+
+  defp host_url(host), do: "http://#{host}:#{port()}/"
+
+  # The port the endpoint really listens on.
+  defp port do
+    case KinokoWeb.Endpoint.config(:http)[:port] do
+      port when is_integer(port) -> port
+      _ -> URI.parse(KinokoWeb.Endpoint.url()).port
     end
   end
 
