@@ -310,7 +310,7 @@ defmodule Kinoko.Lang do
   """
   @spec restore([map()], [{String.t(), [tuple()]}], %{String.t() => Ast.decl()}) ::
           {:ok, Universe.t()} | {:degraded, Universe.t(), [reason]} | {:error, [reason]}
-  defdelegate restore(commits, staged, decls), to: Universe
+  defdelegate restore(commits, staged, decls, opts \\ []), to: Universe
 
   @doc """
   `:ok`, or `{:degraded, reasons}` while committed code does not typecheck

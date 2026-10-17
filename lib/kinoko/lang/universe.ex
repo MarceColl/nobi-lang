@@ -250,10 +250,22 @@ defmodule Kinoko.Lang.Universe do
   no declaration (`name: nil`, the message naming the CID), a declaration
   that is not the CID or the name it is given for (`Kinoko.Lang.Cid.of/1`
   is worked out again), all `"restore"`.
+
+  `verified: true` says the caller checked each CID against the stored text
+  it parsed `decls` from (`Kinoko.CodeDb`): the CID is then not worked out
+  again from the declaration, which a later parser may canonicalize
+  differently. Either way each declaration keeps the CID it is given.
   """
-  @spec restore([round], [{id, [{String.t(), String.t() | :gone}]}], %{String.t() => Ast.decl()}) ::
+  @spec restore(
+          [round],
+          [{id, [{String.t(), String.t() | :gone}]}],
+          %{String.t() => Ast.decl()},
+          keyword()
+        ) ::
           {:ok, t()} | {:degraded, t(), [reason]} | {:error, [reason]}
-  def restore(commits, staged, decls) do
+  def restore(commits, staged, decls, opts \\ []) do
+    verified? = Keyword.get(opts, :verified, false)
+
     code =
       commits |> replay() |> Enum.sort() |> Enum.map(fn {name, cid} -> {:live, name, cid} end)
 
@@ -268,23 +280,23 @@ defmodule Kinoko.Lang.Universe do
 
     entries = code ++ Enum.flat_map(patches, &elem(&1, 1))
 
-    case entries |> Enum.flat_map(&unheld(&1, decls)) |> Enum.uniq() do
+    case entries |> Enum.flat_map(&unheld(&1, decls, verified?)) |> Enum.uniq() do
       [] -> restage(commits, patches, decls)
       errors -> {:error, errors}
     end
   end
 
   # Why `decls` does not hold the declaration an entry names: `[]`, or one reason.
-  defp unheld({:gone, _}, _decls), do: []
+  defp unheld({:gone, _}, _decls, _verified?), do: []
 
-  defp unheld({:live, name, cid}, decls) do
+  defp unheld({:live, name, cid}, decls, verified?) do
     case Map.fetch(decls, cid) do
       :error ->
         [restore_error(nil, "#{name} is #{cid}, and no declaration is given for it")]
 
       {:ok, decl} ->
         cond do
-          Cid.of(decl) != cid ->
+          not verified? and Cid.of(decl) != cid ->
             [restore_error(name, "the declaration given for #{cid} is #{Cid.of(decl)}")]
 
           Ast.name(decl) != name ->
@@ -297,7 +309,9 @@ defmodule Kinoko.Lang.Universe do
   end
 
   defp restage(commits, patches, decls) do
-    code = for {_, cid} <- Enum.sort(replay(commits)), do: {:live, Map.fetch!(decls, cid)}
+    code =
+      for {_, cid} <- Enum.sort(replay(commits)), do: {:stored, Map.fetch!(decls, cid), cid}
+
     {u, verdict} = if code == [], do: {new(), nil}, else: stage(new(), @restore, code)
 
     u =
@@ -312,7 +326,7 @@ defmodule Kinoko.Lang.Universe do
       Enum.reduce(patches, u, fn {id, entries}, u ->
         entries =
           Enum.map(entries, fn
-            {:live, _, cid} -> {:live, Map.fetch!(decls, cid)}
+            {:live, _, cid} -> {:stored, Map.fetch!(decls, cid), cid}
             gone -> gone
           end)
 
@@ -413,7 +427,17 @@ defmodule Kinoko.Lang.Universe do
     {:live, Ast.name(decl), Cid.of(decl), decl}
   end
 
+  # A restored declaration keeps the CID it was stored under.
+  def internal({:stored, decl, cid}) when is_binary(cid) do
+    decl = Ast.without_positions(decl)
+    {:live, Ast.name(decl), cid, decl}
+  end
+
   def internal({:gone, name}) when is_binary(name), do: {:gone, name}
+
+  # The entry as given back (`staged/1`): a restored one is a plain `{:live, decl}`.
+  defp given({:stored, decl, _cid}), do: {:live, decl}
+  defp given(entry), do: entry
 
   @doc false
   def entry_name({:live, name, _, _}), do: name
@@ -443,7 +467,7 @@ defmodule Kinoko.Lang.Universe do
     %{
       u
       | staged: Map.put(u.staged, id, patch),
-        given: Map.put(u.given, id, entries),
+        given: Map.put(u.given, id, Enum.map(entries, &given/1)),
         order: [id | u.order]
     }
   end

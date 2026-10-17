@@ -293,12 +293,22 @@ defmodule Kinoko.CodeDb do
     decls =
       Map.new(wanted, fn {cid, symbol} ->
         case Map.fetch(texts, cid) do
-          {:ok, text} -> {cid, parse!(cid, symbol, text)}
+          {:ok, text} -> {cid, verified!(cid, symbol, text, parse!(cid, symbol, text))}
           :error -> raise "declaration #{cid} (#{symbol}) is missing from the CAS"
         end
       end)
 
-    Lang.restore(commits, staged, decls)
+    Lang.restore(commits, staged, decls, verified: true)
+  end
+
+  # The stored text must be what its CID was taken of. Its tree is today's
+  # parse of it, which may format (so hash) differently once the parser
+  # changes (JSX whitespace did): the CID stays the stored one, never
+  # worked out again from the tree.
+  defp verified!(cid, symbol, text, decl) do
+    if Lang.Cid.of_text(text) == cid,
+      do: decl,
+      else: raise("declaration #{cid} (#{symbol}) in the CAS does not hash to its CID")
   end
 
   # `%{cid => symbol}` for every CID restore needs: what the commits replay

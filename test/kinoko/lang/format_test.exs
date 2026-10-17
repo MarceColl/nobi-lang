@@ -86,7 +86,7 @@ defmodule Kinoko.Lang.FormatTest do
     test "generated children round trip" do
       :rand.seed(:exsss, {7, 11, 13})
 
-      for _ <- 1..300, do: jsx_round_trips(gen_el(3))
+      for _ <- 1..500, do: jsx_round_trips(gen_el(3))
     end
 
     defp gen_el(0), do: "<i>{z}</i>"
@@ -108,8 +108,9 @@ defmodule Kinoko.Lang.FormatTest do
       case :rand.uniform(3) do
         1 ->
           {:text,
-           Enum.random(["", " "]) <>
-             Enum.random(["a", "b c", "d  e"]) <> Enum.random(["", " ", "  "])}
+           Enum.random(["", " ", "\n  ", " \n "]) <>
+             Enum.random(["a", "b c", "d  e", "a\n  b", " ", " \n ", "x\r\n  y", "\r\n"]) <>
+             Enum.random(["", " ", "  ", "\n", " \n  "])}
 
         2 ->
           "{#{Enum.random(~w(a b c))}}"

@@ -105,7 +105,16 @@ defmodule Kinoko.UniverseHelpers do
         %{ids: [id], entries: live}
       end
 
-    durable = %{commits: commits, staged: []}
+    store_durable(name, %{commits: commits, staged: []})
+  end
+
+  @doc """
+  Appends `durable` (as `Kinoko.Lang.durable/1` gives it) as `name`'s
+  newest CodeDb row, as if a CodeDb had stored it; its CIDs must be in the
+  CAS already.
+  """
+  def store_durable(name, durable) do
+    alias Kinoko.CodeDb
 
     seq =
       case Kinoko.Elm.Store.latest(key(name)) do

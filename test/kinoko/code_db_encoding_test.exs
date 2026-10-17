@@ -113,6 +113,46 @@ defmodule Kinoko.CodeDbEncodingTest do
     assert {"A.g", 0} = run([bare, read])
   end
 
+  # Canonical text an older parser stored (JSX text kept its inner
+  # newline): a fresh VM boots it healthy under the CID it was stored with.
+  @tag :tmp_dir
+  test "text stored in an older canonical shape boots in a fresh VM under its CID", %{
+    tmp_dir: dir
+  } do
+    db = Path.join(dir, "kinoko.db")
+    migrations = Path.expand("priv/repo/migrations", File.cwd!())
+    view = "def A.v() : Html<A.Msg> do\n  <p>\n    one\n    two\n  </p>\nend"
+    cid = :crypto.hash(:sha256, ["yabu/1\n", view]) |> Base.encode16(case: :lower)
+
+    boot = """
+    {:ok, _} = Application.ensure_all_started(:ecto_sqlite3)
+    {:ok, _} = Kinoko.Repo.start_link(database: #{inspect(db)}, pool_size: 1, log: false)
+    """
+
+    write =
+      boot <>
+        """
+        Ecto.Migrator.run(Kinoko.Repo, #{inspect(migrations)}, :up, all: true, log: false)
+        {:ok, _, [{msg, _}] = texts} = Kinoko.Lang.prepare("deftype A.Msg do\\n  Go\\nend")
+        :ok = Kinoko.Cas.put([{#{inspect(cid)}, #{inspect(view)}} | texts])
+        durable = %{commits: [%{ids: ["old"], entries: [{:live, "A.Msg", msg}, {:live, "A.v", #{inspect(cid)}}]}], staged: []}
+        :ok = Kinoko.Elm.Store.append(Kinoko.CodeDb.key("main"), 0, "Kinoko.CodeDb",
+          Kinoko.CodeDb.version(), Kinoko.CodeDb.encode(durable))
+        """
+
+    read =
+      boot <>
+        """
+        {:ok, row} = Kinoko.Elm.Store.latest(Kinoko.CodeDb.key("main"))
+        state = Kinoko.CodeDb.decode(row.state)
+        :ok = Kinoko.Lang.health(state.u)
+        IO.write(Enum.find(Kinoko.Lang.symbols(state.u), &(&1.name == "A.v")).cid)
+        """
+
+    assert {_, 0} = run(write)
+    assert {^cid, 0} = run(read)
+  end
+
   # Each script is its own `-e`, evaluated in order in one VM.
   defp run(scripts) do
     paths = Path.wildcard(Path.join(Mix.Project.build_path(), "lib/*/ebin"))

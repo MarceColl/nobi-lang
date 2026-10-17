@@ -76,6 +76,62 @@ defmodule Kinoko.CodeDbTest do
     assert Lang.symbols(restored) == Lang.symbols(u)
   end
 
+  # The canonical text an older parser stored for JSX text over several
+  # lines: the text kept its inner newline. Parsed today it joins to "one
+  # two", which formats (and so hashes) differently.
+  @old_view "def A.v() : Html<A.Msg> do\n  <p>\n    one\n    two\n  </p>\nend"
+  @msg "deftype A.Msg do\n  Go\nend"
+
+  defp text_cid(text),
+    do: :crypto.hash(:sha256, ["yabu/1", "\n", text]) |> Base.encode16(case: :lower)
+
+  defp old_shape_durable do
+    {:ok, _, [{msg_cid, _}] = texts} = Lang.prepare(@msg)
+    view_cid = text_cid(@old_view)
+    :ok = Cas.put([{view_cid, @old_view} | texts])
+
+    {view_cid,
+     %{
+       commits: [%{ids: ["old"], entries: [{:live, "A.Msg", msg_cid}, {:live, "A.v", view_cid}]}],
+       staged: []
+     }}
+  end
+
+  test "text stored in an older canonical shape restores under its stored CID" do
+    {view_cid, durable} = old_shape_durable()
+    {:ok, [decl]} = Lang.parse(@old_view)
+    refute Lang.cid(decl) == view_cid
+
+    %{u: restored} = durable |> CodeDb.encode() |> CodeDb.decode()
+    assert Lang.durable(restored) == durable
+    assert %{cid: ^view_cid} = Enum.find(Lang.symbols(restored), &(&1.name == "A.v"))
+  end
+
+  test "a universe stored in the older shape boots healthy and keeps its CIDs", %{u: u} do
+    {view_cid, durable} = old_shape_durable()
+    store_durable(u, durable)
+
+    assert Universe.health(u) == :ok
+    assert {:ok, html, _} = Universe.eval(u, "A.v()")
+    assert inspect(html) =~ ~s("one two")
+
+    {:promoted, _} = Universe.stage(u, "more", @g)
+    [%{state: binary} | _] = rows(u)
+    assert %{commits: [%{entries: entries} | _]} = CodeDb.stored(binary)
+    assert {:live, "A.v", view_cid} in entries
+  end
+
+  test "decode refuses a CAS text that does not hash to its CID" do
+    {u, {:promoted, _}} = Lang.stage(Lang.new(), "p1", @g)
+    [%{cid: cid}] = Lang.symbols(u)
+    Cas.put([{cid, "def A.g() : Int do\n  2\nend"}])
+    binary = u |> Lang.durable() |> CodeDb.encode()
+
+    error = assert_raise RuntimeError, fn -> CodeDb.decode(binary) end
+    assert error.message =~ cid
+    assert error.message =~ "does not hash to its CID"
+  end
+
   test "decode raises naming the CID when a CAS row is missing" do
     {u, {:promoted, _}} = Lang.stage(Lang.new(), "p1", @g)
     [%{cid: cid}] = Lang.symbols(u)
