@@ -9,7 +9,7 @@ This is a web application written using the Phoenix web framework.
 
 - Kinoko uses SQLite only (`ecto_sqlite3`), a single file with no external services. Dev: `.kinoko/kinoko.db` (git-ignored); override the directory with `KINOKO_DATA`. Test: `.kinoko/test.db`.
 - `mix kinoko.start` creates, migrates and serves from a fresh checkout.
-- Production: the file is `$KINOKO_DATA/kinoko.db` (default `/var/lib/kinoko`). A release has no Mix, so run `bin/kinoko eval "Kinoko.Release.migrate()"` before the first start; it creates the directory and the file.
+- Release (`MIX_ENV=prod mix release`): the local `kinoko` build by default; `bin/kinoko-cli start` (`Kinoko.CLI`) migrates and serves on 127.0.0.1 with data in `$KINOKO_DATA` (default `~/.kinoko`). A server deploy is built with `KINOKO_BUILD=server` (into `_build/server`, no `/mcp` or console) and run with `KINOKO_MODE=server`: the file is `$KINOKO_DATA/kinoko.db` (default `/var/lib/kinoko`); run `bin/kinoko eval "Kinoko.Release.migrate()"` before the first start; it creates the directory and the file.
 - SQLite has one writer: DB-writing tests must not be `async: true`.
 
 ### Phoenix v1.8 guidelines

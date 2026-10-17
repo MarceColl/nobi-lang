@@ -17,7 +17,8 @@ defmodule KinokoWeb.Router do
   # MCP over streamable HTTP: JSON in and out, no session or CSRF. The
   # endpoint leaves the body unparsed for this path (see `KinokoWeb.Endpoint`).
   # It has no auth yet, so it is mounted only where `:mcp_enabled` is set
-  # (dev and test; never prod). See `KinokoWeb.McpController`.
+  # (dev, test and the local `kinoko` build; never a server build). See
+  # `KinokoWeb.McpController`.
   if Application.compile_env(:kinoko, :mcp_enabled, false) do
     pipeline :mcp do
       plug :accepts, ["json"]

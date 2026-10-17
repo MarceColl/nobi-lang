@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Kinoko.Start do
     boot()
     Kinoko.Deployment.ensure_local()
 
-    Mix.shell().info(banner(KinokoWeb.Endpoint.url()))
+    Mix.shell().info(Kinoko.CLI.banner(KinokoWeb.Endpoint.url()))
     # The endpoints already serve; this keeps the VM running (`--no-halt`).
     Mix.Tasks.Phx.Server.run(args)
   end
@@ -34,20 +34,5 @@ defmodule Mix.Tasks.Kinoko.Start do
     run_task.("ecto.migrate", ["--quiet"])
     run_task.("app.start", [])
     :ok
-  end
-
-  @doc "The start-up banner for the endpoint at `base_url`."
-  @spec banner(String.t()) :: String.t()
-  def banner(base_url) do
-    base = String.trim_trailing(base_url, "/")
-
-    """
-
-      Kinoko is running
-
-        app       #{base}
-        console   #{base}/_
-        MCP       #{base}/mcp
-    """
   end
 end

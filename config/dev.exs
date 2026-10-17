@@ -67,7 +67,7 @@ config :kinoko, KinokoWeb.Endpoint,
 config :kinoko, dev_routes: true
 
 # Mount the unauthenticated /mcp endpoint (see KinokoWeb.McpController).
-# Off in prod until it has auth.
+# Off in a server build (KINOKO_BUILD=server) until it has auth.
 config :kinoko, mcp_enabled: true
 
 # Do not include metadata nor timestamps in development logs

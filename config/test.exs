@@ -40,5 +40,5 @@ config :phoenix_live_view,
 # tests call them explicitly.
 config :kinoko, :ensure_main_at_boot, false
 
-# Mount the unauthenticated /mcp endpoint (off in prod until it has auth).
+# Mount the unauthenticated /mcp endpoint (off in a server build until it has auth).
 config :kinoko, mcp_enabled: true

@@ -6,8 +6,8 @@ defmodule Kinoko.Deployment do
   the route table (a `defroutes` symbol) the host serves; `commit` is `nil`
   to follow the universe's head, or a 1-based history position it is pinned
   to; `hosts` are the exact hostnames that reach it. Where
-  `:localhost_deployments` is on (it defaults to `:mcp_enabled`: dev and
-  test, never prod), a host `<name>.localhost` reaches deployment `<name>`
+  `:localhost_deployments` is on (it defaults to `:mcp_enabled`: dev,
+  test and the local `kinoko` build, never a server build), a host `<name>.localhost` reaches deployment `<name>`
   without being listed.
 
   `pin/2` and `follow/1` announce the change on `Kinoko.PubSub`, topic
@@ -215,7 +215,7 @@ defmodule Kinoko.Deployment do
   end
 
   # `:localhost_deployments`; unset, it follows `:mcp_enabled`, which is
-  # set in dev and test only (never prod), like deployment serving itself.
+  # set in dev, test and the local build (never a server build), like deployment serving itself.
   defp localhost_deployments? do
     Application.get_env(
       :kinoko,

@@ -7,6 +7,24 @@ import Config
 # before starting your production server.
 config :kinoko, KinokoWeb.Endpoint, cache_static_manifest: "priv/static/cache_manifest.json"
 
+# The build: `local` (default) is the distributed `kinoko` binary, with the
+# console at /_ and the unauthenticated MCP at /mcp; `KINOKO_BUILD=server`
+# leaves both out for a public deploy. `:mcp_enabled` is read with
+# Application.compile_env (KinokoWeb.Router), so it is fixed when the release
+# is compiled:
+#
+#     MIX_ENV=prod mix release                       # local (kinoko binary)
+#     KINOKO_BUILD=server MIX_ENV=prod mix release   # server deploy
+#
+# A release refuses to start in a mode its build does not fit (KINOKO_MODE).
+config :kinoko,
+  mcp_enabled:
+    (case System.get_env("KINOKO_BUILD", "local") do
+       "local" -> true
+       "server" -> false
+       other -> raise "KINOKO_BUILD must be local or server, got: #{inspect(other)}"
+     end)
+
 # Configures Swoosh API Client
 config :swoosh, api_client: Swoosh.ApiClient.Req
 

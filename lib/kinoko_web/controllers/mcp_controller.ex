@@ -12,8 +12,9 @@ defmodule KinokoWeb.McpController do
   come later), and every tool can change a universe, `"main"` included. So
   the router mounts `/mcp` only when
   `Application.compile_env(:kinoko, :mcp_enabled, false)` is true:
-  `config/dev.exs` and `config/test.exs` set it, prod leaves it off, and
-  there `/mcp` is a 404. It is read at compile time: changing it needs a
+  `config/dev.exs` and `config/test.exs` set it, and so does the local
+  prod build (the `kinoko` binary, which binds 127.0.0.1); a server build
+  (`KINOKO_BUILD=server`) leaves it off, and there `/mcp` is a 404. It is read at compile time: changing it needs a
   recompile of the router.
   """
 

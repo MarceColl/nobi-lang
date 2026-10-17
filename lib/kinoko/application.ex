@@ -7,6 +7,7 @@ defmodule Kinoko.Application do
 
   @impl true
   def start(_type, _args) do
+    check_build()
     Kinoko.Release.ensure_data_dir(Kinoko.Repo)
 
     children =
@@ -65,6 +66,15 @@ defmodule Kinoko.Application do
       ]
     else
       []
+    end
+  end
+
+  # A prod release names its run mode (config/runtime.exs); refuse a build
+  # that does not fit it, e.g. a server exposing the unauthenticated /mcp.
+  defp check_build do
+    case Application.get_env(:kinoko, :mode) do
+      nil -> :ok
+      mode -> Kinoko.Local.check_build!(mode, Application.get_env(:kinoko, :mcp_enabled, false))
     end
   end
 

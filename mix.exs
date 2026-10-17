@@ -6,12 +6,14 @@ defmodule Kinoko.MixProject do
       app: :kinoko,
       version: "0.1.0",
       elixir: "~> 1.15",
+      build_path: build_path(),
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
-      listeners: [Phoenix.CodeReloader]
+      listeners: [Phoenix.CodeReloader],
+      releases: releases()
     ]
   end
 
@@ -28,6 +30,29 @@ defmodule Kinoko.MixProject do
   def cli do
     [
       preferred_envs: [precommit: :test]
+    ]
+  end
+
+  # KINOKO_BUILD (local | server) fixes the compile-time `:mcp_enabled` of a
+  # prod build (config/prod.exs). Mix does not see an env var change, so each
+  # build compiles into its own directory: `_build/prod` (local) and
+  # `_build/server/prod` (server).
+  defp build_path do
+    if Mix.env() == :prod and System.get_env("KINOKO_BUILD") == "server",
+      do: "_build/server",
+      else: "_build"
+  end
+
+  # `MIX_ENV=prod mix release` builds the local `kinoko` release: the console
+  # and the MCP are compiled in (`:mcp_enabled`, set in config/prod.exs from
+  # KINOKO_BUILD, default local). `bin/kinoko-cli` (rel/overlays) runs the
+  # `kinoko` command, Kinoko.CLI.main/1.
+  defp releases do
+    [
+      kinoko: [
+        include_executables_for: [:unix],
+        steps: [:assemble]
+      ]
     ]
   end
 

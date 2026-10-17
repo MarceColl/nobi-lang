@@ -5,10 +5,25 @@ defmodule Kinoko.Release do
       bin/kinoko eval "Kinoko.Release.migrate()"
 
   The database is the SQLite file `$KINOKO_DATA/kinoko.db` (default
-  `/var/lib/kinoko`); `migrate/0` creates the directory and the file first.
+  `~/.kinoko` in local mode, `/var/lib/kinoko` with `KINOKO_MODE=server`;
+  see `Kinoko.Local`); `migrate/0` creates the directory and the file first.
+  `start/0` migrates on its own (`kinoko start`).
   """
 
   @app :kinoko
+
+  @doc """
+  Starts Kinoko from a release with no Mix: migrates, makes the endpoint
+  serve, starts the application, then ensures the `main` universe and the
+  `local` deployment (what `mix kinoko.start` does). `kinoko start` runs it.
+  """
+  @spec start() :: :ok
+  def start do
+    :ok = migrate()
+    Application.put_env(:phoenix, :serve_endpoints, true, persistent: true)
+    {:ok, _} = Application.ensure_all_started(@app)
+    Kinoko.Deployment.ensure_local()
+  end
 
   @doc "Creates the data directory and runs every pending migration."
   @spec migrate() :: :ok
@@ -18,7 +33,10 @@ defmodule Kinoko.Release do
     for repo <- Application.fetch_env!(@app, :ecto_repos) do
       ensure_data_dir(repo)
 
-      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+      # One connection: on a fresh file, a pool opening at once races to set
+      # WAL mode and logs "database is locked".
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true), pool_size: 1)
     end
 
     :ok
