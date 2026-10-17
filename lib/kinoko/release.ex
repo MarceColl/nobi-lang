@@ -13,16 +13,44 @@ defmodule Kinoko.Release do
   @app :kinoko
 
   @doc """
-  Starts Kinoko from a release with no Mix: migrates, makes the endpoint
-  serve, starts the application, then ensures the `main` universe and the
-  `local` deployment (what `mix kinoko.start` does). `kinoko start` runs it.
+  Starts Kinoko from a release with no Mix: resolves the secret key base
+  when the config has none (local mode, see `Kinoko.Local`), migrates, makes
+  the endpoint serve, starts the application, then ensures the `main`
+  universe and the `local` deployment (what `mix kinoko.start` does).
+  `kinoko start` runs it; it is the one start path. A failure to start (a
+  port taken since the check) is `{:error, reason}`.
   """
-  @spec start() :: :ok
+  @spec start() :: :ok | {:error, term()}
   def start do
+    Application.load(@app)
+    put_secret_key_base()
     :ok = migrate()
     Application.put_env(:phoenix, :serve_endpoints, true, persistent: true)
-    {:ok, _} = Application.ensure_all_started(@app)
-    Kinoko.Deployment.ensure_local()
+
+    case Application.ensure_all_started(@app) do
+      {:ok, _} -> Kinoko.Deployment.ensure_local()
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Only now, not in runtime.exs: making the secret writes the data
+  # directory, which `kinoko version` and friends must not do.
+  defp put_secret_key_base do
+    endpoint = Application.get_env(@app, KinokoWeb.Endpoint, [])
+
+    if !endpoint[:secret_key_base] do
+      dir = data_dir(Kinoko.Repo) || Kinoko.Local.data_dir(:local, System.get_env())
+      secret = Kinoko.Local.secret_key_base(dir, System.get_env())
+
+      Application.put_env(
+        @app,
+        KinokoWeb.Endpoint,
+        Keyword.put(endpoint, :secret_key_base, secret),
+        persistent: true
+      )
+    end
+
+    :ok
   end
 
   @doc "Creates the data directory and runs every pending migration."
@@ -42,12 +70,15 @@ defmodule Kinoko.Release do
     :ok
   end
 
-  @doc "Creates the directory of `repo`'s SQLite file (SQLite makes the file, not the directory)."
+  @doc """
+  Creates the directory of `repo`'s SQLite file (SQLite makes the file, not
+  the directory), at 0700 when it is new.
+  """
   @spec ensure_data_dir(module()) :: :ok
   def ensure_data_dir(repo) do
     case data_dir(repo) do
       nil -> :ok
-      dir -> File.mkdir_p!(dir)
+      dir -> Kinoko.Local.ensure_private_dir(dir)
     end
   end
 

@@ -40,13 +40,13 @@ if config_env() == :prod do
   case mode do
     :local ->
       # Loopback only, http://localhost:<port>; the console and every
-      # `<name>.localhost` app may open the LiveView socket. The secret is
-      # SECRET_KEY_BASE or <data_dir>/secret_key_base, made on first run.
+      # `<name>.localhost` app may open the LiveView socket. No secret here:
+      # this file runs for every release command (`kinoko version` too), and
+      # those must create nothing. Kinoko.Release.start/0 resolves it.
       config :kinoko, KinokoWeb.Endpoint,
         url: [host: "localhost", port: port, scheme: "http"],
         http: [ip: Kinoko.Local.bind_ip(:local), port: port],
-        check_origin: Kinoko.Local.check_origin(),
-        secret_key_base: Kinoko.Local.secret_key_base(data_dir, env)
+        check_origin: Kinoko.Local.check_origin()
 
     :server ->
       # The secret key base is used to sign/encrypt cookies and other secrets.

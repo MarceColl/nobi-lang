@@ -44,8 +44,9 @@ defmodule Kinoko.Local do
 
   @doc """
   The local secret key base: `SECRET_KEY_BASE` if set; otherwise the
-  contents of `<data_dir>/secret_key_base`, which is made on first use from
-  64 random bytes. The file is kept at mode 0600.
+  contents of `<data_dir>/secret_key_base`, made on first use from 64
+  random bytes. The file is 0600 from birth and kept so; a file shorter
+  than 64 bytes is refused (it names the file to delete).
   """
   @spec secret_key_base(String.t(), env()) :: String.t()
   def secret_key_base(data_dir, env) do
@@ -57,30 +58,45 @@ defmodule Kinoko.Local do
 
   defp read_or_create_secret(path) do
     case File.read(path) do
-      {:ok, contents} ->
-        :ok = keep_private(path)
-        String.trim(contents)
-
-      {:error, :enoent} ->
-        create_secret(path)
+      {:ok, contents} -> read_secret(path, contents)
+      {:error, :enoent} -> create_secret(path)
     end
   end
 
-  # `:exclusive` makes two first runs agree: the loser reads the winner's
-  # file. The mode is set before anything is written.
+  defp read_secret(path, contents) do
+    secret = String.trim(contents)
+
+    if byte_size(secret) < 64 do
+      raise "the secret in #{path} is shorter than 64 bytes. " <>
+              "Delete #{path} and Kinoko makes a new one on the next start " <>
+              "(signed-in sessions end)."
+    end
+
+    :ok = keep_private(path)
+    secret
+  end
+
+  # Written in full to a private temp file at 0600, then hard-linked into
+  # place: the link is atomic and fails if the file exists, so concurrent
+  # first runs agree (the losers read the winner's file) and the file never
+  # exists partly written or with a looser mode.
   defp create_secret(path) do
-    File.mkdir_p!(Path.dirname(path))
+    :ok = ensure_private_dir(Path.dirname(path))
     secret = Base.encode64(:crypto.strong_rand_bytes(64))
+    tmp = path <> ".tmp-" <> Base.url_encode64(:crypto.strong_rand_bytes(9))
 
-    case File.open(path, [:write, :exclusive]) do
-      {:ok, file} ->
-        :ok = File.chmod(path, 0o600)
-        :ok = IO.binwrite(file, secret <> "\n")
-        :ok = File.close(file)
-        secret
+    try do
+      {:ok, file} = File.open(tmp, [:write, :exclusive])
+      :ok = File.chmod(tmp, 0o600)
+      :ok = IO.binwrite(file, secret <> "\n")
+      :ok = File.close(file)
 
-      {:error, :eexist} ->
-        read_or_create_secret(path)
+      case File.ln(tmp, path) do
+        :ok -> secret
+        {:error, :eexist} -> read_or_create_secret(path)
+      end
+    after
+      File.rm(tmp)
     end
   end
 
@@ -88,14 +104,28 @@ defmodule Kinoko.Local do
     if (File.stat!(path).mode &&& 0o777) == 0o600, do: :ok, else: File.chmod(path, 0o600)
   end
 
+  @doc """
+  Creates `dir` (and its parents) when missing, the directory itself at
+  0700. An existing directory keeps its mode.
+  """
+  @spec ensure_private_dir(String.t()) :: :ok
+  def ensure_private_dir(dir) do
+    if File.dir?(dir) do
+      :ok
+    else
+      File.mkdir_p!(dir)
+      File.chmod!(dir, 0o700)
+    end
+  end
+
   @doc "The address to bind: loopback in local mode, every interface (`::`) in server mode."
   @spec bind_ip(mode()) :: :inet.ip_address()
   def bind_ip(:local), do: {127, 0, 0, 1}
   def bind_ip(:server), do: {0, 0, 0, 0, 0, 0, 0, 0}
 
-  @doc "The endpoint's `check_origin` in local mode: the console and every `<name>.localhost` app."
+  @doc "The endpoint's `check_origin` in local mode: the console (also as 127.0.0.1) and every `<name>.localhost` app."
   @spec check_origin() :: [String.t()]
-  def check_origin, do: ["//localhost", "//*.localhost"]
+  def check_origin, do: ["//localhost", "//*.localhost", "//127.0.0.1"]
 
   @doc """
   Refuses a release whose build does not fit its mode. `/mcp` has no auth,

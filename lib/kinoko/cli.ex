@@ -51,7 +51,7 @@ defmodule Kinoko.CLI do
         System.halt(64)
 
       command ->
-        IO.write(text(command))
+        IO.write(output(command))
         System.halt(0)
     end
   end
@@ -83,10 +83,12 @@ defmodule Kinoko.CLI do
   defp no_args(command, []), do: command
   defp no_args(_command, [arg | _]), do: {:error, "unexpected argument: #{arg}"}
 
-  defp text(:mcp), do: mcp_text(port(System.get_env()))
-  defp text(:version), do: version_text() <> "\n"
-  defp text(:uninstall), do: uninstall_text(uninstall_paths())
-  defp text(:help), do: @usage
+  @doc "What a non-start command prints. Pure: it creates nothing."
+  @spec output(:mcp | :version | :uninstall | :help) :: String.t()
+  def output(:mcp), do: mcp_text(port(System.get_env()))
+  def output(:version), do: version_text() <> "\n"
+  def output(:uninstall), do: uninstall_text(uninstall_paths())
+  def output(:help), do: @usage
 
   @doc "The usage text."
   @spec usage_text() :: String.t()
@@ -182,25 +184,46 @@ defmodule Kinoko.CLI do
   """
   @spec start(keyword()) :: :ok
   def start(opts) do
-    check_port!()
-    :ok = Kinoko.Release.start()
-    announce(opts)
+    port = check_port!()
+
+    case Kinoko.Release.start() do
+      :ok ->
+        announce(opts)
+
+      {:error, reason} ->
+        IO.puts(:stderr, start_error_message(reason, port))
+        System.halt(1)
+    end
   end
 
   @doc """
-  Exits 1 when the endpoint's address is taken. Kinoko never tries another
-  port by itself.
+  The message for a failed start: the friendly "port in use" one when the
+  bind failed (the port was taken after `check_port!/0`), else the reason.
   """
-  @spec check_port!() :: :ok
+  @spec start_error_message(term(), :inet.port_number()) :: String.t()
+  def start_error_message(reason, port) do
+    if inspect(reason, limit: :infinity) =~ "eaddrinuse",
+      do: port_taken_message(port),
+      else: "kinoko: could not start: #{inspect(reason)}"
+  end
+
+  defp port_taken_message(port),
+    do: "kinoko: port #{port} is in use. Stop what uses it, or set PORT."
+
+  @doc """
+  Exits 1 when the endpoint's address is taken, else returns the port.
+  Kinoko never tries another port by itself.
+  """
+  @spec check_port!() :: :inet.port_number()
   def check_port! do
     Application.load(:kinoko)
     http = Application.get_env(:kinoko, KinokoWeb.Endpoint, [])[:http] || []
     port = Keyword.get(http, :port, 4000)
 
     if Kinoko.Local.port_free?(Keyword.get(http, :ip, {127, 0, 0, 1}), port) do
-      :ok
+      port
     else
-      IO.puts(:stderr, "kinoko: port #{port} is in use. Stop what uses it, or set PORT.")
+      IO.puts(:stderr, port_taken_message(port))
       System.halt(1)
     end
   end

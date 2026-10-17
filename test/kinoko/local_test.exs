@@ -52,6 +52,49 @@ defmodule Kinoko.LocalTest do
       assert String.trim(File.read!(path)) == secret
     end
 
+    test "concurrent first runs all get the same secret, at 0600", %{tmp_dir: tmp} do
+      dir = Path.join(tmp, "data")
+
+      secrets =
+        1..20
+        |> Task.async_stream(fn _ -> Local.secret_key_base(dir, %{}) end, timeout: :infinity)
+        |> Enum.map(fn {:ok, secret} -> secret end)
+
+      assert [secret] = Enum.uniq(secrets)
+      path = Path.join(dir, "secret_key_base")
+      assert String.trim(File.read!(path)) == secret
+      assert (File.stat!(path).mode &&& 0o777) == 0o600
+      # No temp files are left beside it.
+      assert File.ls!(dir) == ["secret_key_base"]
+    end
+
+    test "a short or empty secret file is refused, naming the file", %{tmp_dir: tmp} do
+      path = Path.join(tmp, "secret_key_base")
+
+      for contents <- ["", "\n", "short\n"] do
+        File.write!(path, contents)
+        error = assert_raise RuntimeError, fn -> Local.secret_key_base(tmp, %{}) end
+        assert error.message =~ path
+        assert error.message =~ ~r/delete/i
+      end
+    end
+
+    test "a data directory it creates is 0700", %{tmp_dir: tmp} do
+      dir = Path.join(tmp, "fresh")
+      Local.secret_key_base(dir, %{})
+      assert (File.stat!(dir).mode &&& 0o777) == 0o700
+    end
+
+    test "ensure_private_dir/1 leaves an existing directory's mode alone", %{tmp_dir: tmp} do
+      File.chmod!(tmp, 0o755)
+      assert Local.ensure_private_dir(tmp) == :ok
+      assert (File.stat!(tmp).mode &&& 0o777) == 0o755
+
+      new = Path.join(tmp, "a/b")
+      assert Local.ensure_private_dir(new) == :ok
+      assert (File.stat!(new).mode &&& 0o777) == 0o700
+    end
+
     test "an existing secret file is put back to mode 0600", %{tmp_dir: tmp} do
       path = Path.join(tmp, "secret_key_base")
       File.write!(path, String.duplicate("s", 64) <> "\n")
@@ -73,8 +116,8 @@ defmodule Kinoko.LocalTest do
     assert Local.bind_ip(:server) == {0, 0, 0, 0, 0, 0, 0, 0}
   end
 
-  test "local check_origin allows localhost and its subdomains" do
-    assert Local.check_origin() == ["//localhost", "//*.localhost"]
+  test "local check_origin allows localhost, its subdomains and 127.0.0.1" do
+    assert Local.check_origin() == ["//localhost", "//*.localhost", "//127.0.0.1"]
   end
 
   describe "check_build!/2" do
