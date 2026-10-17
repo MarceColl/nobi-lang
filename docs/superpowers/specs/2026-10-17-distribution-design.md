@@ -1,11 +1,11 @@
-# Distribution: one binary, curl | bash — design
+# Distribution: one binary, curl | sh — design
 
 ## Goal
 
 Someone on macOS or Linux runs one command, then `kinoko`, and has the whole system running locally: the console, the MCP and the served apps. There is no Erlang, Elixir, Node or SQLite to install.
 
 ```
-curl -fsSL https://github.com/<owner>/kinoko/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/<owner>/kinoko/releases/latest/download/install.sh | sh
 kinoko            # migrates, starts, opens the console, prints the MCP line
 ```
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** a single `kinoko` binary per macOS and Linux target, installed by `curl … | bash`, that runs the whole system locally with one command.
+**Goal:** a single `kinoko` binary per macOS and Linux target, installed by `curl … | sh`, that runs the whole system locally with one command.
 
 **Spec:** `docs/superpowers/specs/2026-10-17-distribution-design.md` (binding).
 

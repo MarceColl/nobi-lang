@@ -24,7 +24,7 @@ The structure comes from `docs/design/kinoko-marketing/LANGUAGE-SITES-RESEARCH.m
 
 1. **Hero.**
    - A one-line promise in Newsreader, and a subhead.
-   - The install block: `curl -fsSL …/install.sh | bash` in Plex Mono with a copy button, then `kinoko` on the next line.
+   - The install block: `curl -fsSL …/install.sh | sh` (install.sh is POSIX sh; stock Alpine has no bash) in Plex Mono with a copy button, then `kinoko` on the next line.
    - The version and target badges: `macOS · Linux`, plus the version from `mix.exs`.
 2. **See it run.** A terminal window (Vellum card, with the console's title-bar style) showing a real session: install, `kinoko`, the banner, `kinoko mcp`, and the agent's first patch promoted.
 3. **The Elm architecture, Elixir syntax.** An annotated Yabu counter or todo `defapp`, with `init`, `update` and `view`, beside a rendered result styled like a Vellum app card.

@@ -1,4 +1,4 @@
-$ curl -fsSL http://127.0.0.1:4125/install.sh | bash
+$ curl -fsSL http://127.0.0.1:4125/install.sh | sh
 Downloading kinoko-macos-arm64 (latest)
 Installed kinoko to ./bin/kinoko
 

@@ -40,7 +40,7 @@ defmodule Kinoko.Site.BuildTest do
     assert Build.install_url() =~
              ~r{^https://github\.com/[^/]+/[^/]+/releases/latest/download/install\.sh$}
 
-    assert html =~ "curl -fsSL #{Build.install_url()} | bash"
+    assert html =~ "curl -fsSL #{Build.install_url()} | sh"
     refute html =~ "raw.githubusercontent.com"
     assert html =~ Mix.Project.config()[:version]
   end
