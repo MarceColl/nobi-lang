@@ -1,0 +1,32 @@
+:root {
+  /* Kinoko's step is 4px, but only a handful of steps are actually used. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+  --space-32: 128px;
+
+  /* Layout */
+  --measure: 1152px;          /* every section's content width */
+  --measure-narrow: 900px;    /* the closing CTA panel */
+  --measure-copy: 650px;      /* section lead paragraphs */
+  --section-y: 96px;
+  --section-x: 32px;
+
+  /* Radii — pills for actions, 16 for panels, 24 for the big moments */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-pill: 9999px;
+}

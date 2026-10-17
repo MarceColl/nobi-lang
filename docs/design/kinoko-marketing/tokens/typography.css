@@ -1,0 +1,35 @@
+:root {
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Nunito', system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Display — Fraunces, always 600 or 700, never lighter */
+  --text-h1: clamp(48px, 8vw, 72px);
+  --text-h2: clamp(32px, 5vw, 48px);
+  --text-h3: clamp(28px, 5vw, 40px);
+  --text-dialog-title: 28px;
+  --text-wordmark: 28px;
+  --text-card-title: 20px;
+  --text-tile-title: 17px;
+
+  /* Body — Nunito */
+  --text-lead: 20px;
+  --text-section-lead: 18px;
+  --text-base: 16px;
+  --text-sm: 15px;
+  --text-ui: 14px;
+  --text-code: 13px;
+  --text-xs: 12px;
+  --text-micro: 11px;
+  --text-nano: 10px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --leading-display: 1.1;
+  --leading-body: 1.6;
+  --leading-tight: 1.5;
+  --leading-code: 1.8;
+}

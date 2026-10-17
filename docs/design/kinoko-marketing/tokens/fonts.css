@@ -1,0 +1,3 @@
+/* Kinoko loads its two families from Google Fonts, exactly as landing/src/App.tsx does.
+   Fraunces is variable (opsz 9..144); Nunito ships 400/500/600. Code is the system mono stack. */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Nunito:wght@400;500;600&display=swap');

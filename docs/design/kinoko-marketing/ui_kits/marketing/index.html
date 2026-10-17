@@ -1,0 +1,84 @@
+<!-- @dsCard group="Marketing site" viewport="1280x820" subtitle="The kinoko.sh landing page, rebuilt from the system's components" -->
+<!-- @startingPoint section="Marketing site" subtitle="Full landing page — hero, features, infrastructure, waitlist" viewport="1280x820" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kinoko — marketing site</title>
+<link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body { overflow-x: hidden; }
+  @media (max-width: 900px) {
+    .rfc-container { flex-direction: column; }
+    .rfc-comments { width: 100% !important; border-left: none !important; border-top: 1px solid var(--kn-border); }
+    .collab-features { grid-template-columns: 1fr 1fr !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"><div style="min-height:100vh;position:relative;background:var(--kn-void)">
+    <div style="position:absolute;inset:0;background:var(--wash-page);pointer-events:none"></div>
+    <nav style="position:relative;z-index:10;padding:24px 32px;display:flex;align-items:center;justify-content:space-between;max-width:var(--measure);margin:0 auto">
+      <span style="font-family:var(--font-display);font-size:28px;font-weight:700;color:var(--kn-cream)">kinoko</span>
+    </nav>
+    <div style="text-align:center;padding:64px 32px 128px">
+      <h1 style="font-size:var(--text-h1);margin-bottom:24px">Products that<br><span style="background:var(--grad-text);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent">grow themselves</span></h1>
+    </div>
+  </div></div>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="../loader.js"></script>
+<script>
+KNLoad([
+    "../../components/core/Button.jsx",
+    "../../components/core/Input.jsx",
+    "../../components/core/Tag.jsx",
+    "../../components/core/StatusPill.jsx",
+    "../../components/brand/MushroomIcon.jsx",
+    "../../components/brand/GlowingMushroom.jsx",
+    "../../components/brand/Firefly.jsx",
+    "../../components/brand/Wordmark.jsx",
+    "../../components/surfaces/Card.jsx",
+    "../../components/surfaces/FeatureCard.jsx",
+    "../../components/surfaces/Callout.jsx",
+    "../../components/surfaces/WindowChrome.jsx",
+    "../../components/surfaces/Dialog.jsx",
+    "../../components/console/TerminalLine.jsx",
+    "../../components/console/TraceChip.jsx",
+    "Ambient.jsx",
+    "SectionHead.jsx",
+    "Nav.jsx",
+    "TerminalDemo.jsx",
+    "Hero.jsx",
+    "Features.jsx",
+    "Collaboration.jsx",
+  "Loops.jsx",
+    "Infrastructure.jsx",
+    "Closing.jsx",
+    "WaitlistDialog.jsx"
+  ]).then(function (S) {
+  function Site() {
+    const [modal, setModal] = React.useState(false);
+    const open = function () { setModal(true); };
+    return React.createElement('div',
+      { style: { minHeight: '100vh', position: 'relative', overflow: 'hidden', background: 'var(--kn-void)' } },
+      React.createElement(S.Ambient),
+      React.createElement(S.Nav, { onRequest: open }),
+      React.createElement(S.Hero, { onRequest: open }),
+      React.createElement(S.Features),
+      React.createElement(S.Collaboration),
+      React.createElement(S.Loops),
+      React.createElement(S.Infrastructure),
+      React.createElement(S.Closing, { onRequest: open }),
+      React.createElement(S.Footer),
+      React.createElement(S.WaitlistDialog, { open: modal, onClose: function () { setModal(false); } })
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Site));
+}).catch(function (e) { console.error(e); document.body.innerHTML = '<pre style="color:#FF6B6B;padding:24px;font:13px ui-monospace">' + e.message + '</pre>'; });
+</script>
+</body>
+</html>

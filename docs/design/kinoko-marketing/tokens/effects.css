@@ -1,0 +1,37 @@
+:root {
+  /* Elevation here is glow, not shade — a colored bloom around the element. */
+  --glow-mint: 0 0 30px rgba(125, 211, 192, 0.3);
+  --glow-mint-strong: 0 0 40px rgba(125, 211, 192, 0.4);
+  --glow-mint-faint: 0 0 30px rgba(125, 211, 192, 0.1);
+  --glow-violet: 0 0 60px rgba(139, 123, 181, 0.15);
+  --glow-violet-faint: 0 0 60px rgba(139, 123, 181, 0.1);
+  --glow-dialog: 0 0 80px rgba(125, 211, 192, 0.15);
+  --shadow-tooltip: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --inset-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  --ease: ease;
+  --dur-fast: 0.2s;
+  --dur-base: 0.3s;
+  --dur-slow: 0.4s;
+}
+
+@keyframes kn-twinkle {
+  0%, 100% { opacity: 0.1; transform: scale(0.3); }
+  50% { opacity: 1; transform: scale(1); }
+}
+@keyframes kn-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-12px) rotate(3deg); }
+}
+@keyframes kn-float-reverse {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(-3deg); }
+}
+@keyframes kn-pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+@keyframes kn-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}

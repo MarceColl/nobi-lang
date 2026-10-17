@@ -1,0 +1,60 @@
+:root {
+  /* ---- Ground ---------------------------------------------------------- */
+  --kn-void: #0A080F;          /* page ground, node fills, tooltip backs      */
+  --kn-surface: #13111C;       /* panels, terminal, RFC window                */
+  --kn-surface-raised: #1A1725;/* window headers, status pill                 */
+
+  /* ---- Ink ------------------------------------------------------------- */
+  --kn-text: #F5F0FF;          /* headings and primary copy                   */
+  --kn-text-muted: #A99BC5;    /* body copy, descriptions                     */
+  --kn-text-dim: #6B5A8A;      /* labels, footer links, markdown headings     */
+  --kn-text-faint: #5A4A7A;    /* trailing annotations, timings               */
+  --kn-cream: #E5DFD5;         /* wordmark and terminal user input            */
+
+  /* ---- Accents --------------------------------------------------------- */
+  --kn-violet: #8B7BB5;        /* the structural accent — gradients, glows    */
+  --kn-lilac: #B8A5D9;         /* agent/you voice, exploration stage          */
+  --kn-mint: #7DD3C0;          /* success, verification, the "grows" hue      */
+  --kn-mint-light: #9FEDD7;    /* validation stage, resolved traces           */
+  --kn-amber: #F5C869;         /* in-progress, coming soon, production stage  */
+  --kn-red: #FF6B6B;           /* bugs and failures — only ever a small mark  */
+  --kn-teal-deep: #6A9BA5;     /* second stop of the nav-button gradient      */
+  --kn-spore: #FFF8E7;         /* the lit spore on the mushroom mark          */
+
+  /* ---- Mushroom mark --------------------------------------------------- */
+  --kn-cap: #8B7BB5;
+  --kn-cap-shade: #7B6B9B;
+  --kn-stem: #5A4A7A;
+
+  /* ---- Lines ----------------------------------------------------------- */
+  --kn-border: rgba(42, 37, 56, 0.8);        /* window and panel edges       */
+  --kn-border-violet: rgba(139, 123, 181, 0.15);
+  --kn-border-violet-strong: rgba(139, 123, 181, 0.3);
+
+  /* ---- Semantic aliases ------------------------------------------------ */
+  --bg-page: var(--kn-void);
+  --bg-panel: var(--kn-surface);
+  --bg-header: var(--kn-surface-raised);
+  --text-body: var(--kn-text-muted);
+  --text-heading: var(--kn-text);
+  --text-label: var(--kn-text-dim);
+  --border-default: var(--kn-border);
+  --accent: var(--kn-violet);
+  --success: var(--kn-mint);
+  --warning: var(--kn-amber);
+  --danger: var(--kn-red);
+
+  /* ---- Gradients ------------------------------------------------------- */
+  --grad-primary: linear-gradient(135deg, #8B7BB5 0%, #7DD3C0 100%);
+  --grad-nav: linear-gradient(135deg, #8B7BB5 0%, #6A9BA5 100%);
+  --grad-text: linear-gradient(135deg, #B8A5D9 0%, #7DD3C0 50%, #F5C869 100%);
+  --grad-card: linear-gradient(180deg, rgba(139,123,181,0.08) 0%, rgba(13,11,20,0.4) 100%);
+  --grad-cta-panel: linear-gradient(135deg, rgba(139,123,181,0.2) 0%, rgba(125,211,192,0.1) 50%, rgba(139,123,181,0.15) 100%);
+  --grad-dialog: linear-gradient(135deg, rgba(19,17,28,0.98) 0%, rgba(26,23,37,0.98) 100%);
+
+  /* The three ambient washes layered over the page ground. */
+  --wash-page:
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(139,123,181,0.15) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 40% at 20% 100%, rgba(125,211,192,0.1) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 30% at 80% 70%, rgba(245,200,105,0.05) 0%, transparent 50%);
+}

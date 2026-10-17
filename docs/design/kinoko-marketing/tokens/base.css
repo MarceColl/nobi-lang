@@ -1,0 +1,26 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-heading);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: var(--weight-bold);
+  color: var(--text-heading);
+  line-height: var(--leading-display);
+}
+
+code, pre, kbd { font-family: var(--font-mono); }
+
+a { color: var(--kn-lilac); text-decoration: none; transition: color var(--dur-fast) var(--ease); }
+a:hover { color: var(--kn-mint); }
+
+::selection { background: rgba(125, 211, 192, 0.25); color: var(--kn-text); }
+
+:focus-visible { outline: 2px solid var(--kn-mint); outline-offset: 2px; }
