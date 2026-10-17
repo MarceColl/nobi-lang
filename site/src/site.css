@@ -1,0 +1,114 @@
+/* Kinoko homepage stylesheet: built by `mix site.build` (Tailwind `site`
+   profile) into site/dist/site.css. Vellum light, the console's own tokens. */
+
+@import "tailwindcss" source(none);
+@source "../src";
+
+/* Vellum fonts, latin subset (OFL), copied into site/dist/fonts by the build. */
+@font-face {
+  font-family: "Chivo";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("fonts/chivo-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/ibm-plex-mono-400-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/ibm-plex-mono-500-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Newsreader";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("fonts/newsreader-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Vellum tokens, verbatim from assets/css/app.css (test/site/site_build_test.exs keeps them equal). */
+:root {
+  --k-ink: #1B1A17;
+  --k-body: #3A362E;
+  --k-dim: #6E6A61;
+  --k-faint: #8A8579;
+  --k-line: #DDDAD1;
+  --k-paper: #F2F1EC;
+  --k-card: #FFFFFF;
+  --k-tint: #F7F6F2;
+  --k-sand: #EDEBE4;
+  --k-violet: #5B4B96;
+  --k-violet-hover: #48397C;
+  --k-mint: #0F7A66;
+  --k-amber: #A9740B;
+  --k-red: #C0453F;
+  --k-placeholder: #B6B1A5;
+  --k-row-line: #EAE7DE;
+  --k-row-line-2: #EFECE4;
+  --k-sel-row: #E2DFD5;
+  --k-segmented: #E7E4DB;
+  --k-grid-dots: #D7D3C8;
+  --k-gutter: #C0BCB0;
+  --k-zebra: #FCFBF8;
+
+  --k-violet-chip: #F3F0FB;
+  --k-violet-btn-border: #C9C0E4;
+  --k-violet-chip-border: #D9D2EE;
+  --k-mint-chip: #E3F1EC;
+  --k-mint-chip-border: #BFDDD3;
+  --k-amber-chip: #FBF2DF;
+  --k-amber-chip-border: #E8D3A4;
+  --k-amber-text: #7A5406;
+  --k-red-chip: #FBECEB;
+  --k-red-chip-border: #EFCFCD;
+  --k-red-text: #8E332E;
+
+  --k-sans: "Chivo", system-ui, sans-serif;
+  --k-mono: "IBM Plex Mono", monospace;
+  --k-display: "Newsreader", Georgia, serif;
+}
+
+/* The tokens as Tailwind theme values: bg-paper, text-ink, font-display, ... */
+@theme inline {
+  --color-ink: var(--k-ink);
+  --color-body: var(--k-body);
+  --color-dim: var(--k-dim);
+  --color-faint: var(--k-faint);
+  --color-line: var(--k-line);
+  --color-paper: var(--k-paper);
+  --color-card: var(--k-card);
+  --color-tint: var(--k-tint);
+  --color-sand: var(--k-sand);
+  --color-violet: var(--k-violet);
+  --color-violet-hover: var(--k-violet-hover);
+  --color-violet-chip: var(--k-violet-chip);
+  --color-mint: var(--k-mint);
+  --color-mint-chip: var(--k-mint-chip);
+  --color-amber: var(--k-amber);
+  --color-amber-chip: var(--k-amber-chip);
+  --color-amber-text: var(--k-amber-text);
+  --color-red: var(--k-red);
+  --color-red-chip: var(--k-red-chip);
+  --color-red-text: var(--k-red-text);
+  --font-sans: var(--k-sans);
+  --font-mono: var(--k-mono);
+  --font-display: var(--k-display);
+}
+
+html { background: var(--k-paper); color: var(--k-ink); color-scheme: light; }
+::selection { background: rgba(91,75,150,.18); }

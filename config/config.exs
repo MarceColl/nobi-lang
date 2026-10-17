@@ -76,6 +76,14 @@ config :tailwind,
       --output=priv/static/assets/css/app.css
     ),
     cd: Path.expand("..", __DIR__)
+  ],
+  # The static homepage (mix site.build): site/src -> site/dist.
+  site: [
+    args: ~w(
+      --input=site/src/site.css
+      --output=site/dist/site.css
+    ),
+    cd: Path.expand("..", __DIR__)
   ]
 
 # Configures Elixir's Logger

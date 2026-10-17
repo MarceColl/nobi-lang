@@ -1,0 +1,29 @@
+defmodel Counter.Model do
+  count : Int
+end
+
+deftype Counter.Msg do
+  Increment | Decrement
+end
+
+def Counter.init() : (Counter.Model, Cmd<Counter.Msg>) do
+  (%Counter.Model{count: 0}, Cmd.none())
+end
+
+def Counter.update(msg : Counter.Msg, model : Counter.Model) : (Counter.Model, Cmd<Counter.Msg>) do
+  always(model.count >= 0)
+  case msg do
+    Counter.Msg.Increment -> (%Counter.Model{model | count: model.count + 1}, Cmd.none())
+    Counter.Msg.Decrement -> (%Counter.Model{model | count: if model.count > 0 do model.count - 1 else 0 end}, Cmd.none())
+  end
+end
+
+def Counter.view(model : Counter.Model) : Html<Counter.Msg> do
+  <div class="flex items-center gap-4 rounded-xl border border-stone-300 bg-white p-6">
+    <button class="rounded-lg px-3 py-1 text-xl hover:bg-stone-100" on-click={Counter.Msg.Decrement}>-</button>
+    <span class="w-12 text-center text-3xl font-semibold tabular-nums">{model.count}</span>
+    <button class="rounded-lg bg-violet-700 px-3 py-1 text-xl text-white" on-click={Counter.Msg.Increment}>+</button>
+  </div>
+end
+
+defapp Counter

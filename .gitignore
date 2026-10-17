@@ -47,3 +47,6 @@ npm-debug.log
 # mix kinoko.dist: the Burrito binaries (dist/) and Burrito's own output dir.
 /dist/
 /burrito_out/
+
+# mix site.build: the static homepage.
+/site/dist/

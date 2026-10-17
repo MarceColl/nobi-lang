@@ -1,0 +1,36 @@
+defmodel Board.Topic do
+  id : Uuid
+  title : String
+  replies : Int = 0
+end
+
+defmodel Board.Model do
+  topics : List<Board.Topic>
+  draft : String
+end
+
+deftype Board.Msg do
+  Loaded(List<Board.Topic>) | Draft(String) | Post | Saved(Uuid)
+end
+
+def Board.init() : (Board.Model, Cmd<Board.Msg>) do
+  (%Board.Model{topics: [], draft: ""}, Cmd.store.list(Board.Msg.Loaded))
+end
+
+def Board.update(msg : Board.Msg, model : Board.Model) : (Board.Model, Cmd<Board.Msg>) do
+  case msg do
+    Board.Msg.Loaded(topics) -> (%Board.Model{model | topics: topics}, Cmd.none())
+    Board.Msg.Draft(text) -> (%Board.Model{model | draft: text}, Cmd.none())
+    Board.Msg.Post -> (%Board.Model{model | draft: ""}, Cmd.store.insert(%Board.Topic{title: model.draft, replies: 0}, Board.Msg.Saved))
+    Board.Msg.Saved(id) -> (model, Cmd.store.list(Board.Msg.Loaded))
+  end
+end
+
+def Board.view(model : Board.Model) : Html<Board.Msg> do
+  <form class="flex flex-col gap-3 p-6" on-submit={Board.Msg.Post}>
+    <input class="rounded-lg border px-3 py-2" value={model.draft} on-change={Board.Msg.Draft} />
+    <ul>{List.map(model.topics, fn (t : Board.Topic) -> <li>{t.title} · {t.replies}</li> end)}</ul>
+  </form>
+end
+
+defapp Board

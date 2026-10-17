@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kinoko: the Yabu language and its code database</title>
+  <link rel="stylesheet" href="site.css">
+  <script src="copy.js" defer></script>
+</head>
+<%!-- Skeleton (landing task 1): proves the samples, verdicts and styling reach the page. Task 2 builds the real sections. --%>
+<body class="bg-paper font-sans text-body antialiased">
+  <main class="mx-auto max-w-4xl px-4 py-16">
+    <header id="hero">
+      <h1 class="font-display text-5xl text-ink">Kinoko</h1>
+      <p class="mt-2 text-dim">Version <%= @version %> · macOS · Linux</p>
+      <div class="mt-6 flex items-center gap-3 rounded-xl border border-line bg-card p-4 font-mono text-sm">
+        <code id="install" class="min-w-0 flex-1 overflow-x-auto whitespace-pre">curl -fsSL <%= @install_url %> | bash</code>
+        <button type="button" class="rounded-lg border border-line px-3 py-1 text-ink hover:bg-tint" data-copy="#install" aria-label="Copy the install command">Copy</button>
+      </div>
+    </header>
+<%= for {id, title, sample, verdict} <- @sections do %>
+    <section id="<%= id %>" class="mt-12">
+      <h2 class="font-display text-3xl text-ink"><%= title %></h2>
+      <pre class="mt-4 overflow-x-auto rounded-xl border border-line bg-card p-4 font-mono text-sm text-ink"><code><%= sample %></code></pre>
+      <pre class="mt-2 overflow-x-auto rounded-lg bg-sand p-3 font-mono text-xs text-body"><code><%= verdict %></code></pre>
+    </section>
+<% end %>
+  </main>
+</body>
+</html>
