@@ -65,10 +65,14 @@ defmodule Kinoko.Site.BuildTest do
     text = "site" |> Build.render() |> visible()
     [block] = Regex.run(~r/What the agent did.*?The agent's summary/s, text)
 
+    # One table row per call, the tool name first.
+    [tbody] = Regex.run(~r{<tbody>(.*?)</tbody>}s, Build.render("site"), capture: :all_but_first)
+
     shown =
-      for line <- String.split(block, "\n"),
-          [_, label] <- [Regex.run(~r/^\s*(\S.*?)\s+→ /, line)],
-          do: label |> String.split(" ") |> hd()
+      for line <- String.split(tbody, "\n"),
+          row = String.trim(visible(line)),
+          row != "",
+          do: row |> String.split(" ") |> hd()
 
     assert shown == recorded
     assert block =~ "promoted: "
@@ -103,7 +107,7 @@ defmodule Kinoko.Site.BuildTest do
     assert File.read!(Path.join(dist, "copy.js")) == File.read!("site/src/copy.js")
     assert File.read!(Path.join(dist, "forum.webp")) == File.read!("site/src/forum.webp")
 
-    fonts = File.ls!("priv/static/fonts")
+    fonts = File.ls!("site/fonts")
     assert Enum.any?(fonts, &String.ends_with?(&1, ".woff2"))
 
     for font <- fonts,

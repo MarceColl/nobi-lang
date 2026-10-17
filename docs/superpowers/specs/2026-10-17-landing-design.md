@@ -6,12 +6,16 @@ A short, plain static homepage for Kinoko: what it is, who it is for, and how to
 
 ## Decisions (Marce, 2026-10-17)
 
-- **Look:** **Vellum light**, the console's own system.
-  - Paper `#F2F1EC`, ink `#1B1A17` and violet `#5B4B96`; mint and amber as accents.
-  - Newsreader for display text, Chivo for the UI and body, IBM Plex Mono for code.
-  - The same tokens as `assets/css/app.css` (`--k-*`), with the same radii, line colours and shadows.
+- **Look (revised 2026-10-17, restyle):** monochrome, after the principles of a public design guide (vercel.com/design.md), with none of its branding: Kinoko's own wordmark (the mushroom glyph and "kinoko") and its own tokens.
+  - **Type:** Geist for everything, Geist Mono only for code, commands, paths and identifiers, vendored in `site/fonts/` (OFL, variable woff2, weights 400 to 600). Eight roles and no other sizes: display (the title, once), title (section headings), heading (step headings), lede, body, label, caption and mono. Tabular numerals where numbers align.
+  - **Colour:** monochrome surfaces and text in light and dark themes of equal hierarchy, from `prefers-color-scheme`, with no switcher. Colour marks state only: the run's successful steps (green, beside "promoted", ": ok" or the served URL) and focus. No cards, gradients, shadows or side rails; one canvas, separated by spacing.
+  - **Grid:** 12 columns on desktop, 6 on tablet, 4 on mobile. On desktop, section headings sit in columns 1 to 3 and content starts at column 4; prose keeps a 60 to 68 character measure; code, the run table and the screenshot span columns 4 to 12. The step numbers hang in the gutter.
+  - **Spacing:** a 4px token scale (1 to 16); each section owns the gap above it.
+  - **Header and footer:** the wordmark and two metadata items (version, "macOS · Linux") on one baseline; the footer is the glyph and the font licence line.
+  - **Code and the run:** commands on a quiet secondary surface with a small radius and a copy button only where the command is meant to be copied; the recorded run is a semantic table (tool, argument, result) with a caption.
+  - The console's `--k-*` tokens stay in `site/src/site.css` verbatim (a test keeps them equal to `assets/css/app.css`), but the page does not use them. The console keeps Vellum.
 
-  The site and the product should feel like one thing. The marketing kit's dark look is not used. Its structure ideas (terminal window, closing panel) are reused in Vellum colours.
+  The first look was Vellum light, the console's own system (Newsreader, Chivo, IBM Plex Mono, paper and violet); the restyle replaced it on the site only.
 - **Copy:** Claude drafts it from what is actually built, and Marce edits it.
   - Every claim must be true of the current build.
   - Every code sample must compile in today's Yabu.
@@ -29,15 +33,15 @@ The first landing (eight sections: hero, "See it run", the Elm architecture, cod
 
 ## Structure
 
-1. **Title.** "Kinoko" in Newsreader, the one-line description, and one paragraph.
+1. **Title.** "Kinoko" in the display role, the one-line description, and one paragraph.
 2. **Getting started.** Five numbered steps: install (`curl -fsSL …/install.sh | sh`, with a copy button), start (`kinoko`), connect the agent (`claude mcp add …`, with a copy button; `kinoko mcp` for other clients), ask for an app (the forum prompt), open it (`forum.localhost:4000`, the console at `localhost:4000/_`).
-   - Under step 4, a short terminal block lists the Kinoko tool calls of a real recorded run of that prompt, each with its one-line result, and the agent's first summary sentence. It is built from `site/samples/agent-run.jsonl` at build time. If it grows past about 15 lines, it is collapsed in a `<details>`.
+   - Under step 4, a captioned table lists the Kinoko tool calls of a real recorded run of that prompt, each with its one-line result, and the agent's first summary sentence. It is built from `site/samples/agent-run.jsonl` at build time. If it grows past about 15 lines, it is collapsed in a `<details>`.
    - Under step 5, a screenshot of the forum that run built (`site/src/forum.webp`).
 3. **An example app.** `site/samples/counter.yabu`, shown as code.
 4. **Status.** The version (major.minor from `mix.exs`), macOS and Linux, local and single-user, no hosting yet.
 5. **Links.** Source and Releases.
 
-The footer has the version and the fonts' licence (OFL).
+The header has the version and "macOS · Linux"; the footer has the glyph and the fonts' licence (OFL).
 
 ## Constraints
 

@@ -1,46 +1,32 @@
 /* Kinoko homepage stylesheet: built by `mix site.build` (Tailwind `site`
-   profile) into site/dist/site.css. Vellum light, the console's own tokens. */
+   profile) into site/dist/site.css. Monochrome, Geist, light and dark from
+   prefers-color-scheme. Colour marks state only (a run's successful steps,
+   focus), always beside a text cue. */
 
 @import "tailwindcss" source(none);
 @source "../src";
 
-/* Vellum fonts, latin subset (OFL), copied into site/dist/fonts by the build. */
+/* Geist and Geist Mono (OFL, site/fonts/OFL-geist.txt), variable, copied
+   into site/dist/fonts by the build. Weights 400 to 600 only. */
 @font-face {
-  font-family: "Chivo";
+  font-family: "Geist";
   font-style: normal;
-  font-weight: 400 700;
+  font-weight: 400 600;
   font-display: swap;
-  src: url("fonts/chivo-latin.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  src: url("fonts/geist-variable.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "IBM Plex Mono";
+  font-family: "Geist Mono";
   font-style: normal;
-  font-weight: 400;
+  font-weight: 400 600;
   font-display: swap;
-  src: url("fonts/ibm-plex-mono-400-latin.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  src: url("fonts/geist-mono-variable.woff2") format("woff2");
 }
 
-@font-face {
-  font-family: "IBM Plex Mono";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("fonts/ibm-plex-mono-500-latin.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
-@font-face {
-  font-family: "Newsreader";
-  font-style: normal;
-  font-weight: 400 500;
-  font-display: swap;
-  src: url("fonts/newsreader-latin.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
+/* The console's Vellum tokens, kept verbatim so the console and the site
+   share one source (test/site/site_build_test.exs keeps them equal). The
+   page itself draws only from the site tokens below. */
 /* Vellum tokens, verbatim from assets/css/app.css (test/site/site_build_test.exs keeps them equal). */
 :root {
   --k-ink: #1B1A17;
@@ -83,164 +69,176 @@
   --k-display: "Newsreader", Georgia, serif;
 }
 
-/* The tokens as Tailwind theme values: bg-paper, text-ink, font-display, ... */
-@theme inline {
-  --color-ink: var(--k-ink);
-  --color-body: var(--k-body);
-  --color-dim: var(--k-dim);
-  --color-faint: var(--k-faint);
-  --color-line: var(--k-line);
-  --color-paper: var(--k-paper);
-  --color-card: var(--k-card);
-  --color-tint: var(--k-tint);
-  --color-sand: var(--k-sand);
-  --color-violet: var(--k-violet);
-  --color-violet-hover: var(--k-violet-hover);
-  --color-violet-chip: var(--k-violet-chip);
-  --color-mint: var(--k-mint);
-  --color-mint-chip: var(--k-mint-chip);
-  --color-amber: var(--k-amber);
-  --color-amber-chip: var(--k-amber-chip);
-  --color-amber-text: var(--k-amber-text);
-  --color-red: var(--k-red);
-  --color-red-chip: var(--k-red-chip);
-  --color-red-text: var(--k-red-text);
-  --color-row-line: var(--k-row-line);
-  --color-gutter: var(--k-gutter);
-  --font-sans: var(--k-sans);
-  --font-mono: var(--k-mono);
-  --font-display: var(--k-display);
+/* ---- Site tokens --------------------------------------------------------
+   Surfaces, text, border, focus and state, in two themes of equal
+   hierarchy. Every text pair is WCAG AA (4.5:1) on both surfaces. */
+:root {
+  --bg: #FFFFFF;
+  --surface-secondary: #F4F4F4;
+  --text: #171717;
+  --text-secondary: #4D4D4D;
+  --text-tertiary: #666666;
+  --border: #E6E6E6;
+  --focus: #0B63CE;
+  --ok: #0E7A4A;
+
+  --sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Spacing scale (4px steps). Within a group 2 to 4, between groups 6 to
+     8, at section turns 8 to 12. */
+  --space-1: 4px;  --space-2: 8px;   --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px;  --space-8: 32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
+  --radius-small: 4px;
+  --radius: 6px;
+
+  --gutter: var(--space-4);
+  --margin: var(--space-4);
 }
 
-html { background: var(--k-paper); color: var(--k-ink); color-scheme: light; }
-::selection { background: rgba(91,75,150,.18); }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0A0A0A;
+    --surface-secondary: #1A1A1A;
+    --text: #EDEDED;
+    --text-secondary: #B4B4B4;
+    --text-tertiary: #949494;
+    --border: #2B2B2B;
+    --focus: #5EA2FF;
+    --ok: #4CC38A;
+  }
+}
 
-/* ---- Page ---------------------------------------------------------------
-   Vellum values from the console (lib/kinoko_web/live/console): white cards
-   on paper with a 1px line and 11px radii, tint title bars, mono code with a
-   gutter. One narrow column with plenty of air. Plain CSS (no @apply);
-   utilities in the template override it. */
+@media (min-width: 640px) { :root { --gutter: var(--space-6); --margin: var(--space-8); } }
+@media (min-width: 1024px) { :root { --margin: var(--space-12); } }
 
 @layer components {
-body { font-size: 17px; line-height: 1.65; }
-code, pre { font-family: var(--k-mono); }
 
-.wrap { width: 100%; max-width: 1180px; margin-inline: auto; padding-inline: 16px; }
-@media (min-width: 640px) { .wrap { padding-inline: 32px; } }
-@media (min-width: 1024px) { .wrap { padding-inline: 48px; } }
-
-/* The reading column. */
-.page { width: 100%; max-width: 760px; margin-inline: auto; padding-inline: 16px; }
-@media (min-width: 640px) { .page { padding-inline: 32px; } }
-
-.skip { position: absolute; left: 16px; top: -48px; padding: 8px 12px; border-radius: 6px; background: var(--k-ink); color: #fff; font-size: 14px; z-index: 10; }
-.skip:focus { top: 12px; }
-
-:focus-visible { outline: 2px solid var(--k-violet); outline-offset: 2px; border-radius: 4px; }
-
-.navlink { color: var(--k-body); text-decoration: none; transition: color .15s; }
-.navlink:hover { color: var(--k-violet); }
-.link { color: var(--k-violet); text-decoration: underline; text-decoration-color: var(--k-violet-btn-border); text-underline-offset: 3px; transition: color .15s, text-decoration-color .15s; }
-.link:hover { color: var(--k-violet-hover); text-decoration-color: currentColor; }
-
-/* The title: Newsreader, the page's one large thing. */
-.intro { padding-block: 72px 56px; }
-@media (min-width: 1024px) { .intro { padding-block: 112px 80px; } }
-.title {
-  font-size: clamp(3.4rem, 9vw, 5.5rem);
-  line-height: 1;
-  letter-spacing: -.03em;
-  font-weight: 400;
+html { background: var(--bg); color: var(--text); color-scheme: light dark; }
+body {
+  background: var(--bg); color: var(--text-secondary);
+  font-family: var(--sans); font-size: 16px; line-height: 26px;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
-.tagline { margin-top: 18px; font-size: 21px; line-height: 1.45; color: var(--k-ink); }
-@media (min-width: 640px) { .tagline { font-size: 23px; } }
-.lede { margin-top: 20px; font-size: 17px; line-height: 1.65; color: var(--k-body); max-width: 36rem; }
+::selection { background: color-mix(in srgb, var(--text) 18%, transparent); }
+code, pre { font-family: var(--mono); }
+.num { font-variant-numeric: tabular-nums; }
 
-.block { border-top: 1px solid var(--k-line); padding-block: 48px; }
-@media (min-width: 1024px) { .block { padding-block: 64px; } }
-.block > p { margin-top: 16px; }
-.h2 {
-  font-family: var(--k-display);
-  font-weight: 400;
-  color: var(--k-ink);
-  font-size: clamp(1.75rem, 3.2vw, 2.25rem);
-  line-height: 1.1;
-  letter-spacing: -.015em;
+/* ---- Type roles: the only sizes on the page. --------------------------- */
+.t-display { font-size: 48px; line-height: 48px; font-weight: 600; letter-spacing: -.045em; color: var(--text); }
+@media (min-width: 1024px) { .t-display { font-size: 72px; line-height: 72px; } }
+.t-title   { font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -.025em; color: var(--text); }
+.t-heading { font-size: 16px; line-height: 24px; font-weight: 400; color: var(--text-secondary); }
+.t-heading strong { font-weight: 600; color: var(--text); }
+.t-lede    { font-size: 20px; line-height: 30px; font-weight: 500; letter-spacing: -.01em; color: var(--text); }
+@media (min-width: 640px) { .t-lede { font-size: 24px; line-height: 34px; } }
+.t-body    { font-size: 16px; line-height: 26px; color: var(--text-secondary); }
+.t-label   { font-size: 14px; line-height: 20px; font-weight: 500; }
+.t-caption { font-size: 13px; line-height: 20px; color: var(--text-tertiary); }
+/* mono: 13px/22px for blocks, .9em inline. */
+
+/* ---- Grid: 4 columns on mobile, 6 on tablet, 12 on desktop. ------------- */
+.shell { width: 100%; max-width: 1200px; margin-inline: auto; padding-inline: var(--margin); }
+.grid12 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: var(--gutter); }
+@media (min-width: 640px) { .grid12 { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .grid12 { grid-template-columns: repeat(12, minmax(0, 1fr)); } }
+.grid12 > * { min-width: 0; grid-column: 1 / -1; }
+
+/* Desktop: section headings in columns 1 to 3, content from column 4.
+   Prose spans 6 columns (about 64 characters), code and the run log up to 9. */
+@media (min-width: 1024px) {
+  .rail { grid-column: 1 / span 3; }
+  .body-col { grid-column: 4 / -1; }
+  .prose-col { grid-column: 1 / span 7; }
 }
-.block > figure { margin-top: 24px; }
+.prose, .prose-col, .aside, .ask, .t-heading, .run-note, .shot figcaption { max-width: 68ch; }
 
-code.inline {
-  font-size: .84em;
-  color: var(--k-ink);
-  background: var(--k-sand);
-  border: 1px solid var(--k-line);
-  border-radius: 4px;
-  padding: .05em .35em;
-  overflow-wrap: anywhere;
-}
+/* ---- Header and footer: one baseline each, no rules. -------------------- */
+.site-header { height: 64px; align-items: center; grid-template-columns: auto 1fr; }
+.site-header > * { grid-column: auto; }
+.wordmark { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text); text-decoration: none; font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: -.02em; }
+.wordmark .glyph { transform: translateY(-1px); }
+.meta { justify-self: end; display: flex; gap: var(--space-4); font-size: 13px; line-height: 20px; color: var(--text-tertiary); }
 
-/* Getting started: numbered steps, the number in a violet disc. */
-.steps { list-style: none; margin: 28px 0 0; padding: 0; counter-reset: step; display: flex; flex-direction: column; gap: 36px; }
-.steps > li { counter-increment: step; position: relative; padding-left: 42px; min-width: 0; }
-.steps > li::before {
-  content: counter(step);
-  position: absolute; left: 0; top: 1px;
-  width: 26px; height: 26px; border-radius: 999px; display: grid; place-items: center;
-  font-family: var(--k-mono); font-size: 12px; color: var(--k-violet);
-  background: var(--k-violet-chip); border: 1px solid var(--k-violet-chip-border);
-}
-.steps h3 { font-size: 17px; line-height: 1.55; font-weight: 400; color: var(--k-body); }
-.steps h3 strong { color: var(--k-ink); font-weight: 700; }
-.steps h3 + * { margin-top: 12px; }
-.aside { margin-top: 10px; font-size: 15px; color: var(--k-dim); }
+.site-footer { grid-template-columns: auto 1fr; align-items: center; column-gap: var(--space-4); padding-block: var(--space-12); color: var(--text-tertiary); }
+.site-footer > * { grid-column: auto; }
+.site-footer p { justify-self: end; text-align: right; }
 
-/* The prompt, as you would type it to the agent. */
-.ask { margin: 12px 0 0; padding: 4px 0 4px 16px; border-left: 3px solid var(--k-violet-btn-border); font-size: 17px; color: var(--k-ink); }
+/* ---- Sections: spacing, not borders, separates them. ------------------- */
+.intro { padding-top: var(--space-12); }
+@media (min-width: 1024px) { .intro { padding-top: var(--space-16); } }
+.tagline { margin-top: var(--space-4); }
+.intro-body { margin-top: var(--space-3); }
 
-/* Cards and their title bars (the console's #console-titlebar). */
-.card { background: var(--k-card); border: 1px solid var(--k-line); border-radius: 11px; box-shadow: 0 1px 2px rgba(27,26,23,.04); min-width: 0; }
-figure.card, figure { margin: 0; min-width: 0; }
-.titlebar { display: flex; align-items: center; gap: 12px; min-height: 42px; padding: 0 14px; background: var(--k-tint); border-bottom: 1px solid var(--k-line); min-width: 0; }
+/* Each section owns the gap above it. */
+.section { padding-top: var(--space-12); row-gap: var(--space-6); }
+.section:last-of-type { padding-bottom: var(--space-16); }
 
-/* The recorded run: a terminal card. */
-.run { margin-top: 16px; overflow: hidden; }
-.run .term { white-space: pre; }
-.run-note { padding: 12px 18px 14px; border-top: 1px solid var(--k-row-line); font-size: 14px; line-height: 1.55; color: var(--k-dim); }
+/* ---- Getting started: a plain ordered list. ---------------------------- */
+.steps { list-style: decimal; margin: 0; padding-left: 1.5em; display: flex; flex-direction: column; gap: var(--space-10); }
+.steps > li { min-width: 0; }
+/* Desktop: the numbers hang in the gutter so every step aligns to column 4. */
+@media (min-width: 1024px) { .steps { margin-left: -1.5em; } }
+.steps > li::marker { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.steps > li > * + * { margin-top: var(--space-3); }
 
-/* Code with the console's line-number gutter (#source). */
-.code { display: flex; font-size: 13px; line-height: 1.75; padding-block: 14px; }
-.code pre { margin: 0; }
-.gutter { flex: none; width: 44px; padding-right: 14px; text-align: right; color: var(--k-gutter); user-select: none; }
-.src { flex: 1; min-width: 0; overflow-x: auto; padding-right: 18px; color: var(--k-ink); }
-.tok-kw { color: var(--k-violet); }
-
-/* The terminal: mono, the REPL bar's colours. */
-.term { margin: 0; padding: 14px 18px; overflow-x: auto; font-size: 12.5px; line-height: 1.75; color: var(--k-body); }
-.tok-cmd { color: var(--k-ink); font-weight: 500; }
-.tok-ok { color: var(--k-mint); }
-.tok-out { color: var(--k-dim); }
-
-/* A command line (the REPL bar's input row). */
-.install { overflow: hidden; }
-.install-row { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 6px 8px 6px 16px; min-width: 0; }
-.prompt { font-family: var(--k-mono); color: var(--k-violet); flex: none; }
-.install-cmd { flex: 1; min-width: 0; overflow-x: auto; white-space: pre; font-size: 14px; color: var(--k-ink); padding-block: 6px; scrollbar-width: thin; }
+/* ---- Commands: a quiet surface, a copy button only where meant. -------- */
+.cmd { display: flex; align-items: center; gap: var(--space-3); min-height: 48px; padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); background: var(--surface-secondary); border-radius: var(--radius); min-width: 0; }
+.prompt { font-family: var(--mono); font-size: 13px; color: var(--text-tertiary); flex: none; user-select: none; }
+.cmd-text { flex: 1; min-width: 0; overflow-x: auto; white-space: pre; font-size: 13px; line-height: 22px; color: var(--text); padding-block: var(--space-1); scrollbar-width: thin; }
 /* From 640px the install command wraps (at its <wbr> after /releases/, or a
    space) so all of it shows; the copied text stays one line. Below, it
-   scrolls inside its frame. */
-@media (min-width: 640px) { .install-wrap { white-space: normal; overflow-x: visible; overflow-wrap: anywhere; line-height: 1.6; } }
+   scrolls inside its surface. */
+@media (min-width: 640px) { .cmd-wrap { white-space: normal; overflow-x: visible; overflow-wrap: anywhere; } }
 .copy {
-  flex: none; height: 32px; padding: 0 14px; border-radius: 6px;
-  border: 1px solid var(--k-violet-btn-border); background: var(--k-violet-chip); color: var(--k-violet);
-  font-size: 13px; font-weight: 500; cursor: pointer;
-  transition: background-color .15s, border-color .15s, transform .1s;
+  flex: none; height: 32px; padding: 0 var(--space-3); border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font-family: var(--sans); font-size: 14px; line-height: 20px; font-weight: 500; cursor: pointer;
+  transition: border-color .15s, background-color .15s;
 }
-.copy:hover { background: #ECE7F8; border-color: #B6AADB; }
-.copy:active { transform: translateY(1px); }
+.copy:hover { border-color: var(--text-tertiary); }
 
-/* A screenshot of a real page, framed like the console's app preview. */
-.shot { margin-top: 16px; border: 1px solid var(--k-line); border-radius: 11px; overflow: hidden; background: var(--k-card); box-shadow: 0 1px 2px rgba(27,26,23,.04); }
-.shot img { display: block; width: 100%; height: auto; }
+code.inline { font-size: .875em; color: var(--text); background: var(--surface-secondary); border-radius: var(--radius-small); padding: .1em .35em; overflow-wrap: anywhere; }
+.aside { color: var(--text-tertiary); }
+.ask { margin-inline: 0; color: var(--text); font-style: normal; }
+.ask::before { content: "“"; } .ask::after { content: "”"; }
+
+/* ---- The recorded run: a semantic table with a caption. ---------------- */
+figure { margin: 0; min-width: 0; }
+.run-scroll { overflow-x: auto; scrollbar-width: thin; }
+.run-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.run-table caption { text-align: left; caption-side: top; padding-bottom: var(--space-3); color: var(--text); }
+.run-sub { color: var(--text-tertiary); font-weight: 400; margin-left: var(--space-2); }
+.run-table thead th { font-size: 13px; line-height: 20px; font-weight: 500; color: var(--text-tertiary); text-align: left; padding: 0 var(--space-4) var(--space-2) 0; border-bottom: 1px solid var(--border); }
+.run-table tbody th, .run-table td { text-align: left; vertical-align: baseline; padding: var(--space-2) var(--space-4) var(--space-2) 0; border-bottom: 1px solid var(--border); font-weight: 400; white-space: nowrap; }
+.run-table tbody tr:last-child > * { border-bottom: 0; }
+.run-table code { font-size: 13px; line-height: 22px; }
+.run-table tbody th code { color: var(--text); font-weight: 500; }
+.run-table td code { color: var(--text-secondary); }
+.run-table td.tok-ok code { color: var(--ok); }
+.run-note { margin-top: var(--space-3); }
+
+/* ---- The screenshot: evidence, captioned. ------------------------------ */
+.shot img { display: block; width: 100%; height: auto; border-radius: var(--radius); outline: 1px solid var(--border); outline-offset: -1px; }
+.shot figcaption { margin-top: var(--space-2); }
+
+/* ---- Code sample. ------------------------------------------------------ */
+.code-name { margin-bottom: var(--space-2); }
+.code-name code { font-size: 13px; color: var(--text); }
+.code { display: flex; font-size: 13px; line-height: 22px; padding-block: var(--space-4); background: var(--surface-secondary); border-radius: var(--radius); }
+.code pre { margin: 0; }
+.gutter { flex: none; width: 44px; padding-right: var(--space-4); text-align: right; color: var(--text-tertiary); user-select: none; }
+.src { flex: 1; min-width: 0; overflow-x: auto; padding-right: var(--space-4); color: var(--text); scrollbar-width: thin; }
+.tok-kw { font-weight: 600; }
+
+/* ---- Links, focus, skip link, motion. ---------------------------------- */
+.link { color: var(--text); text-decoration: underline; text-decoration-color: var(--text-tertiary); text-underline-offset: 3px; text-decoration-thickness: 1px; transition: text-decoration-color .15s; }
+.link:hover { text-decoration-color: currentColor; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-small); }
+.skip { position: absolute; left: var(--space-4); top: -48px; padding: var(--space-2) var(--space-3); border-radius: var(--radius); background: var(--text); color: var(--bg); font-size: 14px; z-index: 10; }
+.skip:focus { top: var(--space-3); }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 }

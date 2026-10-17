@@ -15,7 +15,7 @@ defmodule Mix.Tasks.Site.Build do
       `agent_run/1`);
     * `forum.webp`: the forum that run built, from `site/src/forum.webp`;
     * `site.css`: the Tailwind `site` profile (input `site/src/site.css`);
-    * `fonts/*`: the Vellum fonts and their licences from `priv/static/fonts`;
+    * `fonts/*`: Geist and Geist Mono and their licence, from `site/fonts`;
     * `copy.js`: the copy-to-clipboard script, from `site/src/copy.js`.
 
   `mix site.serve` previews the result.
@@ -24,7 +24,6 @@ defmodule Mix.Tasks.Site.Build do
   use Mix.Task
 
   @site "site"
-  @fonts "priv/static/fonts"
 
   # The GitHub repository the page links to and installs from: `KINOKO_REPO`
   # (CI sets it from `github.repository`), else this placeholder locally. The install line fetches install.sh from
@@ -56,8 +55,10 @@ defmodule Mix.Tasks.Site.Build do
     for file <- ~w(copy.js forum.webp),
         do: File.cp!(Path.join([site, "src", file]), Path.join(dist, file))
 
-    for font <- File.ls!(@fonts),
-        do: File.cp!(Path.join(@fonts, font), Path.join([dist, "fonts", font]))
+    fonts = Path.join(site, "fonts")
+
+    for font <- File.ls!(fonts),
+        do: File.cp!(Path.join(fonts, font), Path.join([dist, "fonts", font]))
 
     Mix.Task.run("tailwind", ["site", "--minify", "--output=#{Path.expand("site.css", dist)}"])
     Mix.Task.reenable("tailwind")
@@ -132,9 +133,10 @@ defmodule Mix.Tasks.Site.Build do
   @doc """
   The recorded agent run (`site/samples/agent-run.jsonl`, Claude Code's
   `stream-json` events) as the page shows it: `calls`, one per Kinoko tool
-  call in order, `%{name, label, result}` (the tool without its
-  `mcp__kinoko__` prefix, the name with its key argument, and the result's
-  one line), and `summary`, the agent's closing sentence.
+  call in order, `%{name, arg, result, class}` (the tool without its
+  `mcp__kinoko__` prefix, its key argument or `""`, the result's one line,
+  and `tok-ok` for a successful step), and `summary`, the agent's closing
+  sentence.
   """
   @spec agent_run(String.t()) :: %{calls: [map()], summary: String.t()}
   def agent_run(jsonl) do
@@ -156,17 +158,17 @@ defmodule Mix.Tasks.Site.Build do
     calls =
       for {id, name, input} <- uses do
         result = summarize(Map.fetch!(results, id))
-        %{name: name, label: label(name, input), result: result, class: result_class(result)}
+
+        %{
+          name: name,
+          arg: escape(arg(input)),
+          result: escape(result),
+          class: result_class(result)
+        }
       end
 
-    width = calls |> Enum.map(&String.length(&1.label)) |> Enum.max(fn -> 0 end)
-
     %{
-      calls:
-        for call <- calls do
-          pad = String.duplicate(" ", width - String.length(call.label))
-          %{call | label: escape(call.label), result: escape(call.result)} |> Map.put(:pad, pad)
-        end,
+      calls: calls,
       summary:
         events
         |> Enum.find(&(&1["type"] == "result"))
@@ -179,11 +181,11 @@ defmodule Mix.Tasks.Site.Build do
   defp result_text(text) when is_binary(text), do: text
   defp result_text(parts), do: Enum.map_join(parts, "\n", &(&1["text"] || ""))
 
-  # The tool with its key argument: a patch id, a deployment name, a test, or
-  # the start of an expression.
-  defp label(name, input) do
+  # A call's key argument: a patch id, a deployment name, a test, or the
+  # start of an expression.
+  defp arg(input) do
     arg = input["id"] || input["name"] || input["symbol"] || input["expression"]
-    if arg, do: "#{name} #{clip(arg, 28)}", else: name
+    if arg, do: clip(arg, 28), else: ""
   end
 
   # A result's one line: the URL a deployment serves at, else the first line.

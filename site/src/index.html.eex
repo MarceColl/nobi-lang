@@ -5,114 +5,111 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Kinoko</title>
   <meta name="description" content="A local runtime for web apps built by coding agents.">
-  <meta name="theme-color" content="#F2F1EC">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235B4B96' stroke-width='1.5'%3E%3Cpath d='M12 13v8M12 21c-3 0-5-1.5-7-3M12 21c3 0 5-1.5 7-3'/%3E%3Cpath d='M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z' fill='%23E4DFF3'/%3E%3C/svg%3E">
-  <link rel="preload" href="fonts/newsreader-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0A0A0A" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23171717' stroke-width='1.75'%3E%3Cstyle%3E@media (prefers-color-scheme: dark)%7Bsvg%7Bstroke:%23EDEDED%7D%7D%3C/style%3E%3Cpath d='M12 13v8M12 21c-3 0-5-1.5-7-3M12 21c3 0 5-1.5 7-3'/%3E%3Cpath d='M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z'/%3E%3C/svg%3E">
+  <link rel="preload" href="fonts/geist-variable.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="site.css">
   <script src="copy.js" defer></script>
 </head>
-<body class="bg-paper font-sans text-body antialiased">
+<body>
 <a href="#main" class="skip">Skip to content</a>
 
-<header class="wrap flex h-16 items-center gap-6">
-  <a href="#top" class="flex items-center gap-2 text-ink" aria-label="Kinoko, back to the top">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B4B96" stroke-width="1.5" aria-hidden="true"><path d="M12 13v8"/><path d="M12 21c-3 0-5-1.5-7-3"/><path d="M12 21c3 0 5-1.5 7-3"/><path d="M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z" fill="#E4DFF3"/></svg>
-    <span class="text-[15px] font-bold tracking-[-.01em]">kinoko</span>
+<header class="shell grid12 site-header">
+  <a href="#top" class="wordmark" aria-label="Kinoko, back to the top">
+    <svg class="glyph" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M12 13v8"/><path d="M12 21c-3 0-5-1.5-7-3"/><path d="M12 21c3 0 5-1.5 7-3"/><path d="M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z"/></svg>
+    <span>kinoko</span>
   </a>
-  <nav class="ml-auto flex items-center gap-5 text-[14px]" aria-label="Project">
-    <a class="navlink" href="<%= @source_url %>">Source</a>
-    <a class="navlink" href="<%= @releases_url %>">Releases</a>
-  </nav>
+  <p class="meta"><span class="num">v<%= @version %></span><span>macOS · Linux</span></p>
 </header>
 
-<main id="main" class="page">
+<main id="main" class="shell">
 
-<section id="top" class="intro" aria-labelledby="title">
-  <h1 id="title" class="title font-display text-ink">Kinoko</h1>
-  <p class="tagline">A local runtime for web apps built by coding agents.</p>
-  <p class="lede">Connect Claude Code (or any MCP client) to Kinoko and ask it to build an app. The agent writes it; Kinoko runs it on your machine with its own database and an admin console.</p>
+<section id="top" class="grid12 intro" aria-labelledby="title">
+  <div class="prose-col">
+    <h1 id="title" class="t-display">Kinoko</h1>
+    <p class="t-lede tagline">A local runtime for web apps built by coding agents.</p>
+    <p class="t-body intro-body">Connect Claude Code (or any MCP client) to Kinoko and ask it to build an app. The agent writes it; Kinoko runs it on your machine with its own database and an admin console.</p>
+  </div>
 </section>
 
-<section id="getting-started" class="block" aria-labelledby="start-title">
-  <h2 id="start-title" class="h2">Getting started</h2>
-  <ol class="steps">
+<section id="getting-started" class="grid12 section" aria-labelledby="start-title">
+  <h2 id="start-title" class="t-title rail">Getting started</h2>
+  <ol class="steps body-col">
     <li id="step-install">
-      <h3><strong>Install</strong></h3>
-      <div class="card install">
-        <div class="install-row">
-          <span class="prompt" aria-hidden="true">$</span>
-          <code id="install" class="install-cmd install-wrap">curl -fsSL <%= String.replace(@install_url, "/releases/", "/releases/<wbr>") %> | sh</code>
-          <button type="button" class="copy" data-copy="#install" aria-label="Copy the install command">Copy</button>
-        </div>
+      <h3 class="t-heading"><strong>Install</strong></h3>
+      <div class="cmd">
+        <span class="prompt" aria-hidden="true">$</span>
+        <code id="install" class="cmd-text cmd-wrap">curl -fsSL <%= String.replace(@install_url, "/releases/", "/releases/<wbr>") %> | sh</code>
+        <button type="button" class="copy" data-copy="#install" aria-label="Copy the install command">Copy</button>
       </div>
     </li>
     <li id="step-start">
-      <h3><strong>Start Kinoko.</strong> It opens the console in your browser.</h3>
-      <div class="card install">
-        <div class="install-row">
-          <span class="prompt" aria-hidden="true">$</span>
-          <code class="install-cmd">kinoko</code>
-        </div>
+      <h3 class="t-heading"><strong>Start Kinoko.</strong> It opens the console in your browser.</h3>
+      <div class="cmd">
+        <span class="prompt" aria-hidden="true">$</span>
+        <code class="cmd-text">kinoko</code>
       </div>
     </li>
     <li id="step-connect">
-      <h3><strong>Connect your agent</strong></h3>
-      <div class="card install">
-        <div class="install-row">
-          <span class="prompt" aria-hidden="true">$</span>
-          <code id="mcp-add" class="install-cmd">claude mcp add --transport http kinoko http://localhost:4000/mcp</code>
-          <button type="button" class="copy" data-copy="#mcp-add" aria-label="Copy the claude mcp add command">Copy</button>
-        </div>
+      <h3 class="t-heading"><strong>Connect your agent</strong></h3>
+      <div class="cmd">
+        <span class="prompt" aria-hidden="true">$</span>
+        <code id="mcp-add" class="cmd-text">claude mcp add --transport http kinoko http://localhost:4000/mcp</code>
+        <button type="button" class="copy" data-copy="#mcp-add" aria-label="Copy the claude mcp add command">Copy</button>
       </div>
-      <p class="aside">Other clients: <code class="inline">kinoko mcp</code> prints the config.</p>
+      <p class="t-body aside">Other clients: <code class="inline">kinoko mcp</code> prints the config.</p>
     </li>
     <li id="step-ask">
-      <h3><strong>Ask for an app</strong></h3>
-      <blockquote class="ask">Build me a forum with threads and replies, served at forum.localhost.</blockquote>
-      <figure id="agent-run" class="card run">
-        <div class="titlebar">
-          <span class="flex-none whitespace-nowrap text-[13px] font-semibold text-ink">What the agent did</span>
-          <span class="truncate text-[12.5px] text-dim">Kinoko tool calls, from a recorded run</span>
+      <h3 class="t-heading"><strong>Ask for an app</strong></h3>
+      <blockquote class="t-body ask">Build me a forum with threads and replies, served at forum.localhost.</blockquote>
+      <figure id="agent-run" class="run">
+        <div class="run-scroll" tabindex="0" role="region" aria-labelledby="agent-run-caption">
+          <table class="run-table">
+            <caption id="agent-run-caption" class="t-label"><span class="run-title">What the agent did</span> <span class="run-sub">Kinoko tool calls, from a recorded run</span></caption>
+            <thead><tr><th scope="col">Tool</th><th scope="col">Argument</th><th scope="col">Result</th></tr></thead>
+            <tbody>
+<%= for call <- @agent_run.calls do %>              <tr><th scope="row"><code><%= call.name %></code></th> <td><code><%= call.arg %></code></td> <td class="<%= call.class %>"><code><%= call.result %></code></td></tr>
+<% end %>            </tbody>
+          </table>
         </div>
-        <pre class="term" tabindex="0" aria-label="The agent's Kinoko tool calls"><code><%= for call <- @agent_run.calls do %><span class="tok-cmd"><%= call.label %></span><%= call.pad %>  <span class="tok-out">→</span> <span class="<%= call.class %>"><%= call.result %></span>
-<% end %></code></pre>
-        <figcaption class="run-note">The agent's summary: “<%= @agent_run.summary %>” Recorded with Kinoko on port 4123.</figcaption>
+        <figcaption class="t-caption run-note">The agent's summary: “<%= @agent_run.summary %>” Recorded with Kinoko on port 4123.</figcaption>
       </figure>
     </li>
     <li id="step-open">
-      <h3><strong>Open it.</strong> The app is at <code class="inline">forum.localhost:4000</code>. The console at <code class="inline">localhost:4000/_</code> shows its code and data.</h3>
+      <h3 class="t-heading"><strong>Open it.</strong> The app is at <code class="inline">forum.localhost:4000</code>. The console at <code class="inline">localhost:4000/_</code> shows its code and data.</h3>
       <figure class="shot">
         <img src="forum.webp" width="1200" height="945" loading="lazy" alt="The forum the agent built in the recorded run: a new-thread form and one thread with one reply">
+        <figcaption class="t-caption">The forum from the recorded run, at <code class="inline">forum.localhost:4123</code>, after one thread and one reply. Unedited.</figcaption>
       </figure>
     </li>
   </ol>
 </section>
 
-<section id="example" class="block" aria-labelledby="example-title">
-  <h2 id="example-title" class="h2">An example app</h2>
-  <figure class="card overflow-hidden">
-    <div class="titlebar">
-      <span class="font-mono text-[12.5px] font-medium text-ink">counter.yabu</span>
-    </div>
-    <div class="code"><pre class="gutter" aria-hidden="true"><%= Enum.map_join(1..@counter.lines, "\n", &Integer.to_string/1) %></pre><pre class="src" tabindex="0" aria-label="counter.yabu"><code><%= @counter.html %></code></pre></div>
+<section id="example" class="grid12 section" aria-labelledby="example-title">
+  <h2 id="example-title" class="t-title rail">An example app</h2>
+  <figure class="body-col code-fig">
+    <figcaption class="t-label code-name"><code>counter.yabu</code></figcaption>
+    <div class="code"><pre class="gutter num" aria-hidden="true"><%= Enum.map_join(1..@counter.lines, "\n", &Integer.to_string/1) %></pre><pre class="src" tabindex="0" aria-label="counter.yabu"><code><%= @counter.html %></code></pre></div>
   </figure>
 </section>
 
-<section id="status" class="block" aria-labelledby="status-title">
-  <h2 id="status-title" class="h2">Status</h2>
-  <p>v<%= @release %>. macOS and Linux. Local and single-user, no hosting yet.</p>
+<section id="status" class="grid12 section" aria-labelledby="status-title">
+  <h2 id="status-title" class="t-title rail">Status</h2>
+  <p class="t-body body-col prose">v<%= @release %>. macOS and Linux. Local and single-user, no hosting yet.</p>
 </section>
 
-<section id="links" class="block" aria-labelledby="links-title">
-  <h2 id="links-title" class="h2">Links</h2>
-  <p><a class="link" href="<%= @source_url %>">Source</a> · <a class="link" href="<%= @releases_url %>">Releases</a></p>
+<section id="links" class="grid12 section" aria-labelledby="links-title">
+  <h2 id="links-title" class="t-title rail">Links</h2>
+  <p class="t-body body-col prose"><a class="link" href="<%= @source_url %>">Source</a> · <a class="link" href="<%= @releases_url %>">Releases</a></p>
 </section>
 
 </main>
 
-<footer class="wrap flex flex-wrap items-center gap-x-6 gap-y-2 py-10 text-[13px] text-dim">
-  <span>Kinoko <%= @version %></span>
-  <span class="sm:ml-auto">Set in Newsreader, Chivo and IBM Plex Mono, under the SIL Open Font License.</span>
+<footer class="shell grid12 site-footer">
+  <svg class="glyph" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" role="img" aria-label="Kinoko"><path d="M12 13v8"/><path d="M12 21c-3 0-5-1.5-7-3"/><path d="M12 21c3 0 5-1.5 7-3"/><path d="M3.5 10a8.5 5.5 0 0 1 17 0c0 1.6-3.8 2.6-8.5 2.6S3.5 11.6 3.5 10z"/></svg>
+  <p class="t-caption">Set in Geist and Geist Mono, under the SIL Open Font License.</p>
 </footer>
 </body>
 </html>
