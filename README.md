@@ -1,18 +1,29 @@
-# Kinoko
+# Nobi
 
-To start your Phoenix server:
+Nobi is an agent-oriented programming language and local runtime for web apps. Connect an MCP client, ask an agent to build an app in Nobi, and run it locally with per-deployment SQLite data and a console for inspecting the code and data.
 
-* Run `mix setup` to install and setup dependencies
-* Start Phoenix endpoint with `mix phx.server` or inside IEx with `iex -S mix phx.server`
+Nobi source defines typed models, messages, functions, tests, apps, and routes. The checker reports errors to the agent; a patch becomes live only when the resulting code typechecks as a whole. See the [content extraction](docs/CONTENT_EXTRACTION.md) for a source-backed overview and the [glossary](docs/GLOSSARY.md) for system terminology.
 
-Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
+## Run from source
 
-Ready to run in production? Please [check our deployment guides](https://hexdocs.pm/phoenix/deployment.html).
+Requires Elixir and Erlang/OTP. Install project dependencies and assets, then start Nobi:
 
-## Learn more
+```sh
+mix setup
+mix nobi.start
+```
 
-* Official website: https://www.phoenixframework.org/
-* Guides: https://hexdocs.pm/phoenix/overview.html
-* Docs: https://hexdocs.pm/phoenix
-* Forum: https://elixirforum.com/c/phoenix-forum
-* Source: https://github.com/phoenixframework/phoenix
+Nobi starts on `http://localhost:4000` by default. The console is at `http://localhost:4000/_`; MCP is at `http://localhost:4000/mcp`. Run `nobi mcp` for client configuration when using a release binary.
+
+## Check changes
+
+```sh
+mix test
+mix precommit
+```
+
+The site is built with `mix site.build`. Real language examples live in `site/samples/` and `test/fixtures/nobi/`.
+
+## Project status
+
+Nobi is under active development. The checked-in site describes the current release as local and single-user; hosted operation is not available yet. See [GitHub releases](https://github.com/MarceColl/nobi-lang/releases) for packaged binaries.
