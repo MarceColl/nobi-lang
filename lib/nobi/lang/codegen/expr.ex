@@ -150,6 +150,7 @@ defmodule Nobi.Lang.Codegen.Expr do
   @spec expr(Nobi.Lang.Ast.node_(), ctx) :: {tuple(), ctx}
   def expr({:int, _, [n]}, ctx) when n >= @i64_min and n <= @i64_max, do: {lit(n), ctx}
   def expr({:int, _, [n]}, ctx), do: {rt(:checked, [lit(n)]), ctx}
+  def expr({:float, _, [f]}, ctx), do: {lit(f), ctx}
   def expr({:str, _, [s]}, ctx), do: {lit(s), ctx}
   def expr({:bool, _, [b]}, ctx), do: {lit(b), ctx}
 

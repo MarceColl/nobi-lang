@@ -170,6 +170,7 @@ defmodule NobiWeb.Mcp.Instructions do
     case msg do App.Msg.Add(n) -> ... end    match (`do`, never `of`)
     if c do a else b end              an expression; else is required
     fn (x : Int) -> x + 1 end         lambda
+    x * 2.0   Float.from_int(n)       Float; NEVER mixed with Int
     not a / a and b / a or b          booleans; no `!`, `&&` or `||`
     x = e                             binds ONE name; no `(a, b) = e`
     case t do (m, cmd) -> m end       take a tuple apart; there is no `t.0`
@@ -264,9 +265,16 @@ defmodule NobiWeb.Mcp.Instructions do
     or you will silently drop fields, variants or branches you did not restate.
   - Symbols that change together must be in ONE patch: a patch that breaks a
     committed dependent cannot promote.
-  - A Model field holds data: Int, String, Bool, Uuid, Unit, List<T>,
+  - A Model field holds data: Int, Float, String, Bool, Uuid, Unit, List<T>,
     Map<K, V>, Option<T>, tuples, another defmodel, or your own deftype (its
     payloads data too). Never a function, Cmd or Html.
+  - Float is a double: `1.5`, `2.0e-3`, `1e3`. `+ - * / < > <= >= == !=` take
+    two Ints or two Floats, never one of each: `x * 2` with `x : Float` is a
+    type error; write `x * 2.0`, or `Float.from_int(n)` for an Int. Overflow
+    and division by zero are runtime errors (there is no NaN or infinity),
+    and `-0.0` is `0.0`. Float.round/floor/ceil give an Int back;
+    Float.to_string(x, 2) fixes the decimals. List.sum and List.sort_by take
+    Int only. A Float is never a case pattern: compare it in an `if`.
   - Construction has NO defaults: `%App.Model{...}` must list EVERY field
     (a missing one is `missing-field`). `%App.Model{row | f: v}` copies the
     rest, so add a field and you must add it to every construction.

@@ -197,6 +197,7 @@ defmodule Nobi.Lang.Format do
   defp branch(e, ind), do: ind <> fmt(e, 1, ind)
 
   defp raw({:int, _, [n]}, _), do: Integer.to_string(n)
+  defp raw({:float, _, [f]}, _), do: Nobi.Lang.Rt.float_text(f)
   defp raw({:str, _, [s]}, _), do: quote_str(s)
   defp raw({:bool, _, [b]}, _), do: to_string(b)
   defp raw({:name, _, [n]}, _), do: n

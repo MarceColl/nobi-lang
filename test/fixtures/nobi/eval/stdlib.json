@@ -272,5 +272,56 @@
    "Option.and_then(Option.Some(\"2\"), fn (s : String) -> String.to_int(s) end) == Option.Some(2)",
    "Option.and_then(Option.Some(\"x\"), fn (s : String) -> String.to_int(s) end) == Option.None"
   ]
+ },
+ {
+  "name": "Float.from_int",
+  "examples": [
+   "Float.from_int(3) == 3.0",
+   "Float.from_int(-2) / 4.0 == -0.5"
+  ]
+ },
+ {
+  "name": "Float.round",
+  "examples": [
+   "Float.round(2.5) == 3",
+   "Float.round(-2.5) == -3",
+   "Float.round(1.4) == 1"
+  ]
+ },
+ {
+  "name": "Float.floor",
+  "examples": [
+   "Float.floor(2.9) == 2",
+   "Float.floor(-1.5) == -2"
+  ]
+ },
+ {
+  "name": "Float.ceil",
+  "examples": [
+   "Float.ceil(1.1) == 2",
+   "Float.ceil(-1.9) == -1"
+  ]
+ },
+ {
+  "name": "Float.sqrt",
+  "examples": [
+   "Float.sqrt(2.25) == 1.5",
+   "Float.sqrt(0.0) == 0.0"
+  ]
+ },
+ {
+  "name": "Float.abs",
+  "examples": [
+   "Float.abs(-1.5) == 1.5",
+   "Float.abs(2.0) == 2.0"
+  ]
+ },
+ {
+  "name": "Float.to_string",
+  "examples": [
+   "Float.to_string(1234.567, 1) == \"1234.6\"",
+   "Float.to_string(-0.001, 2) == \"0.00\"",
+   "Float.to_string(2.0, 0) == \"2\""
+  ]
  }
 ]

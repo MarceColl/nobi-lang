@@ -152,7 +152,7 @@ defmodule Nobi.Lang.OracleTest do
           acc + assert_matches(label, p["source"], p)
       end
 
-    # Each program's app view gains `App.Msg` (307); 13 declarations, 5 of
+    # Each TS program's app view gains `App.Msg` (307); 13 declarations, 5 of
     # them failing ones, gain `Option` through the map-key rule.
     assert gained == 320
   end

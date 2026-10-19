@@ -2,7 +2,7 @@ defmodule Nobi.Lang.Types.Stdlib do
   @moduledoc """
   Stdlib signatures (ported from `types/stdlib.rs`): the 59 rows the checker
   resolves calls against, in the Rust/TS declared order, then the `Map` rows
-  this port adds, then `Store.get`/`Store.list`, then `Uuid.to_string`/`Uuid.parse`, then `Cmd.time.after` (73 in all). `Cmd.store.tx`
+  this port adds, then `Store.get`/`Store.list`, then `Uuid.to_string`/`Uuid.parse`, then `Cmd.time.after`, then the seven `Float` rows (80 in all). `Cmd.store.tx`
   takes a closure and `Tx.delete` a model and an id (a special form), where
   Rust's took a list of ops and a row. Generic positions use
   lowercase `{:var, "a"}` for defs and `{:var, "T"}` for the `Option`/`Result`
@@ -29,6 +29,7 @@ defmodule Nobi.Lang.Types.Stdlib do
           v = tv.("v")
           map = fn k, v -> {:applied, "Map", [k, v]} end
           int = nm.("Int")
+          float = nm.("Float")
           str = nm.("String")
           bool = nm.("Bool")
           uuid = nm.("Uuid")
@@ -141,7 +142,16 @@ defmodule Nobi.Lang.Types.Stdlib do
             # A timer (after the Uuid rows so every earlier row keeps its
             # rank): the msg itself, not a callback, delivered to `update`
             # after `ms` milliseconds.
-            {"Cmd.time.after", def_.([int, a], cmd.(a))}
+            {"Cmd.time.after", def_.([int, a], cmd.(a))},
+            # Float (after the timer so every earlier row keeps its rank).
+            # round/floor/ceil give an Int; to_string fixes 0..15 decimals.
+            {"Float.from_int", def_.([int], float)},
+            {"Float.round", def_.([float], int)},
+            {"Float.floor", def_.([float], int)},
+            {"Float.ceil", def_.([float], int)},
+            {"Float.sqrt", def_.([float], float)},
+            {"Float.abs", def_.([float], float)},
+            {"Float.to_string", def_.([float, int], str)}
           ]
         )
 

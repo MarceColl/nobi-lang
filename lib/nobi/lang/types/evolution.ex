@@ -202,6 +202,7 @@ defmodule Nobi.Lang.Types.Evolution do
 
   # A default of type `t` to show in the fix.
   defp suggest({:named, "Int"}), do: "0"
+  defp suggest({:named, "Float"}), do: "0.0"
   defp suggest({:named, "String"}), do: ~s("")
   defp suggest({:named, "Bool"}), do: "false"
   defp suggest({:applied, "List", _}), do: "[]"

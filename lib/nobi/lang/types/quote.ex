@@ -97,6 +97,7 @@ defmodule Nobi.Lang.Types.Quote do
   defp strip_meta(_), do: []
 
   defp args(:int, a, left), do: {a, left}
+  defp args(:float, a, left), do: {a, left}
   defp args(:bool, a, left), do: {a, left}
   defp args(:str, [s], left), do: {[short(s)], left}
   defp args(:name, [n], left), do: {[short(n)], left}

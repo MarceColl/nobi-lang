@@ -258,6 +258,73 @@ defmodule NobiWeb.McpSendTest do
     end
   end
 
+  describe "Float data" do
+    @runs """
+    defmodel F.Run do
+      id : Uuid
+      dps : Float = 0.0
+    end
+
+    defmodel F.Sim do
+      dps : Float
+    end
+
+    defmodel F.Model do
+      runs : List<F.Run>
+      note : String
+    end
+
+    deftype F.Msg do
+      Record(String) | Saved(Uuid) | Loaded(List<F.Run>)
+    end
+
+    def F.init() : (F.Model, Cmd<F.Msg>) do
+      (%F.Model{runs: [], note: ""}, Cmd.store.list(F.Msg.Loaded))
+    end
+
+    def F.update(msg : F.Msg, model : F.Model) : (F.Model, Cmd<F.Msg>) do
+      case msg do
+        F.Msg.Record(json) ->
+          case (JSON.parse(json) : Result<F.Sim, String>) do
+            Result.Ok(sim) -> (model, Cmd.store.insert(%F.Run{dps: sim.dps * 1.0}, F.Msg.Saved))
+            Result.Err(e) -> (%F.Model{model | note: e}, Cmd.none())
+          end
+        F.Msg.Saved(id) -> (model, Cmd.store.list(F.Msg.Loaded))
+        F.Msg.Loaded(rows) -> (%F.Model{model | runs: rows}, Cmd.none())
+      end
+    end
+
+    def F.view(model : F.Model) : Html<F.Msg> do
+      <ul>{List.map(model.runs, fn (r : F.Run) -> <li title={r.dps}>DPS {Float.to_string(r.dps, 1)} raw {r.dps}</li> end)} {model.note}</ul>
+    end
+
+    defapp F
+
+    defroutes F.Routes do
+      "/" -> F
+    end
+    """
+
+    test "a JSON number decodes into a Float, is stored as REAL, and renders", %{conn: conn} do
+      f = fresh_universe("floats")
+      assert {:promoted, _} = Universe.stage(f, "runs", @runs)
+      :ok = Deployment.create(f, f, "F.Routes", [])
+
+      text = send!(conn, f, "/", [~S|F.Msg.Record("{\"dps\": 1234.567}")|])
+      assert text =~ "Cmd.store.insert(F.Run) -> <uuid"
+      assert text =~ "dps: 1234.567"
+      assert text =~ "DPS 1234.6 raw 1234.567"
+
+      text = send!(conn, f, "/", [~S|F.Msg.Record("{\"dps\": \"fast\"}")|])
+      assert text =~ "expected Float at $.dps"
+
+      {:ok, repo} = Data.open(f)
+      {:ok, image} = Universe.image(f)
+      models = %{models: image.module.__nobi__(:models), types: image.module.__nobi__(:types)}
+      assert {:ok, [{:rec, "F.Run", %{"dps" => 1234.567}}]} = Data.list(repo, "F.Run", models)
+    end
+  end
+
   describe "bounds" do
     test "at most 20 messages, and nothing runs past that", %{conn: conn, d: d, u: u} do
       text = send_err!(conn, d, "/", List.duplicate("B.Msg.Post", 21))

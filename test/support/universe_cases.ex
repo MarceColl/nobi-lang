@@ -11,7 +11,12 @@ defmodule Nobi.Lang.UniverseCases do
   alias Nobi.Lang.{Ast, Parser, Universe}
 
   @names ~w(a b c d e f)
-  @types [{"Int", "1", "+"}, {"String", "\"s\"", "++"}, {"Bool", "true", "=="}]
+  @types [
+    {"Int", "1", "+"},
+    {"String", "\"s\"", "++"},
+    {"Bool", "true", "=="},
+    {"Float", "1.5", "+"}
+  ]
 
   # ---------- drawing ----------
 
@@ -34,7 +39,8 @@ defmodule Nobi.Lang.UniverseCases do
   """
   def def_src do
     {n, t, body, f, g, other} =
-      {int(0, 6), int(0, 3), int(0, 10), int(0, 6), int(0, 6), int(0, 3)}
+      {int(0, 6), int(0, length(@types)), int(0, 10), int(0, 6), int(0, 6),
+       int(0, length(@types))}
 
     {ty, lit, op} = Enum.at(@types, t)
     {f, g} = {Enum.at(@names, f), Enum.at(@names, g)}
@@ -55,7 +61,7 @@ defmodule Nobi.Lang.UniverseCases do
   @doc "Committed code to start from: every name, as a literal of some type."
   def base do
     for n <- @names do
-      {ty, lit, _} = Enum.at(@types, int(0, 3))
+      {ty, lit, _} = Enum.at(@types, int(0, length(@types)))
       "def M.#{n}() : #{ty} do #{lit} end"
     end
   end

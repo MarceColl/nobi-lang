@@ -341,6 +341,34 @@ defmodule Nobi.Lang.CodegenTest do
                {:nobi_error, "integer overflow"}
     end
 
+    test "Float literals and operators" do
+      src = """
+      def F.mean(a : Float, b : Float) : Float do
+        (a + b) / 2.0
+      end
+
+      def F.flip(a : Float) : Float do
+        -a * 1.0e300
+      end
+
+      def F.less(a : Float) : Bool do
+        a < 0.5 and a != -0.0
+      end
+      """
+
+      image = image!(src)
+      load(image)
+      assert call(image, "F.mean", [1.5, 2.0]) == 1.75
+
+      assert catch_throw(call(image, "F.mean", [1.0e308, 1.7e308])) ==
+               {:nobi_error, "float overflow"}
+
+      assert call(image, "F.flip", [0.0]) === 0.0
+      assert catch_throw(call(image, "F.flip", [1.0e10])) == {:nobi_error, "float overflow"}
+      assert call(image, "F.less", [0.25])
+      refute call(image, "F.less", [0.0])
+    end
+
     test "arguments are evaluated left to right" do
       src = """
       def O.f(a : Int, b : Int) : Int do

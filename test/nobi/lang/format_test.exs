@@ -274,4 +274,30 @@ defmodule Nobi.Lang.FormatTest do
       assert Cid.of(d) == Cid.of(d |> Format.decl() |> Parser.program() |> elem(1) |> hd())
     end
   end
+
+  describe "Float literals" do
+    test "print canonically, always with a dot" do
+      for {src, text} <- [
+            {"1.0", "1.0"},
+            {"1.50", "1.5"},
+            {"1e3", "1000.0"},
+            {"2.0e-3", "0.002"},
+            {"1.0e-7", "1.0e-7"},
+            {"1e300", "1.0e300"},
+            {"-0.25", "-0.25"},
+            {"0.1 + 0.2", "0.1 + 0.2"}
+          ] do
+        {:ok, e} = Parser.expr(src)
+        assert Format.expr(e) == text, src
+        survives(src)
+      end
+    end
+
+    test "a def's CID survives a format round trip" do
+      {:ok, [d]} = Parser.program("def A.f() : Float do\n  1.50e2 * 2.0\nend")
+      {:ok, [again]} = d |> Format.decl() |> Parser.program()
+      assert Format.decl(d) == "def A.f() : Float do\n  150.0 * 2.0\nend"
+      assert Cid.of(d) == Cid.of(again)
+    end
+  end
 end

@@ -110,8 +110,9 @@ defmodule Nobi.Lang.Rt do
   """
   @spec constant(term()) :: value()
   def constant(:none), do: :none
-  def constant({k, _, [v]}) when k in [:int, :str, :bool], do: v
+  def constant({k, _, [v]}) when k in [:int, :float, :str, :bool], do: v
   def constant({:neg, _, [{:int, _, [n]}]}), do: -n
+  def constant({:neg, _, [{:float, _, [f]}]}), do: fnorm(-f)
   def constant({:list, _, items}), do: Enum.map(items, &constant/1)
   def constant({:tuple, _, items}), do: items |> Enum.map(&constant/1) |> List.to_tuple()
 
@@ -134,21 +135,80 @@ defmodule Nobi.Lang.Rt do
 
   # ---------- arithmetic ----------
 
-  @doc "Checked i64 `a + b`."
+  # Ints are checked i64. Floats are doubles with no NaN or infinity (the
+  # BEAM has neither): an overflow is an error, and `-0.0` is `0.0`, so
+  # equality and map keys see one zero.
+
+  @doc "Checked `a + b`."
+  def add(a, b) when is_float(a), do: float_op(fn -> a + b end)
   def add(a, b), do: checked(a + b)
 
-  @doc "Checked i64 `a - b`."
+  @doc "Checked `a - b`."
+  def sub(a, b) when is_float(a), do: float_op(fn -> a - b end)
   def sub(a, b), do: checked(a - b)
 
-  @doc "Checked i64 `a * b`."
+  @doc "Checked `a * b`."
+  def mul(a, b) when is_float(a), do: float_op(fn -> a * b end)
   def mul(a, b), do: checked(a * b)
 
-  @doc "Checked i64 `a / b`, truncating toward zero; `b == 0` is an error."
+  @doc "Checked `a / b` (an Int's truncates toward zero); dividing by zero is an error."
   def div(_a, 0), do: error!("division by zero")
+  def div(_a, b) when is_float(b) and b == 0.0, do: error!("division by zero")
+  def div(a, b) when is_float(a), do: float_op(fn -> a / b end)
   def div(a, b), do: checked(Kernel.div(a, b))
 
-  @doc "Checked i64 `-a`."
+  @doc "Checked `-a`."
+  def neg(a) when is_float(a), do: fnorm(-a)
   def neg(a), do: checked(-a)
+
+  @doc "A float result: `-0.0` as `0.0`; past the largest double, the overflow error."
+  def float_op(f) do
+    fnorm(f.())
+  rescue
+    ArithmeticError -> error!("float overflow")
+  end
+
+  @doc "`f`, with `-0.0` as `0.0`."
+  def fnorm(f) when f == 0.0, do: 0.0
+  def fnorm(f), do: f
+
+  @doc """
+  A float's canonical text: the fewest digits that read back as `f`, always
+  with a `.`. Plain decimals from `1.0e-6` up to `1.0e21` (`1000.0`,
+  `0.001`), scientific notation past them (`1.0e21`, `1.0e-7`). Source
+  formatting, display and JSON all use it.
+  """
+  @spec float_text(float) :: String.t()
+  def float_text(f) when is_float(f) do
+    short = :erlang.float_to_binary(f, [:short])
+
+    case String.split(short, "e") do
+      [plain] -> plain
+      [mantissa, exp] -> decimal(mantissa, String.to_integer(exp), short)
+    end
+  end
+
+  defp decimal("-" <> mantissa, exp, short), do: "-" <> decimal(mantissa, exp, short)
+
+  defp decimal(mantissa, exp, _short) when exp >= -6 and exp <= 20 do
+    [int, frac] = String.split(mantissa, ".")
+    digits = int <> String.trim_trailing(frac, "0")
+    point = byte_size(int) + exp
+
+    cond do
+      point <= 0 ->
+        "0." <> String.duplicate("0", -point) <> digits
+
+      point >= byte_size(digits) ->
+        digits <> String.duplicate("0", point - byte_size(digits)) <> ".0"
+
+      true ->
+        {i, f} = String.split_at(digits, point)
+        i <> "." <> f
+    end
+  end
+
+  defp decimal(_mantissa, _exp, short), do: short
 
   @doc "`n` if it is an i64, else the overflow error (an Int literal's check)."
   def checked(n) when is_i64(n), do: n
@@ -427,8 +487,9 @@ defmodule Nobi.Lang.Rt do
   defp kind({:store, pid, ref}) when is_pid(pid) and is_reference(ref), do: 11
   defp kind(v) when is_tuple(v), do: 6
   defp kind(v) when is_function(v), do: 9
+  defp kind(v) when is_float(v), do: 12
 
-  defp same_kind(k, a, b) when k in [0, 1, 2], do: order(a, b)
+  defp same_kind(k, a, b) when k in [0, 1, 2, 12], do: order(a, b)
   defp same_kind(3, {:uuid, a}, {:uuid, b}), do: order(a, b)
   defp same_kind(4, a, b), do: lexicographic(a, b, &cmp/2)
   defp same_kind(5, a, b), do: lexicographic(sorted(a), sorted(b), &entry/2)
@@ -604,6 +665,7 @@ defmodule Nobi.Lang.Rt do
   defp child(items, acc) when is_list(items), do: Enum.reduce(items, acc, &child/2)
   defp child(s, acc) when is_binary(s), do: [html_text(s) | acc]
   defp child(n, acc) when is_integer(n), do: [html_text(Integer.to_string(n)) | acc]
+  defp child(f, acc) when is_float(f), do: [html_text(float_text(f)) | acc]
   defp child(b, acc) when is_boolean(b), do: [html_text(Atom.to_string(b)) | acc]
   defp child({:uuid, s}, acc), do: [html_text(s) | acc]
   defp child(v, _), do: mismatch!("Html, text or a list of them", v)
@@ -621,7 +683,7 @@ defmodule Nobi.Lang.Rt do
   def kind_name(v) do
     elem(
       {"an Int", "a String", "a Bool", "a Uuid", "a List", "a Map", "a tuple", "a record",
-       "a variant", "a function", "a Cmd", "a Store"},
+       "a variant", "a function", "a Cmd", "a Store", "a Float"},
       kind(v)
     )
   end
