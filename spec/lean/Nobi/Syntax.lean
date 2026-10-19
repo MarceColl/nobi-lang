@@ -153,6 +153,22 @@ def Ty.hasFnList : List Ty → Bool
   | t :: ts => Ty.hasFn t || Ty.hasFnList ts
 end
 
+mutual
+/-- Whether deftype parameter `x` occurs in `t`. -/
+def Ty.mentions (x : String) : Ty → Bool
+  | .var y => x == y
+  | .tuple ts => Ty.mentionsList x ts
+  | .list t => Ty.mentions x t
+  | .map k v => Ty.mentions x k || Ty.mentions x v
+  | .arrow ps r => Ty.mentionsList x ps || Ty.mentions x r
+  | .named _ args => Ty.mentionsList x args
+  | _ => false
+
+def Ty.mentionsList (x : String) : List Ty → Bool
+  | [] => false
+  | t :: ts => Ty.mentions x t || Ty.mentionsList x ts
+end
+
 /-- Runtime errors (`spec/semantics.md`, § Values). `stuck` is a value of the
 wrong shape for its rule; `noArm` a `case` no arm matched. Both are
 unreachable from a well-typed program. `fuel` is running out of fuel, which

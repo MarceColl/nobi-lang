@@ -47,32 +47,65 @@ def wfList (P : Prog) (tps : List String) : List Ty → TyM Unit
   | t :: ts => do wf P tps t; wfList P tps ts
 end
 
-/-- How deep `keysOk` follows a deftype's parameters into its variants. -/
-def keyDepth : Nat := 16
+/-- For each deftype, whether each of its parameters reaches a `Map` key. -/
+abbrev KeyReach := List (String × List Bool)
 
+/-- What `R` says of `m`'s parameters, if it has one flag per argument in
+`args`; else nothing is passed on (an arity error reports that). -/
+def KeyReach.flags (R : KeyReach) (m : String) (args : List Ty) : List Bool :=
+  let fs := (R.lookup m).getD []
+  if fs.length == args.length then fs else []
+
+mutual
+/-- Whether parameter `x` reaches a key in `t`: it occurs inside a `Map`'s
+key, or inside an argument to a parameter that reaches one (per `R`). -/
+def reachesKey (R : KeyReach) (x : String) : Ty → Bool
+  | .map k v => k.mentions x || reachesKey R x v
+  | .tuple ts => reachesKeyList R x [] ts
+  | .list t => reachesKey R x t
+  | .arrow ps r => reachesKeyList R x [] ps || reachesKey R x r
+  | .named m args => reachesKeyList R x (R.flags m args) args
+  | _ => false
+
+/-- `reachesKey` over `ts`, where `fs` flags the ones passed to a parameter
+that reaches a key. -/
+def reachesKeyList (R : KeyReach) (x : String) : List Bool → List Ty → Bool
+  | _, [] => false
+  | fs, t :: ts =>
+    (fs.headD false && t.mentions x) || reachesKey R x t || reachesKeyList R x fs.tail ts
+end
+
+/-- The least fixpoint of `reachesKey` over every deftype of `P`, as
+`types/keys.ex` settles it. Each round before the fixpoint turns at least
+one flag on, so one round per parameter is enough. -/
+def keyReach (P : Prog) : KeyReach :=
+  let ds := P.types ++ stdTypes
+  let step (R : KeyReach) : KeyReach :=
+    ds.map fun d => (d.name, d.params.map fun x => d.variants.any (·.2.any (reachesKey R x)))
+  let rounds := (ds.map (·.params.length)).sum
+  Nat.repeat step rounds (ds.map fun d => (d.name, d.params.map fun _ => false))
+
+mutual
 /-- Every `Map` key type in `t` is data, including keys a deftype's
 parameter reaches (`types/keys.ex`). -/
-def keysOk (P : Prog) : Nat → Ty → Bool
-  | 0, _ => true
-  | n + 1, t =>
-    match t with
-    | .map k v => !k.hasFn && keysOk P n k && keysOk P n v
-    | .tuple ts => ts.all (keysOk P n)
-    | .list t => keysOk P n t
-    | .arrow ps r => ps.all (keysOk P n) && keysOk P n r
-    | .named m args =>
-      args.all (keysOk P n) &&
-        (args.isEmpty ||
-          match P.findType m with
-          | some d =>
-            d.variants.all fun v => (Ty.substList (d.params.zip args) v.2).all (keysOk P n)
-          | none => true)
-    | _ => true
+def keysOk (R : KeyReach) : Ty → Bool
+  | .map k v => !k.hasFn && keysOk R k && keysOk R v
+  | .tuple ts => keysOkList R ts
+  | .list t => keysOk R t
+  | .arrow ps r => keysOkList R ps && keysOk R r
+  | .named m args =>
+    keysOkList R args && ((R.flags m args).zip args).all fun (f, a) => !f || !a.hasFn
+  | _ => true
+
+def keysOkList (R : KeyReach) : List Ty → Bool
+  | [] => true
+  | t :: ts => keysOk R t && keysOkList R ts
+end
 
 /-- A type written in a program: well-formed, and its map keys are data. -/
 def annot (P : Prog) (tps : List String) (t : Ty) : TyM Unit := do
   wf P tps t
-  unless keysOk P keyDepth t do
+  unless keysOk (keyReach P) t do
     fail "non-data-map-key" s!"the type `{show' t}` holds a `Map` whose key is not data"
 
 /-- Arguments against parameters: as many, each of its parameter's type. -/

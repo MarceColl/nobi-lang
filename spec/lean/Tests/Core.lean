@@ -147,6 +147,24 @@ def heavy (k : Nat) (body : Expr) : Expr :=
 #guard code (ty (.map (.arrow [.int] .int) .int [])) == "non-data-map-key"
 #guard code (ty (.map .int (.arrow [.int] .int) [])) == "ok"
 
+-- A key reached through deftype parameters, at any depth: `K0<a>` puts `a`
+-- in a key, and each `Ki<a>` passes `a` to `K(i-1)`. `R<a>` recurs.
+def keyChain (n : Nat) : Prog :=
+  { types :=
+      { name := "R", params := ["a"], variants := [("R", [.named "R" [.var "a"], .list (.var "a")])] } ::
+      (List.range (n + 1)).map fun i =>
+        if i == 0 then { name := "K0", params := ["a"], variants := [("K", [.map (.var "a") .int])] }
+        else { name := s!"K{i}", params := ["a"], variants := [("K", [.named s!"K{i - 1}" [.var "a"]])] } }
+def annotCode (P : Prog) (t : Ty) : String :=
+  match Typing.annot P [] t with
+  | .error e => e.code
+  | .ok _ => "ok"
+#guard annotCode (keyChain 0) (.named "K0" [.arrow [.int] .int]) == "non-data-map-key"
+#guard annotCode (keyChain 40) (.named "K40" [.arrow [.int] .int]) == "non-data-map-key"
+#guard annotCode (keyChain 40) (.named "K40" [.int]) == "ok"
+#guard annotCode (keyChain 0) (.named "R" [.arrow [.int] .int]) == "ok"
+#guard annotCode (keyChain 0) (.named "R" [.map (.arrow [.int] .int) .int]) == "non-data-map-key"
+
 -- [T-Construct] [E-Construct]: `id : Uuid` may be left out, and is then absent.
 #guard ty (pt 1 2) == .ok pointTy
 #guard ev (pt 1 2) == .ok (.record "T.Point" [("x", .int 1), ("y", .int 2)])

@@ -39,6 +39,15 @@ a model with none (`unbound`, `arity`). Its map keys must be **data**: no
 function type anywhere in a key type, including through a deftype parameter
 that reaches a map key (`non-data-map-key`, `types/keys.ex`).
 
+Those are the only constraints on a type itself (`types/check.ex`
+L145-213). Every type parameter stands for any type: there are no
+higher-kinded parameters, bounds or classes, so a count is all an argument
+list needs. The other rules sit where a type is declared, in [T-Program]:
+model fields and variant arguments hold data, and parameter names are
+distinct (`types/check/decl.ex` L104-165, L255-270). Because a variant
+argument never holds a function, a deftype cannot recur through one, and
+recursive deftypes need no positivity check.
+
 ## Values
 
 ```
@@ -74,6 +83,13 @@ Int only (Float arrives in spec 1.2.0).
   error `mismatch`.
 - **Literals:** non-negative (a minus is `neg`). The lexer refuses one above
   `2⁶³ − 1`; core evaluates an out-of-range literal to `overflow`.
+- **On the BEAM:** integers are unbounded bignums, so `+ − *`, negation and
+  `div` never wrap or trap, whatever the build or emulator flags. The i64
+  range is Nobi's own: `Rt.checked/1` runs after every Int operation and
+  throws `integer overflow`. Word size moves only the internal small/bignum
+  boundary (2⁵⁹ on 64-bit), which no Int operation observes. Stage 2 adds
+  probes for both facts (`B-int-bignum`, `B-int-div` in
+  `beam-assumptions.md`).
 
 Source: `rt.ex` L137-155, `lexer.ex` L116-117, `codegen/expr.ex` L151-152.
 
@@ -127,7 +143,15 @@ Source: `codegen/expr.ex` L403-404.
 ## Functions
 
 Functions are second-class in one way: a `let` never binds one (see the
-`let` rule). They are passed as arguments, held in data and returned.
+`let` rule). They are passed as arguments, returned, and held in tuples,
+lists, map values and deftype arguments (`Option<(Int) -> Int>`), but not
+in model fields or variant arguments.
+
+The `let` restriction is the checker's (`types/check.ex` L697-704: "inlined
+at the call site, never named"), kept so that the spec accepts the same
+programs. Evaluation does not need it: [E-Let] would bind a closure like any
+other value, and the BEAM compiles a lambda to an ordinary fun. Lifting it
+is a minor change.
 
 [T-Lam] Each parameter's type is well-formed, no name twice (`bad-name`), and `Γ, x₁ : τ₁ … ⊢ e : τ ⟹ Γ ⊢ fn (x₁ : τ₁ …) -> e : (τ₁ …) -> τ`. since: 1.0.0
 Source: `types/check.ex` L461-472.
