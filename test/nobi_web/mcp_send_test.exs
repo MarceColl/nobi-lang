@@ -94,6 +94,8 @@ defmodule NobiWeb.McpSendTest do
   end
   """
 
+  @ticker File.read!("test/fixtures/nobi/ticker.nobi")
+
   # ---------- helpers ----------
 
   defp call(conn, args) do
@@ -216,6 +218,44 @@ defmodule NobiWeb.McpSendTest do
     assert tool.inputSchema.required == ["deployment", "path"]
     assert NobiWeb.Mcp.Instructions.head() =~ "WRITES that deployment's data"
     assert NobiWeb.Mcp.Instructions.text() =~ "ON THAT DEPLOYMENT'S REAL DATA"
+  end
+
+  describe "timers (Cmd.time.after)" do
+    setup do
+      t = fresh_universe("tick")
+      assert {:promoted, _} = Universe.stage(t, "ticker", @ticker)
+      :ok = Deployment.create(t, t, "Main", [])
+      %{t: t}
+    end
+
+    test "fire on a virtual clock, at once, each counting as an effect", %{conn: conn, t: t} do
+      text = send!(conn, t, "/", [])
+
+      assert text =~
+               "[init]\n" <>
+                 "  Cmd.time.after(10) -> fired at 10ms => Ticker.Msg.Tick (virtual time, after 10ms)\n" <>
+                 "  Cmd.time.after(10) -> fired at 20ms => Ticker.Msg.Tick (virtual time, after 10ms)\n" <>
+                 "  Cmd.time.after(10) -> fired at 30ms => Ticker.Msg.Tick (virtual time, after 10ms)\n"
+
+      assert text =~ "view text: Count 3"
+    end
+
+    test "the earliest fires first; equal ones in the order issued", %{conn: conn, t: t} do
+      text = send!(conn, t, "/", ["Ticker.Msg.Race"])
+      assert text =~ "fired at 35ms => Ticker.Msg.Mark(\"early\")"
+      assert text =~ "fired at 50ms => Ticker.Msg.Mark(\"late\")"
+      assert text =~ ~s|log: "early-tie,late"|
+    end
+
+    test "a loop that re-arms itself ends at the step cap", %{conn: conn, t: t} do
+      text = send_err!(conn, t, "/", ["Ticker.Msg.Forever", "Ticker.Msg.Race"])
+      assert text =~ "step cap reached: 50 effects ran in one step and more were waiting"
+      assert text =~ "(Cmd.time.after(10))"
+      assert text =~ "a timer that always re-arms itself, never settles"
+      # init's 3 ticks, then 50 more.
+      assert text =~ "final model: %Ticker.Model{count: 53,"
+      refute text =~ "[send] Ticker.Msg.Race"
+    end
   end
 
   describe "bounds" do

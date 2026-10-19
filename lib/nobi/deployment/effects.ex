@@ -11,6 +11,8 @@ defmodule Nobi.Deployment.Effects do
   effects, in order (a batch's in its order):
 
     * `{:now, cb}`: `Cmd.time.now(cb)`, `cb` applied to Unix milliseconds;
+    * `{:after, ms, msg}`: `Cmd.time.after(ms, msg)`, `msg` delivered to
+      `update` after `ms` milliseconds, `ms` in `0..#{86_400_000}` (a day);
     * `{:random, lo, hi, cb}`: `Cmd.random.int(lo, hi, cb)`, `lo ≤ hi`;
     * `{:navigate, app, args}`: `Cmd.navigate(App, args…)`; `path/3` gives
       its URL in a route table;
@@ -20,7 +22,7 @@ defmodule Nobi.Deployment.Effects do
     * `{:unavailable, name}`: an effect no host runs yet (`Cmd.blob.*`,
       `Cmd.ai.*`);
     * `{:error, message}`: an effect that cannot run (`Cmd.random.int` with
-      `lo > hi`, a store effect whose model never settled), or
+      `lo > hi`, `Cmd.time.after` with `ms` out of range, a store effect whose model never settled), or
       `{:error, :unknown}` for a value that is no command.
 
   A store operation's writes are `writes/0`.
@@ -36,8 +38,12 @@ defmodule Nobi.Deployment.Effects do
 
   @none {:var, "Option", "None", []}
 
+  # The longest `Cmd.time.after` delay: a day, in milliseconds.
+  @max_after_ms 86_400_000
+
   @type effect ::
           {:now, term()}
+          | {:after, non_neg_integer(), term()}
           | {:random, integer(), integer(), term()}
           | {:navigate, String.t(), [term()]}
           | {:store, String.t(), String.t() | nil, [term()]}
@@ -56,6 +62,13 @@ defmodule Nobi.Deployment.Effects do
   defp bare(:none), do: []
   defp bare({:batch, cmds}) when is_list(cmds), do: Enum.flat_map(cmds, &bare/1)
   defp bare({:effect, "Cmd.time.now", _, [cb]}), do: [{:now, cb}]
+
+  defp bare({:effect, "Cmd.time.after", _, [ms, msg]})
+       when is_integer(ms) and ms in 0..@max_after_ms,
+       do: [{:after, ms, msg}]
+
+  defp bare({:effect, "Cmd.time.after", _, _}),
+    do: [{:error, "Cmd.time.after: ms must be 0..#{@max_after_ms}"}]
 
   defp bare({:effect, "Cmd.random.int", _, [lo, hi, cb]})
        when is_integer(lo) and is_integer(hi) and lo <= hi,
@@ -78,6 +91,7 @@ defmodule Nobi.Deployment.Effects do
   @doc "An effect as its call names it: `Cmd.store.insert(Forum.Topic)`, `Cmd.time.now`."
   @spec describe(effect()) :: String.t()
   def describe({:now, _}), do: "Cmd.time.now"
+  def describe({:after, ms, _}), do: "Cmd.time.after(#{ms})"
   def describe({:random, lo, hi, _}), do: "Cmd.random.int(#{lo}, #{hi})"
   def describe({:navigate, app, _}), do: "Cmd.navigate(#{app})"
   def describe({:store, "tx", _, _}), do: "Cmd.store.tx"

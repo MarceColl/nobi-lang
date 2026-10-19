@@ -19,9 +19,15 @@ defmodule Nobi.Deployment.Runner do
 
   Effects run one at a time in the order they were issued, a callback's
   msg goes through `update` at once and its own effects join the end of
-  the queue, until the queue is empty: a step "settles". A step may run
-  at most `max_steps` effects (default #{50}; each counts once, with or
-  without a callback); a step that reaches it stops the run there. A run
+  the queue, until the queue is empty. `Cmd.time.after` runs on a virtual
+  clock (it starts at 0 and only timers move it): a timer waits until the
+  queue is empty, then the earliest one fires, at once, and its msg goes
+  through `update` like a callback's. A step "settles" when neither
+  effects nor timers are left, so a timer never outlives its step. A step
+  may run at most `max_steps` effects (default #{50}; each counts once,
+  with or without a callback, a timer when it fires); a step that reaches
+  it stops the run there, which is where a loop that re-arms its timer
+  ends. A run
   takes at most #{20} messages. `Cmd.navigate` is reported with its URL but not followed: the
   run stays on its app. An `update` that fails stops the run.
 
@@ -83,6 +89,7 @@ defmodule Nobi.Deployment.Runner do
         steps: [],
         model: nil,
         model_type: model_type(code, app),
+        clock: 0,
         stopped?: false
       }
 
@@ -259,7 +266,7 @@ defmodule Nobi.Deployment.Runner do
         :error -> {[], [failed("(cmd)", "#{run.app} returned a command that is not a Cmd")]}
       end
 
-    {run, entries, error} = drain(run, queue, entries, 0)
+    {run, entries, error} = drain(run, queue, [], entries, 0)
 
     step = %{
       msg: label,
@@ -271,48 +278,68 @@ defmodule Nobi.Deployment.Runner do
     %{run | steps: [step | run.steps], stopped?: error != nil}
   end
 
-  # `done`: effects performed in this step, each counted once.
-  defp drain(run, [], entries, _done), do: {run, entries, nil}
+  # `done`: effects performed in this step, each counted once. `timers`:
+  # the step's `Cmd.time.after`s not yet fired, `{due, effect}` by due time
+  # (in the order issued for the same one).
+  defp drain(run, [], [], entries, _done), do: {run, entries, nil}
 
-  defp drain(run, [_ | _] = queue, entries, done) when done >= run.max do
-    left = queue |> Enum.take(@left_shown) |> Enum.map_join(", ", &Effects.describe/1)
-    more = length(queue) - @left_shown
+  defp drain(run, queue, timers, entries, done) when done >= run.max do
+    waiting = queue ++ Enum.map(timers, &elem(&1, 1))
+    left = waiting |> Enum.take(@left_shown) |> Enum.map_join(", ", &Effects.describe/1)
+    more = length(waiting) - @left_shown
     left = if more > 0, do: "#{left}, … #{more} more", else: left
 
     {run, entries,
      "step cap reached: #{run.max} effects ran in one step and more were waiting " <>
-       "(#{left}). A callback that always issues another effect never settles; nothing " <>
-       "after this step ran."}
+       "(#{left}). A callback that always issues another effect, or a timer that " <>
+       "always re-arms itself, never settles; nothing after this step ran."}
   end
 
-  defp drain(run, [effect | queue], entries, done) do
+  # Nothing else waits: the earliest timer fires, moving the clock to it.
+  defp drain(run, [], [{due, {:after, ms, msg} = effect} | timers], entries, done) do
+    entry = %{entry(effect) | value: "fired at #{due}ms", note: "virtual time, after #{ms}ms"}
+    deliver(%{run | clock: due}, msg, [], timers, entry, entries, done)
+  end
+
+  defp drain(run, [{:after, ms, _msg} = effect | queue], timers, entries, done) do
+    due = run.clock + ms
+    {before, later} = Enum.split_while(timers, fn {d, _} -> d <= due end)
+    drain(run, queue, before ++ [{due, effect} | later], entries, done)
+  end
+
+  defp drain(run, [effect | queue], timers, entries, done) do
     case perform(run, effect) do
       {:value, value, cb, entry} ->
         case apply_cb(run, cb, value) do
           {:ok, msg} ->
-            entry = %{entry | msg: msg}
-
-            case update(run, msg) do
-              {:ok, model, cmd} ->
-                more =
-                  case Effects.flatten(cmd) do
-                    {:ok, effects} -> effects
-                    :error -> [{:error, "#{run.app} returned a command that is not a Cmd"}]
-                  end
-
-                drain(%{run | model: model}, queue ++ more, [entry | entries], done + 1)
-
-              {:error, why} ->
-                {run, [entry | entries], why}
-            end
+            deliver(run, msg, queue, timers, entry, entries, done)
 
           {:error, e} ->
             entry = %{entry | error: "its callback failed: #{error_text(e)}"}
-            drain(run, queue, [entry | entries], done + 1)
+            drain(run, queue, timers, [entry | entries], done + 1)
         end
 
       {:done, entry} ->
-        drain(run, queue, [entry | entries], done + 1)
+        drain(run, queue, timers, [entry | entries], done + 1)
+    end
+  end
+
+  # `msg` through `update`; its effects join the end of the queue.
+  defp deliver(run, msg, queue, timers, entry, entries, done) do
+    entry = %{entry | msg: msg}
+
+    case update(run, msg) do
+      {:ok, model, cmd} ->
+        more =
+          case Effects.flatten(cmd) do
+            {:ok, effects} -> effects
+            :error -> [{:error, "#{run.app} returned a command that is not a Cmd"}]
+          end
+
+        drain(%{run | model: model}, queue ++ more, timers, [entry | entries], done + 1)
+
+      {:error, why} ->
+        {run, [entry | entries], why}
     end
   end
 

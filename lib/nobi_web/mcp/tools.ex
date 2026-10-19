@@ -529,12 +529,13 @@ defmodule NobiWeb.Mcp.Tools do
     do: "#{e.effect} -> ERROR: #{error}"
 
   defp effect_text(%{note: note} = e) when is_binary(note),
-    do: "#{e.effect} -> #{e.value} (#{note})"
+    do: "#{e.effect} -> #{e.value}#{msg_text(e)} (#{note})"
 
-  defp effect_text(e) do
-    msg = if e.msg == nil, do: "", else: " => " <> Runner.show(e.msg, @value_max)
-    "#{e.effect} -> #{Runner.show(e.value, @value_max)}#{msg}"
-  end
+  defp effect_text(e),
+    do: "#{e.effect} -> #{Runner.show(e.value, @value_max)}#{msg_text(e)}"
+
+  defp msg_text(%{msg: nil}), do: ""
+  defp msg_text(%{msg: msg}), do: " => " <> Runner.show(msg, @value_max)
 
   defp view_text(%{view: {:ok, html}, entries: entries}) do
     {tree, _handlers} = NobiWeb.NobiHtml.prepare(html, 0, entries)

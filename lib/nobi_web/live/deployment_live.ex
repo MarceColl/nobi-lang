@@ -70,6 +70,11 @@ defmodule NobiWeb.DeploymentLive do
       `Nobi.Elm.Effect.now/1` / `random/2`, whose task applies `cb`
       (unix milliseconds, or the integer) through `Universe.apply/4`. A
       result for an app that has since been replaced is dropped.
+    * `Cmd.time.after(ms, msg)`: `Nobi.Elm.Effect.after_ms/2`, `msg` queued
+      as a callback once `ms` have passed. It is never dropped for a full
+      queue (a lost tick would stall a loop that re-arms itself), but is
+      for a replaced mount. The static render does not start it (no
+      process effects there); the connected mount does.
     * `Cmd.navigate(App, args…)`: `Nobi.Lang.Routes.path/3` in the
       deployment's route table, then a `patch` (same LiveView; the new
       path's `handle_params` mounts the target app).
@@ -225,6 +230,9 @@ defmodule NobiWeb.DeploymentLive do
 
   def update({:nobi_callback, gen, result}, m), do: enqueue(m, {:callback, gen, result})
 
+  def update({:nobi_callback, gen, result, :keep}, m),
+    do: enqueue(m, {:callback, gen, result, :keep})
+
   def update({:stored, gen, result}, m),
     do: enqueue(%{m | storing: max(m.storing - 1, 0)}, {:callback, gen, result})
 
@@ -269,6 +277,7 @@ defmodule NobiWeb.DeploymentLive do
 
   defp droppable?({:event, _kind, _params}), do: true
   defp droppable?({:callback, _gen, _result}), do: true
+  defp droppable?({:callback, _gen, _result, :keep}), do: false
   defp droppable?(_control), do: false
 
   defp advance(%{inflight: nil} = m) do
@@ -316,6 +325,8 @@ defmodule NobiWeb.DeploymentLive do
       {:error, e} -> {:skip, fail(m, e)}
     end
   end
+
+  defp start(m, {:callback, gen, result, :keep}), do: start(m, {:callback, gen, result})
 
   defp start(m, _stale), do: {:skip, m}
 
@@ -434,6 +445,10 @@ defmodule NobiWeb.DeploymentLive do
     reply = callback(m, cb)
     {m, Fx.now(&reply.(DateTime.to_unix(&1, :millisecond)))}
   end
+
+  # The msg is the app's own value: no callback to apply, so no task.
+  defp lower_effect(m, {:after, ms, msg}, _origin),
+    do: {m, Fx.after_ms(ms, {:nobi_callback, m.gen, {:ok, msg}, :keep})}
 
   defp lower_effect(m, {:random, lo, hi, cb}, _origin),
     do: {m, Fx.random(lo..hi//1, callback(m, cb))}
