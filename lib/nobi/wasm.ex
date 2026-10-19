@@ -149,6 +149,8 @@ defmodule Nobi.Wasm do
     end
   rescue
     e -> {:error, "wasm: " <> Exception.message(e)}
+  catch
+    :exit, reason -> {:error, "wasm: " <> Exception.format_exit(reason)}
   end
 
   defp check_hash("sha256:" <> hex) when byte_size(hex) == 64 do
@@ -186,10 +188,8 @@ defmodule Nobi.Wasm do
 
   # The exports a call may name: `(i32, i32) -> i64`.
   defp callable(module) do
-    for {name, {:fn, [:i32, :i32], [:i64]}} <- Wasmex.Module.exports(module),
-        do: name,
-        into: [],
-        uniq: true
+    for({name, {:fn, [:i32, :i32], [:i64]}} <- Wasmex.Module.exports(module), do: name)
+    |> Enum.sort()
   end
 
   defp abi(module) do

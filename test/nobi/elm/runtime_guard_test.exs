@@ -59,8 +59,10 @@ defmodule Nobi.Elm.RuntimeGuardTest do
       {rt, _} = Runtime.init(Mod, :init, &Mod.init/0)
       {rt, _} = Runtime.step(rt, :bad_wasm_to_msg)
 
+      # The first WASM call loads Nobi.Wasm: allow for a busy suite.
       assert_receive {Runtime, _id, {:effect_error, "wasm bad… f (0 bytes)", %RuntimeError{}}} =
-                       msg
+                       msg,
+                     2_000
 
       {rt, _} = Runtime.info(rt, msg)
       assert [{:effect_error, _, %RuntimeError{message: "boom"}}] = rt.state

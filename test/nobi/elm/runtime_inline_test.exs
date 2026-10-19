@@ -39,7 +39,8 @@ defmodule Nobi.Elm.RuntimeInlineTest do
     {rt, _} = Runtime.init(Mod, :init, &Mod.init/0, inline: 32)
     {rt, _} = Runtime.step(rt, :wasm)
     assert rt.state == [:fetched]
-    assert_receive {Runtime, _id, {:wasm, {:error, "bad module hash"}}} = msg
+    # The first WASM call loads Nobi.Wasm: allow for a busy suite.
+    assert_receive {Runtime, _id, {:wasm, {:error, "bad module hash"}}} = msg, 2_000
     {rt, _} = Runtime.info(rt, msg)
     assert rt.state == [{:wasm, {:error, "bad module hash"}}, :fetched]
   end
