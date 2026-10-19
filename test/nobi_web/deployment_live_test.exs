@@ -12,6 +12,7 @@ defmodule NobiWeb.DeploymentLiveTest do
 
   @forum File.read!("test/fixtures/nobi/forum.nobi")
   @lab File.read!("test/fixtures/nobi/lab.nobi")
+  @ticker File.read!("test/fixtures/nobi/ticker.nobi")
   @uuid "0b6f9a52-4d1e-4c3a-9f7e-2a1b3c4d5e6f"
 
   # A route with a param and an app whose click navigates to it.
@@ -758,6 +759,67 @@ defmodule NobiWeb.DeploymentLiveTest do
     end
   end
 
+  describe "timers (Cmd.time.after)" do
+    alias Nobi.Elm.Sim
+    alias NobiWeb.DeploymentLive
+
+    setup do
+      %{u: deploy(@ticker, "Main")}
+    end
+
+    defp count(%{model: {:rec, "Ticker.Model", %{"count" => n}}}), do: n
+    defp count(_m), do: 0
+
+    test "a loop that re-arms its timer counts on its own, once connected", %{conn: conn, u: u} do
+      # The static render starts no timer.
+      static = conn |> on_host(u) |> get("/") |> html_response(200)
+      assert static =~ ~s(<span id="count">0</span>)
+
+      {view, _html} = open(conn, u, "/")
+      eventually(view, &(&1 =~ ~s(<span id="count">3</span>)))
+      refute has_element?(view, "#nobi-error")
+    end
+
+    test "the earliest timer fires first", %{conn: conn, u: u} do
+      {view, _html} = open(conn, u, "/")
+      eventually(view, &(&1 =~ ~s(<span id="count">3</span>)))
+      click(view, click_id(view, "#race"))
+      eventually(view, &(&1 =~ ~s(<span id="log">early-tie,late</span>)))
+    end
+
+    test "under Nobi.Elm.Sim each tick arrives on virtual time, the same on every walk", %{
+      u: u
+    } do
+      spec = %{
+        module: DeploymentLive,
+        init: fn ->
+          {m, fx} = DeploymentLive.init(%{}, %{"deployment" => u, "elm_connected?" => true})
+          {m, open} = DeploymentLive.update({:params, %{}, "http://#{u}.localhost/"}, m)
+          {m, [fx, open]}
+        end,
+        # Steps really run (they read the deployment); time is the simulator's.
+        outcomes: fn
+          {:task, fun}, _clock -> [{"ran", {:ok, fun.()}}]
+          _request, _clock -> nil
+        end,
+        invariants: [{"no tick before its time", fn m, world -> count(m) * 10 <= world.clock end}]
+      }
+
+      walks = for seed <- 1..3, do: Sim.run(spec, seed)
+      [walk | _] = walks
+
+      assert walk.violation == nil
+      last = List.last(walk.trace)
+      assert count(last.state) == 3 and last.clock == 30 and last.state.error == nil
+
+      fired = for %{label: "⏱ t=" <> rest} <- walk.trace, do: Integer.parse(rest) |> elem(0)
+      assert fired == [10, 20, 30]
+
+      labels = &Enum.map(&1.trace, fn node -> node.label end)
+      assert Enum.all?(walks, &(labels.(&1) == labels.(walk)))
+    end
+  end
+
   describe "deftype and Result fields" do
     test "are stored by insert and tx and read back exactly", %{conn: conn} do
       u = deploy(@kinds, "Main")
@@ -1031,6 +1093,47 @@ defmodule NobiWeb.DeploymentLiveTest do
       # Even a result for a replaced mount ends the wait.
       {m, _} = DeploymentLive.update({:stored, -1, {:ok, :msg}}, m)
       assert m.storing == 0 and not DeploymentLive.busy?(m)
+    end
+
+    test "a timer is Effect.after_ms, kept past a full queue, dropped for a replaced mount" do
+      {m, _} = DeploymentLive.update({:committed, "x", %{commit: 3}}, following(2))
+      cmd = {:cmd, {:effect, "Cmd.time.after", nil, [10, :tick]}}
+      {m, fx} = DeploymentLive.update({:stepped, 1, {:ok, %{cmd: cmd}}}, m)
+      gen = m.gen
+
+      assert {:after_ms, 10, {:nobi_callback, ^gen, {:ok, :tick}, :keep} = fired} =
+               Enum.find(List.flatten([fx]), &match?({:after_ms, _, _}, &1))
+
+      # A step in flight and 32 events waiting: a plain callback is dropped,
+      # the timer's msg waits its turn.
+      m = %{m | tree: {:text, "x"}}
+      {m, _} = DeploymentLive.update({:committed, "x", %{commit: 4}}, m)
+
+      m =
+        Enum.reduce(1..32, m, fn i, m ->
+          elem(DeploymentLive.update({:event, "nobi:click", %{"click" => "r1.e#{i}"}}, m), 0)
+        end)
+
+      {m, _} = DeploymentLive.update({:nobi_callback, gen, {:ok, :lost}}, m)
+      assert m.queued == 32
+      {m, _} = DeploymentLive.update(fired, m)
+      assert m.queued == 33
+      assert {:value, {:callback, ^gen, {:ok, :tick}, :keep}} = :queue.peek_r(m.queue)
+
+      # Idle: the current mount's timer starts a step, an older mount's does not.
+      idle = %{m | inflight: nil, queue: :queue.new(), queued: 0}
+      {stale, _} = DeploymentLive.update({:nobi_callback, gen - 1, {:ok, :tick}, :keep}, idle)
+      assert stale.inflight == nil
+      {live, _} = DeploymentLive.update(fired, idle)
+      assert live.inflight == idle.seq + 1
+    end
+
+    test "a timer out of range shows a banner and starts nothing" do
+      {m, _} = DeploymentLive.update({:committed, "x", %{commit: 3}}, following(2))
+      cmd = {:cmd, {:effect, "Cmd.time.after", nil, [-1, :tick]}}
+      {m, fx} = DeploymentLive.update({:stepped, 1, {:ok, %{cmd: cmd}}}, m)
+      assert m.error.message =~ "Cmd.time.after: ms must be 0..86400000"
+      refute Enum.any?(List.flatten([fx]), &match?({:after_ms, _, _}, &1))
     end
 
     test "a crashed step shows a generic banner, never the crash" do

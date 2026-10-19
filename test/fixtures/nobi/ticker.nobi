@@ -1,0 +1,36 @@
+defmodel Ticker.Model do
+  count : Int
+  limit : Int
+  log : String
+end
+
+deftype Ticker.Msg do
+  Tick | Forever | Race | Mark(String)
+end
+
+def Ticker.init() : (Ticker.Model, Cmd<Ticker.Msg>) do
+  (%Ticker.Model{count: 0, limit: 3, log: ""}, Cmd.time.after(10, Ticker.Msg.Tick))
+end
+
+def Ticker.update(msg : Ticker.Msg, model : Ticker.Model) : (Ticker.Model, Cmd<Ticker.Msg>) do
+  case msg do
+    Ticker.Msg.Tick -> if model.count + 1 < model.limit do (%Ticker.Model{model | count: model.count + 1}, Cmd.time.after(10, Ticker.Msg.Tick)) else (%Ticker.Model{model | count: model.count + 1}, Cmd.none()) end
+    Ticker.Msg.Forever -> (%Ticker.Model{model | limit: 1000000}, Cmd.time.after(10, Ticker.Msg.Tick))
+    Ticker.Msg.Race -> (model, Cmd.batch([Cmd.time.after(20, Ticker.Msg.Mark("late")), Cmd.time.after(5, Ticker.Msg.Mark("early")), Cmd.time.after(5, Ticker.Msg.Mark("-tie,"))]))
+    Ticker.Msg.Mark(s) -> (%Ticker.Model{model | log: String.concat(model.log, s)}, Cmd.none())
+  end
+end
+
+def Ticker.view(model : Ticker.Model) : Html<Ticker.Msg> do
+  <main id="ticker">
+    <p>Count <span id="count">{model.count}</span></p>
+    <p>Log <span id="log">{model.log}</span></p>
+    <button id="race" on-click={Ticker.Msg.Race}>Race</button>
+  </main>
+end
+
+defapp Ticker
+
+defroutes Main do
+  "/" -> Ticker
+end

@@ -284,15 +284,22 @@ defmodule NobiWeb.Mcp.Instructions do
   - Cmd values (effects) are data to `eval`: it shows the Cmd a function
     returns and runs nothing. A deployment serving the app runs them
     (Cmd.store.*, Cmd.time.now in Unix milliseconds, Cmd.random.int,
-    Cmd.navigate); Cmd.blob.*
+    Cmd.navigate, Cmd.time.after); Cmd.blob.*
     and Cmd.ai.* are not available yet.
+  - Cmd.time.after(ms, msg) delivers `msg` itself (a Msg value, not a
+    callback: `Cmd.time.after(1000, App.Msg.Tick)`) to update after `ms`
+    milliseconds, 0..86400000. update re-arms it for a loop:
+    `App.Msg.Tick -> (%App.Model{model | n: model.n + 1}, Cmd.time.after(1000, App.Msg.Tick))`.
+    A page drops a pending timer when it reopens the app; there is no cancel.
   - `send` (deployment, path, messages) runs them for real, as a page would:
     it opens `path` (its route's app, init with the URL's params), then sends
     each message, a Nobi expression of that app's Msg type
     (`Counter.Msg.Add(10)`), to update. Every effect runs, store writes
     included, ON THAT DEPLOYMENT'S REAL DATA, and callbacks go back into
     update until nothing is left (at most 50 effects per message, 20
-    messages per send). It
+    messages per send). Timers fire on a virtual clock, at once, when
+    nothing else is left, and count toward the 50: a loop that re-arms
+    its timer ends at that cap. It
     answers each effect's result or error, the model after each step, and
     the final view's text and links. Use it to prove a flow: post a row,
     see it listed. A Uuid in a message comes from text:

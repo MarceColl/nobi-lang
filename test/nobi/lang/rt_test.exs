@@ -423,7 +423,8 @@ defmodule Nobi.Lang.RtTest do
         {Stdlib.cmd_blob_get("k", text), eff.("Cmd.blob.get", ["k", text])},
         {Stdlib.cmd_blob_list("p", text), eff.("Cmd.blob.list", ["p", text])},
         {Stdlib.cmd_blob_delete("k", text), eff.("Cmd.blob.delete", ["k", text])},
-        {Stdlib.cmd_ai_generate("m", "p", text), eff.("Cmd.ai.generate", ["m", "p", text])}
+        {Stdlib.cmd_ai_generate("m", "p", text), eff.("Cmd.ai.generate", ["m", "p", text])},
+        {Stdlib.cmd_time_after(10, got), eff.("Cmd.time.after", [10, got])}
       ]
 
       for {got_cmd, want} <- cases, do: assert(got_cmd == want)

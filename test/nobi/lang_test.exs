@@ -7,6 +7,7 @@ defmodule Nobi.LangTest do
   alias Nobi.Lang.Universe
 
   @counter File.read!("test/fixtures/nobi/counter.nobi")
+  @ticker File.read!("test/fixtures/nobi/ticker.nobi")
 
   defp promoted do
     {u, {:promoted, ["counter"]}} = Lang.stage(Lang.new(), "counter", @counter)
@@ -61,6 +62,31 @@ defmodule Nobi.LangTest do
   test "unstage" do
     {u, _} = Lang.stage(Lang.new(), "x", "def A.f() : Int do\n  \"s\"\nend")
     assert {_, true} = Lang.unstage(u, "x")
+  end
+
+  describe "Cmd.time.after" do
+    test "the ticker promotes, and formats to a fixed point" do
+      assert {u, {:promoted, ["ticker"]}} = Lang.stage(Lang.new(), "ticker", @ticker)
+      assert {:ok, init} = Lang.read(u, "Ticker.init")
+      assert init =~ "Cmd.time.after(10, Ticker.Msg.Tick)"
+      assert {:ok, text} = Lang.format(@ticker)
+      assert {:ok, ^text} = Lang.format(text)
+    end
+
+    test "takes an Int and the msg itself, never a callback" do
+      {u, {:promoted, _}} = Lang.stage(Lang.new(), "ticker", @ticker)
+      cmd = &"def Ticker.later() : Cmd<Ticker.Msg> do\n  #{&1}\nend"
+
+      assert {_, {:promoted, _}} = Lang.stage(u, "ok", cmd.("Cmd.time.after(0, Ticker.Msg.Tick)"))
+
+      for {id, body} <- [
+            callback: "Cmd.time.after(10, Ticker.Msg.Mark)",
+            string: ~s|Cmd.time.after("10", Ticker.Msg.Tick)|,
+            arity: "Cmd.time.after(Ticker.Msg.Tick)"
+          ] do
+        assert {_, {:staged, [_ | _]}} = Lang.stage(u, Atom.to_string(id), cmd.(body)), body
+      end
+    end
   end
 
   describe "a parse error restaged under an id" do

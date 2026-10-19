@@ -120,7 +120,7 @@ defmodule Nobi.Exec.StdlibTest do
   end
 
   @effects ~S"""
-  deftype C.Msg do Got(Int) | Saved(Uuid) | Rows(List<C.Row>) | Row(Option<C.Row>) | Done(Result<(List<Uuid>, Int), String>) | Text(String) | Maybe(Option<String>) | Keys(List<String>) end
+  deftype C.Msg do Tick | Got(Int) | Saved(Uuid) | Rows(List<C.Row>) | Row(Option<C.Row>) | Done(Result<(List<Uuid>, Int), String>) | Text(String) | Maybe(Option<String>) | Keys(List<String>) end
   defmodel C.Row do
     id : Uuid
     text : String
@@ -140,7 +140,8 @@ defmodule Nobi.Exec.StdlibTest do
       Cmd.blob.get("k", C.Msg.Maybe),
       Cmd.blob.list("p", C.Msg.Keys),
       Cmd.blob.delete("k", C.Msg.Text),
-      Cmd.ai.generate("m", "p", C.Msg.Text)
+      Cmd.ai.generate("m", "p", C.Msg.Text),
+      Cmd.time.after(250, C.Msg.Tick)
     ]
   end
   def C.batch() : Cmd<C.Msg> do Cmd.batch([Cmd.none(), Cmd.batch([Cmd.time.now(C.Msg.Got)])]) end
@@ -167,7 +168,8 @@ defmodule Nobi.Exec.StdlibTest do
         effect("Cmd.blob.get", ["k", msg.("Maybe")]),
         effect("Cmd.blob.list", ["p", msg.("Keys")]),
         effect("Cmd.blob.delete", ["k", msg.("Text")]),
-        effect("Cmd.ai.generate", ["m", "p", msg.("Text")])
+        effect("Cmd.ai.generate", ["m", "p", msg.("Text")]),
+        effect("Cmd.time.after", [250, var("C.Msg", "Tick", [])])
       ]
 
       effect_rows =
