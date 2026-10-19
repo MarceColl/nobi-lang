@@ -8,7 +8,7 @@ defmodule NobiWeb.McpTest do
   @g "def A.g() : Int do\n  1\nend"
   @f "def A.f() : Int do\n  A.g()\nend"
 
-  @tool_names ~w(list_universes create_universe stage_patch unstage list_staged read symbols eval test history health list_deployments create_deployment guide send)
+  @tool_names ~w(list_universes create_universe stage_patch unstage list_staged read symbols eval test history health list_deployments create_deployment guide send put_wasm)
 
   # ---------- helpers ----------
 
@@ -491,6 +491,30 @@ defmodule NobiWeb.McpTest do
       by_name = Map.new(tools, &{&1["name"], &1})
       assert by_name["stage_patch"]["inputSchema"]["required"] == ["id", "source"]
       assert by_name["eval"]["inputSchema"]["properties"]["universe"]["type"] == "string"
+    end
+  end
+
+  describe "put_wasm" do
+    test "stores a module, answers its hash and exports; refuses bad input", %{conn: conn} do
+      {:ok, bytes} = Wasmex.Wat.to_wasm(File.read!("test/fixtures/wasm/echo.wat"))
+      hash = "sha256:" <> Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
+
+      assert ok!(conn, "put_wasm", %{"bytes_base64" => Base.encode64(bytes)}) ==
+               "stored: #{hash}\nexports: big, echo, garble, grow, spin, trap, upper"
+
+      assert Nobi.Wasm.call(hash, "echo", "hi") == {:ok, "hi"}
+      assert err!(conn, "put_wasm", %{"bytes_base64" => "%%%"}) == "bytes_base64 is not base64"
+
+      {:ok, imports} =
+        Wasmex.Wat.to_wasm(~s|(module (import "env" "f" (func)) (memory (export "memory") 1))|)
+
+      assert err!(conn, "put_wasm", %{"bytes_base64" => Base.encode64(imports)}) ==
+               "not stored: a module may import nothing; this one imports env.f"
+
+      refute Map.has_key?(
+               Enum.find(NobiWeb.Mcp.Tools.list(), &(&1.name == "put_wasm")).inputSchema.properties,
+               :universe
+             )
     end
   end
 

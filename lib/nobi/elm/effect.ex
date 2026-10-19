@@ -14,6 +14,9 @@ defmodule Nobi.Elm.Effect do
     * `now(to_msg)` — `to_msg.(%DateTime{})` in UTC
     * `random(range, to_msg)` — `to_msg.(integer)`
     * `task(fun, to_msg)` — escape hatch; `to_msg.({:ok, result} | {:error, reason})`
+    * `wasm(hash, export, input, to_msg)` — `Nobi.Wasm.call/4`;
+      `to_msg.({:ok, text} | {:error, reason})`. Never run inline (see
+      `Nobi.Elm.Runtime`); `Nobi.Elm.Sim` resolves it by its arguments.
 
   ## Commands — no response
 
@@ -30,6 +33,7 @@ defmodule Nobi.Elm.Effect do
           | :now
           | {:random, Range.t()}
           | {:task, (-> term())}
+          | {:wasm, String.t(), String.t(), String.t()}
   @type t ::
           {:async, request(), to_msg()}
           | {:reply, GenServer.from(), term()}
@@ -60,6 +64,11 @@ defmodule Nobi.Elm.Effect do
 
   def random(%Range{} = range, to_msg) when is_function(to_msg, 1),
     do: {:async, {:random, range}, to_msg}
+
+  @doc "Calls `export` of the WASM module `hash` on `input` (`Nobi.Wasm.call/4`)."
+  def wasm(hash, export, input, to_msg)
+      when is_binary(hash) and is_binary(export) and is_binary(input) and is_function(to_msg, 1),
+      do: {:async, {:wasm, hash, export, input}, to_msg}
 
   def task(fun, to_msg) when is_function(fun, 0) and is_function(to_msg, 1),
     do: {:async, {:task, fun}, to_msg}

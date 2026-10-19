@@ -162,7 +162,8 @@ defmodule Nobi.Exec.StdlibTest do
       Cmd.blob.list("p", C.Msg.Keys),
       Cmd.blob.delete("k", C.Msg.Text),
       Cmd.ai.generate("m", "p", C.Msg.Text),
-      Cmd.time.after(250, C.Msg.Tick)
+      Cmd.time.after(250, C.Msg.Tick),
+      Cmd.wasm.call("sha256:00", "simulate", "{}", fn (r : Result<String, String>) -> C.Msg.Text("x") end)
     ]
   end
   def C.batch() : Cmd<C.Msg> do Cmd.batch([Cmd.none(), Cmd.batch([Cmd.time.now(C.Msg.Got)])]) end
@@ -190,7 +191,8 @@ defmodule Nobi.Exec.StdlibTest do
         effect("Cmd.blob.list", ["p", msg.("Keys")]),
         effect("Cmd.blob.delete", ["k", msg.("Text")]),
         effect("Cmd.ai.generate", ["m", "p", msg.("Text")]),
-        effect("Cmd.time.after", [250, var("C.Msg", "Tick", [])])
+        effect("Cmd.time.after", [250, var("C.Msg", "Tick", [])]),
+        :wasm
       ]
 
       effect_rows =
@@ -207,6 +209,12 @@ defmodule Nobi.Exec.StdlibTest do
             assert {:cmd, {:effect, "Cmd.random.int", nil, [1, 6, f]}} = cmd
             assert is_function(f, 1)
             assert f.(3) == var("C.Msg", "Got", [6])
+
+          :wasm ->
+            assert {:cmd, {:effect, "Cmd.wasm.call", nil, ["sha256:00", "simulate", "{}", f]}} =
+                     cmd
+
+            assert f.(var("Result", "Err", ["timeout"])) == var("C.Msg", "Text", ["x"])
 
           :tx ->
             assert {:cmd, {:effect, "Cmd.store.tx", nil, [body, cb]}} = cmd

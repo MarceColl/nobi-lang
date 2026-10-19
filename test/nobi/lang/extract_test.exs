@@ -115,9 +115,9 @@ defmodule Nobi.Lang.ExtractTest do
   end
 
   describe "Stdlib" do
-    test "has the 59 Rust rows in declared order, then 9 Map, 2 Store, 2 Uuid, 1 timer and 7 Float rows" do
-      assert map_size(Stdlib.signatures()) == 80
-      assert length(Stdlib.names()) == 80
+    test "has the 59 Rust rows in declared order, then 9 Map, 2 Store, 2 Uuid, 1 timer and 7 Float rows and Cmd.wasm.call" do
+      assert map_size(Stdlib.signatures()) == 81
+      assert length(Stdlib.names()) == 81
       assert Enum.take(Stdlib.names(), 2) == ["List.map", "List.filter"]
       assert Enum.at(Stdlib.names(), 58) == "Tx.delete"
       assert Enum.slice(Stdlib.names(), 59..67) |> Enum.all?(&String.starts_with?(&1, "Map."))
@@ -126,7 +126,7 @@ defmodule Nobi.Lang.ExtractTest do
                ["Store.get", "Store.list", "Uuid.to_string", "Uuid.parse", "Cmd.time.after"]
 
       assert Enum.drop(Stdlib.names(), 73) ==
-               ~w(Float.from_int Float.round Float.floor Float.ceil Float.sqrt Float.abs Float.to_string)
+               ~w(Float.from_int Float.round Float.floor Float.ceil Float.sqrt Float.abs Float.to_string Cmd.wasm.call)
 
       assert Enum.all?(Stdlib.names(), &Map.has_key?(Stdlib.signatures(), &1))
     end

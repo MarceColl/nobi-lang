@@ -42,3 +42,7 @@ config :nobi, :ensure_main_at_boot, false
 
 # Mount the unauthenticated /mcp endpoint (off in a server build until it has auth).
 config :nobi, mcp_enabled: true
+
+# Runaway WASM ends fast in tests: about 0.2 s of fuel, a 3 s deadline and
+# 16 MiB of memory.
+config :nobi, Nobi.Wasm, fuel: 200_000_000, deadline_ms: 3_000, memory_bytes: 16 * 1024 * 1024

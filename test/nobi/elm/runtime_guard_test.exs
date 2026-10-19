@@ -6,6 +6,7 @@ defmodule Nobi.Elm.RuntimeGuardTest.Mod do
   def update(:fetch, acc), do: {acc, Fx.task(fn -> :x end, &{:got, &1})}
   def update(:bad_to_msg, acc), do: {acc, Fx.task(fn -> :x end, fn _ -> raise "boom" end)}
   def update(:throw_to_msg, acc), do: {acc, Fx.now(fn _ -> throw(:nope) end)}
+  def update(:bad_wasm_to_msg, acc), do: {acc, Fx.wasm("bad", "f", "", fn _ -> raise "boom" end)}
   def update({:sub, t}, acc), do: {acc, Fx.subscribe(Nobi.PubSub, t)}
   def update({:unsub, t}, acc), do: {acc, Fx.unsubscribe(Nobi.PubSub, t)}
   def update(msg, acc), do: {[msg | acc], Fx.none()}
@@ -50,6 +51,19 @@ defmodule Nobi.Elm.RuntimeGuardTest do
       {rt, _} = Runtime.init(Mod, :init, &Mod.init/0)
       {rt, _} = Runtime.step(rt, :bad_to_msg)
       assert_receive {Runtime, _id, {:effect_error, "task " <> _, %RuntimeError{}}} = msg
+      {rt, _} = Runtime.info(rt, msg)
+      assert [{:effect_error, _, %RuntimeError{message: "boom"}}] = rt.state
+    end
+
+    test "on a WASM result too" do
+      {rt, _} = Runtime.init(Mod, :init, &Mod.init/0)
+      {rt, _} = Runtime.step(rt, :bad_wasm_to_msg)
+
+      # The first WASM call loads Nobi.Wasm: allow for a busy suite.
+      assert_receive {Runtime, _id, {:effect_error, "wasm bad… f (0 bytes)", %RuntimeError{}}} =
+                       msg,
+                     2_000
+
       {rt, _} = Runtime.info(rt, msg)
       assert [{:effect_error, _, %RuntimeError{message: "boom"}}] = rt.state
     end

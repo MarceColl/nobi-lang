@@ -72,6 +72,10 @@ defmodule Nobi.Elm.Timeline do
   def describe({:async, :now, _}), do: "now"
   def describe({:async, {:random, range}, _}), do: "random #{inspect(range)}"
   def describe({:async, {:task, fun}, _}), do: "task #{inspect(fun)}"
+
+  def describe({:async, {:wasm, hash, export, input}, _}),
+    do: "wasm #{String.slice(hash, 0, 15)}… #{export} (#{byte_size(input)} bytes)"
+
   def describe({:reply, {pid, _}, value}), do: "reply #{short(value)} to #{inspect(pid)}"
   def describe({:send, :self, msg}), do: "dispatch #{short(msg)}"
   def describe({:send, dest, msg}), do: "send #{short(msg)} to #{inspect(dest)}"

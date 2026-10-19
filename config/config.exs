@@ -52,6 +52,19 @@ config :nobi, NobiWeb.Endpoint,
 # at the `config/runtime.exs`.
 config :nobi, Nobi.Mailer, adapter: Swoosh.Adapters.Local
 
+# WASM call limits (`Nobi.Wasm`), read at call time. Fuel is the hard CPU
+# bound: about 1e9 per second of a tight loop on the reference box, so the
+# default runs out at about the deadline. `concurrency` defaults to
+# min(schedulers, 4).
+config :nobi, Nobi.Wasm,
+  fuel: 30_000_000_000,
+  deadline_ms: 30_000,
+  memory_bytes: 256 * 1024 * 1024,
+  queue: 16,
+  max_input: 8 * 1024 * 1024,
+  max_output: 8 * 1024 * 1024,
+  max_module: 32 * 1024 * 1024
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",

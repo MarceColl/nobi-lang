@@ -7,6 +7,8 @@ defmodule Nobi.Elm.RuntimeInlineTest.Mod do
   def update(:loop, acc), do: {[:loop | acc], Fx.task(fn -> :again end, fn _ -> :loop end)}
   def update({:sub, topic}, acc), do: {acc, Fx.subscribe(Nobi.PubSub, topic, :subscribed)}
   def update(:subscribed, acc), do: {[:subscribed | acc], Fx.none()}
+  def update(:wasm, acc), do: {acc, Fx.wasm("sha256:bad", "f", "", &{:wasm, &1})}
+  def update({:wasm, r}, acc), do: {[{:wasm, r} | acc], Fx.none()}
 end
 
 defmodule Nobi.Elm.RuntimeInlineTest do
@@ -26,6 +28,21 @@ defmodule Nobi.Elm.RuntimeInlineTest do
     {rt, _} = Runtime.step(rt, :loop)
     assert Enum.count(rt.state, &(&1 == :loop)) == 4
     refute_received _
+  end
+
+  test "WASM never runs inline: a render drops it, a connected host runs it in a task" do
+    {rt, _} = Runtime.init(Mod, :init, &Mod.init/0, perform: false, inline: 32)
+    {rt, _} = Runtime.step(rt, :wasm)
+    assert rt.state == [:fetched]
+    refute_received _
+
+    {rt, _} = Runtime.init(Mod, :init, &Mod.init/0, inline: 32)
+    {rt, _} = Runtime.step(rt, :wasm)
+    assert rt.state == [:fetched]
+    # The first WASM call loads Nobi.Wasm: allow for a busy suite.
+    assert_receive {Runtime, _id, {:wasm, {:error, "bad module hash"}}} = msg, 2_000
+    {rt, _} = Runtime.info(rt, msg)
+    assert rt.state == [{:wasm, {:error, "bad module hash"}}, :fetched]
   end
 
   test "stop_inline/1 returns async effects to their own process" do

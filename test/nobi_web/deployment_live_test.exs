@@ -820,6 +820,61 @@ defmodule NobiWeb.DeploymentLiveTest do
     end
   end
 
+  describe "WASM (Cmd.wasm.call)" do
+    setup do
+      %{u: deploy(Nobi.WasmFixture.app(Nobi.WasmFixture.put!()), "W.Routes")}
+    end
+
+    test "the static render never runs WASM; the connected mount does", %{conn: conn, u: u} do
+      static = conn |> on_host(u) |> get("/") |> html_response(200)
+      assert static =~ ~s(<p id="out"></p>)
+      assert static =~ ~s(<p id="dps">0.0</p>)
+
+      {view, _html} = open(conn, u, "/")
+      html = eventually(view, &(&1 =~ ~s(<p id="dps">7.25</p>)))
+      assert html =~ ~s(<p id="runs">1</p>)
+    end
+
+    test "a loop calls, decodes the Float and re-arms with a timer", %{conn: conn, u: u} do
+      {view, _html} = open(conn, u, "/")
+      eventually(view, &(&1 =~ ~s(<p id="runs">1</p>)))
+      click(view, click_id(view, "#start"))
+      html = eventually(view, &(&1 =~ ~s(<p id="runs">4</p>)))
+      assert html =~ ~s(<p id="dps">1234.5</p>)
+      refute has_element?(view, "#nobi-error")
+    end
+
+    test "a runaway call ends as Err while the page keeps updating", %{conn: conn, u: u} do
+      {view, _html} = open(conn, u, "/")
+      eventually(view, &(&1 =~ ~s(<p id="runs">1</p>)))
+
+      click(view, click_id(view, "#spin"))
+      click(view, click_id(view, "#click"))
+      # The click is handled while `spin` burns its fuel (about 0.2 s here).
+      assert text(view, "#clicks") == "1"
+      refute text(view, "#errs") =~ "out of fuel"
+
+      eventually(view, &(&1 =~ ~s(<p id="errs">out of fuel</p>)))
+      refute has_element?(view, "#nobi-error")
+    end
+
+    test "past 4 calls in flight a call gets Err at once", %{conn: conn, u: u} do
+      {view, _html} = open(conn, u, "/")
+      eventually(view, &(&1 =~ ~s(<p id="runs">1</p>)))
+      click(view, click_id(view, "#burst"))
+
+      errs = fn html ->
+        [errs] = Regex.run(~r/<p id="errs">([^<]*)<\/p>/, html, capture: :all_but_first)
+        String.split(errs, ";", trim: true)
+      end
+
+      html = eventually(view, &(length(errs.(&1)) == 5))
+
+      assert errs.(html) |> Enum.frequencies() ==
+               %{"too many wasm calls in flight" => 1, "out of fuel" => 4}
+    end
+  end
+
   describe "deftype and Result fields" do
     test "are stored by insert and tx and read back exactly", %{conn: conn} do
       u = deploy(@kinds, "Main")
