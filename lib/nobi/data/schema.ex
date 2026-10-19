@@ -20,7 +20,7 @@ defmodule Nobi.Data.Schema do
   ## Storage types
 
   A column holds the values of one storage type (`storage_type/1`): `Int`,
-  `Bool`, `String` or `Uuid` (an `Option` of one shares it), or `JSON` and
+  `Float`, `Bool`, `String` or `Uuid` (an `Option` of one shares it), or `JSON` and
   the field's whole type. It is recorded with the column. A field whose
   type changes (a model removed and declared again under its name) never
   reads the old column as the new type: SQLite would coerce (`"0042"` into
@@ -38,8 +38,8 @@ defmodule Nobi.Data.Schema do
   ## Columns
 
   `id TEXT PRIMARY KEY` and `_seq INTEGER NOT NULL` (insertion order,
-  indexed), then one per field: `Int`/`Bool` → `INTEGER`, `String`/`Uuid` →
-  `TEXT`, `Option` of one of those → that type, nullable; anything else →
+  indexed), then one per field: `Int`/`Bool` → `INTEGER`, `Float` → `REAL`,
+  `String`/`Uuid` → `TEXT`, `Option` of one of those → that type, nullable; anything else →
   `TEXT` holding canonical JSON (`Nobi.Data.Codec`). Every field column is
   nullable and has no SQL `DEFAULT`: defaults are read-time, from the
   reader's signature (a `NULL` in a non-`Option` column is "absent").
@@ -220,7 +220,7 @@ defmodule Nobi.Data.Schema do
   shares its scalar's.
   """
   @spec storage_type(term()) :: String.t()
-  def storage_type({:named, t}) when t in ["Int", "Bool", "String", "Uuid"], do: t
+  def storage_type({:named, t}) when t in ["Int", "Float", "Bool", "String", "Uuid"], do: t
 
   def storage_type({:applied, "Option", [inner]} = type) do
     if Codec.scalar?(inner), do: storage_type(inner), else: "JSON " <> Format.type(type)
@@ -554,6 +554,7 @@ defmodule Nobi.Data.Schema do
   @doc "The SQLite column type of a field of `type` (see \"Columns\")."
   @spec column_type(term()) :: String.t()
   def column_type({:named, t}) when t in ["Int", "Bool"], do: "INTEGER"
+  def column_type({:named, "Float"}), do: "REAL"
   def column_type({:named, t}) when t in ["String", "Uuid"], do: "TEXT"
 
   def column_type({:applied, "Option", [inner]}) do

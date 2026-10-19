@@ -24,7 +24,7 @@ defmodule Nobi.Lang.Types.Check.Tree do
     {{kind, m, args}, acc}
   end
 
-  defp map_args(k, args, acc, _f) when k in [:int, :str, :bool, :name], do: {args, acc}
+  defp map_args(k, args, acc, _f) when k in [:int, :float, :str, :bool, :name], do: {args, acc}
   defp map_args(k, items, acc, f) when k in [:list, :tuple], do: Enum.map_reduce(items, acc, f)
 
   defp map_args(:map, entries, acc, f) do

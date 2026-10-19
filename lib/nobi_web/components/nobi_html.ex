@@ -288,6 +288,7 @@ defmodule NobiWeb.NobiHtml do
 
   defp stringify(s) when is_binary(s), do: s
   defp stringify(n) when is_integer(n), do: Integer.to_string(n)
+  defp stringify(f) when is_float(f), do: Nobi.Lang.Rt.float_text(f)
   defp stringify(b) when is_boolean(b), do: Atom.to_string(b)
   defp stringify({:uuid, s}) when is_binary(s), do: s
   defp stringify(_), do: nil

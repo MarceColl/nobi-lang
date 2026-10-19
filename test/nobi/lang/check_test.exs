@@ -31,6 +31,43 @@ defmodule Nobi.Lang.CheckTest do
     assert first_error(~S|def A.f() : Bool do "x" == 1 end|).code == "mismatch"
   end
 
+  describe "Float" do
+    test "operators take the operands' number type" do
+      assert ty(checks("def A.f(x : Float) : Float do x * 2.0 + 1.5 end")) == named("Float")
+      assert ty(checks("def A.f(x : Float) : Bool do -x < 0.5 end")) == named("Bool")
+      assert ty(checks("def A.f() : Float do -0.25 end")) == named("Float")
+      assert ty(checks("def A.f() : Bool do 1.5 == 1.5 end")) == named("Bool")
+      assert ty(checks("def A.f(x : Int) : Int do x / 2 - 1 end")) == @int
+    end
+
+    test "a known Float operand makes an unannotated one a Float" do
+      assert ty(
+               checks(
+                 "def A.f(xs : List<Float>) : List<Float> do List.map(xs, fn (x : Float) -> x * 2.0 end) end"
+               )
+             ) == {:applied, "List", [named("Float")]}
+    end
+
+    test "Int and Float don't mix, and the hint says how" do
+      for src <- [
+            "def A.f(x : Float) : Float do x * 2 end",
+            "def A.f(x : Int) : Float do 1.5 + x end",
+            "def A.f(x : Int) : Bool do x < 0.5 end",
+            "def A.f(x : Int) : Bool do x == 0.5 end"
+          ] do
+        err = first_error(src)
+        assert err.code == "mismatch", src
+        assert err.message =~ "Int and Float don't mix", src
+        assert err.message =~ "Float.from_int(x)", src
+      end
+    end
+
+    test "with no Float operand an operator works in Int" do
+      assert first_error("def A.f() : Float do 1 + 2 end").code == "mismatch"
+      assert first_error("def A.f(x : Int) : Float do -x end").code == "mismatch"
+    end
+  end
+
   test "occurs check fires instead of looping" do
     err = first_error("def A.f(xs : List<Int>) : Int do List.length(List.append(xs, xs)) end")
     assert err.code in ["occurs", "mismatch"]

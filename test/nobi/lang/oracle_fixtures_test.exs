@@ -4,7 +4,7 @@ defmodule Nobi.Lang.OracleFixturesTest do
   test "the golden files are whole" do
     assert length(NobiOracle.corpus()) == 4
     assert length(NobiOracle.generated()) == 300
-    assert length(NobiOracle.ill_typed()) == 307
+    assert length(NobiOracle.ill_typed()) == 310
     refute Enum.any?(NobiOracle.every_source(), fn {_, s} -> s =~ ~r/\) : Html do/ end)
   end
 end

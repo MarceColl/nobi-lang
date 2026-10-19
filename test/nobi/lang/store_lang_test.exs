@@ -117,6 +117,10 @@ defmodule Nobi.Lang.StoreLangTest do
       assert Rt.constant(e) ==
                {{:var, "Option", "Some", [-1]}, %{"a" => [{:var, "A.S", "On", []}]},
                 {:var, "Option", "None", []}}
+
+      {:ok, e} = Parser.expr("(1.5, -0.25, -0.0)")
+      assert {1.5, -0.25, zero} = Rt.constant(e)
+      assert zero === 0.0
     end
 
     test "constant defaults typecheck against their field" do
@@ -125,6 +129,8 @@ defmodule Nobi.Lang.StoreLangTest do
       defmodel A.M do
         id : Uuid
         n : Int = -3
+        f : Float = -0.5
+        g : List<Float> = [1.5, 2.0e3]
         s : String = "x"
         l : List<Int> = [1, 2]
         m : Map<String, Int> = %{"a" => 1}
@@ -475,6 +481,13 @@ defmodule Nobi.Lang.StoreLangTest do
 
       assert m ==
                "Forum.Post: new field replies : Int needs a default (replies : Int = 0) or an Option type"
+
+      {_, [m]} = refused!(v1(), "v2", @v1 |> String.replace("end", "  dps : Float\nend"))
+
+      assert m ==
+               "Forum.Post: new field dps : Float needs a default (dps : Float = 0.0) or an Option type"
+
+      promoted!(v1(), "v2", @v1 |> String.replace("end", "  dps : Float = 0.0\nend"))
     end
 
     test "several violations are each a reason" do

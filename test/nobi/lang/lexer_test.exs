@@ -218,4 +218,24 @@ defmodule Nobi.Lang.LexerTest do
       refute Ast.capitalised?("")
     end
   end
+
+  describe "floats" do
+    test "a fraction or an exponent makes a Float" do
+      assert values("1.5 2.0e-3 1e3 1E+2 0.25") == [1.5, 0.002, 1000.0, 100.0, 0.25, nil]
+      assert kinds("1.5 1e3") == [:float, :float, :eof]
+    end
+
+    test "a dot before a name, or a bare e, is not a Float" do
+      assert kinds("x.f") == [:name, :dot, :name, :eof]
+      assert kinds("1.f") == [:int, :dot, :name, :eof]
+      assert kinds("x.1") == [:name, :dot, :int, :eof]
+      assert kinds("7e") == [:int, :name, :eof]
+      assert kinds("1..2") == [:int, :dot, :dot, :int, :eof]
+    end
+
+    test "past the largest double is a parse error" do
+      assert err("x = 1.0e400") == {"float literal is out of range", 1, 5}
+      assert values("1e300") == [1.0e300, nil]
+    end
+  end
 end

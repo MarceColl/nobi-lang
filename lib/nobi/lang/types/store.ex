@@ -80,8 +80,8 @@ defmodule Nobi.Lang.Types.Store do
 
   @doc "Whether `e` is a constant a default may be (see \"Defaults\")."
   @spec constant?(term()) :: boolean()
-  def constant?({k, _, [_]}) when k in [:int, :str, :bool], do: true
-  def constant?({:neg, _, [{:int, _, [_]}]}), do: true
+  def constant?({k, _, [_]}) when k in [:int, :float, :str, :bool], do: true
+  def constant?({:neg, _, [{k, _, [_]}]}) when k in [:int, :float], do: true
   def constant?({k, _, items}) when k in [:list, :tuple], do: Enum.all?(items, &constant?/1)
 
   def constant?({:map, _, entries}),

@@ -71,6 +71,34 @@ defmodule Nobi.Lang.RtJsonTest do
     end
   end
 
+  test "Float accepts any JSON number in a double's range" do
+    assert decode("1.5", n("Float")) == {:ok, 1.5}
+    assert decode("3", n("Float")) == {:ok, 3.0}
+    assert decode("1e3", n("Float")) == {:ok, 1000.0}
+    assert decode("-2.5E-3", n("Float")) == {:ok, -0.0025}
+    assert {:ok, zero} = decode("-0", n("Float"))
+    assert zero === 0.0
+
+    assert decode(~s({"dps": 1234.567}), {:named, "J.Dps"}, %{"J.Dps" => [{"dps", n("Float")}]}) ==
+             {:ok, rec("J.Dps", %{"dps" => 1234.567})}
+
+    for bad <- ~w(1e400 -1e999 "1.5" true null [] {}) do
+      assert decode(bad, n("Float")) == {:error, "expected Float at $"}, bad
+    end
+
+    assert {:error, _} = decode("1.5", n("Int"))
+  end
+
+  test "a Float is written in its shortest form and reads back the same" do
+    for f <- [1.5, 3.0, 0.1, -0.0025, 1.0e21, 1.0e-7, 1234.567, 1.7976931348623157e308] do
+      assert {:ok, text} = stringify(f)
+      assert decode(text, n("Float")) == {:ok, f}
+    end
+
+    assert stringify(3.0) == {:ok, "3.0"}
+    assert stringify([1.5, 2.0]) == {:ok, "[1.5,2.0]"}
+  end
+
   test "String / Bool are strict" do
     assert decode(~s("hi"), n("String")) == {:ok, "hi"}
 

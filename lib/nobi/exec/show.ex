@@ -57,6 +57,7 @@ defmodule Nobi.Exec.Show do
   defp literal(v, left, depth), do: kind(v, left - 1, depth + 1)
 
   defp kind(n, left, _) when is_integer(n), do: {node(:int, [n]), left}
+  defp kind(f, left, _) when is_float(f), do: {node(:float, [f]), left}
   defp kind(b, left, _) when is_boolean(b), do: {node(:bool, [b]), left}
   defp kind(s, left, _) when is_binary(s), do: string(s, left)
   defp kind({:uuid, s}, left, _), do: {name("<uuid #{s}>"), left}

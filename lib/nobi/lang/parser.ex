@@ -146,6 +146,7 @@ defmodule Nobi.Lang.Parser do
 
   defp describe({:name, s, _, _}), do: s
   defp describe({:int, n, _, _}), do: Integer.to_string(n)
+  defp describe({:float, f, _, _}), do: Nobi.Lang.Rt.float_text(f)
   defp describe({:str, s, _, _}), do: "\"#{s}\""
   defp describe({:op, s, _, _}), do: s
   defp describe({:newline, _, _, _}), do: "newline"
@@ -785,6 +786,9 @@ defmodule Nobi.Lang.Parser do
       {:int, n, _, _} ->
         {{:int, m, [n]}, advance(p)}
 
+      {:float, f, _, _} ->
+        {{:float, m, [f]}, advance(p)}
+
       {:str, s, _, _} ->
         {{:str, m, [s]}, advance(p)}
 
@@ -1044,12 +1048,16 @@ defmodule Nobi.Lang.Parser do
       {:int, n, _, _} ->
         {{:pint, n}, advance(p)}
 
+      {:float, _, _, _} ->
+        err_at(t, float_pattern())
+
       {:str, s, _, _} ->
         {{:pstr, s}, advance(p)}
 
       {:op, "-", _, _} ->
         case peek2(p) do
           {:int, n, _, _} -> {{:pint, -n}, p |> advance() |> advance()}
+          {:float, _, _, _} -> err_at(t, float_pattern())
           _ -> err_at(t, "expected a pattern, got '-'")
         end
 
@@ -1060,6 +1068,9 @@ defmodule Nobi.Lang.Parser do
         err_at(t, "expected a pattern, got '#{describe(t)}'")
     end
   end
+
+  defp float_pattern,
+    do: "a Float is not a pattern — bind it and compare in an `if` (`x -> if x < 1.5 do … end`)"
 
   defp name_pattern(p, w, t) do
     cond do

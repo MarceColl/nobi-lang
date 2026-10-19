@@ -398,6 +398,41 @@ defmodule Nobi.Lang.Rt.Stdlib do
   def uuid_to_string({:uuid, s}) when is_binary(s), do: s
   def uuid_to_string(_), do: wrong!("Uuid.to_string")
 
+  # ---------- Float ----------
+
+  def float_from_int(n) when is_integer(n), do: n * 1.0
+  def float_from_int(_), do: wrong!("Float.from_int")
+
+  # To the nearest Int, a half away from zero.
+  def float_round(f) when is_float(f), do: Rt.checked(round(f))
+  def float_round(_), do: wrong!("Float.round")
+  def float_floor(f) when is_float(f), do: Rt.checked(floor(f))
+  def float_floor(_), do: wrong!("Float.floor")
+  def float_ceil(f) when is_float(f), do: Rt.checked(ceil(f))
+  def float_ceil(_), do: wrong!("Float.ceil")
+
+  def float_sqrt(f) when is_float(f) and f < 0.0, do: error!("Float.sqrt of a negative number")
+  def float_sqrt(f) when is_float(f), do: :math.sqrt(f)
+  def float_sqrt(_), do: wrong!("Float.sqrt")
+
+  def float_abs(f) when is_float(f), do: abs(f)
+  def float_abs(_), do: wrong!("Float.abs")
+
+  @doc "`f` with `decimals` (0..15) digits after the point, rounded; never `-0.00`."
+  def float_to_string(f, decimals) when is_float(f) and decimals in 0..15 do
+    text = :erlang.float_to_binary(f, decimals: decimals)
+
+    case text do
+      "-" <> rest -> if String.trim(rest, "0") in ["", "."], do: rest, else: text
+      _ -> text
+    end
+  end
+
+  def float_to_string(f, decimals) when is_float(f) and is_integer(decimals),
+    do: error!("Float.to_string: decimals must be 0..15, got #{decimals}")
+
+  def float_to_string(_, _), do: wrong!("Float.to_string")
+
   @doc "`Option.Some(uuid)` for a UUID in any case (kept lowercase), else `Option.None`."
   def uuid_parse(s) when is_binary(s) do
     down = String.downcase(s)

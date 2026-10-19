@@ -9,6 +9,7 @@ defmodule Nobi.Lang.Lexer do
                    `.ident` parts (`Counter.Msg.Add`). Keywords are plain names;
                    the parser decides which are keywords.
       :int         value = integer (must fit i64)
+      :float       value = float (`1.5`, `2.0e-3`, `1e3`; must fit a double)
       :str         value = decoded string
       :op          value = "==" "!=" "<=" ">=" "++" "<" ">" "+" "-" "*" "/"
       :lparen :rparen :lbracket :rbracket :lbrace :rbrace
@@ -107,17 +108,68 @@ defmodule Nobi.Lang.Lexer do
 
   defp blank_run(rest, line, col), do: %__MODULE__{rest: rest, line: line, col: col}
 
-  # ---------- ints ----------
+  # ---------- numbers ----------
 
+  # Digits are an Int, unless a fraction (`.` and a digit) or an exponent
+  # (`e`, an optional sign, a digit) follows: then a Float. `x.f` and `1.f`
+  # stay a field access.
   defp int(%{line: l, col: c} = lx) do
     {digits, lx} = take_ascii(lx, :digit)
-    n = String.to_integer(digits)
 
-    if n > @i64_max do
-      {:error, error(l, c, "integer literal is too large (limit #{@i64_max})")}
-    else
-      {:ok, {:int, n, l, c}, lx}
+    case float_tail(lx, digits) do
+      {nil, lx} ->
+        n = String.to_integer(digits)
+
+        if n > @i64_max do
+          {:error, error(l, c, "integer literal is too large (limit #{@i64_max})")}
+        else
+          {:ok, {:int, n, l, c}, lx}
+        end
+
+      {text, lx} ->
+        case Float.parse(text) do
+          {f, ""} -> {:ok, {:float, f, l, c}, lx}
+          _ -> {:error, error(l, c, "float literal is out of range")}
+        end
     end
+  end
+
+  # The fraction and exponent after an Int's digits, as the whole literal's
+  # text (always with a fraction, so `Float.parse/1` reads it), or nil.
+  defp float_tail(lx, digits) do
+    {frac, lx} =
+      case lx.rest do
+        <<?., d, _::binary>> when d in ?0..?9 ->
+          <<?., rest::binary>> = lx.rest
+          {more, lx} = take_ascii(advance(lx, ?., rest), :digit)
+          {"." <> more, lx}
+
+        _ ->
+          {nil, lx}
+      end
+
+    {exp, lx} =
+      case lx.rest do
+        <<e, d, _::binary>> when e in [?e, ?E] and d in ?0..?9 ->
+          take_exponent(lx, 1)
+
+        <<e, s, d, _::binary>> when e in [?e, ?E] and s in [?+, ?-] and d in ?0..?9 ->
+          take_exponent(lx, 2)
+
+        _ ->
+          {nil, lx}
+      end
+
+    if frac == nil and exp == nil,
+      do: {nil, lx},
+      else: {digits <> (frac || ".0") <> (exp || ""), lx}
+  end
+
+  # `e` (and a sign, when `n` is 2) and the exponent's digits.
+  defp take_exponent(%{rest: rest, col: col} = lx, n) do
+    <<head::binary-size(n), rest::binary>> = rest
+    {digits, lx} = take_ascii(%{lx | rest: rest, col: col + n}, :digit)
+    {head <> digits, lx}
   end
 
   # ---------- names ----------

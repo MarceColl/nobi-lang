@@ -104,7 +104,7 @@ defmodule Nobi.Lang.Types.JsxApp do
           Ctx.error(ctx, "mismatch", message)
 
         {:named, n} ->
-          if n in Patterns.scalars(), do: ctx, else: not_scalar(ctx, name, x, s)
+          if n in Patterns.scalars() or n == "Float", do: ctx, else: not_scalar(ctx, name, x, s)
 
         _ ->
           not_scalar(ctx, name, x, s)
@@ -208,7 +208,7 @@ defmodule Nobi.Lang.Types.JsxApp do
     {match?({:type, _, _}, sig), ctx}
   end
 
-  # `{x}` inside an element: an `Html`, a `String`, an `Int` or a
+  # `{x}` inside an element: an `Html`, a `String`, an `Int`, a `Float` or a
   # `List<Html>`, the `Html` sending what the element sends. A type still
   # open is taken to be that `Html`.
   defp synth_child(ctx, x, sends) do
@@ -219,7 +219,7 @@ defmodule Nobi.Lang.Types.JsxApp do
     {ok, ctx} =
       case resolved do
         {:named, n} ->
-          {n in ["String", "Int"], ctx}
+          {n in ["String", "Int", "Float"], ctx}
 
         # A mismatch of what is sent is reported as one; the child is of a
         # kind an element holds all the same.

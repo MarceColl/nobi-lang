@@ -2,7 +2,7 @@ defmodule Nobi.Data.Codec do
   @moduledoc """
   Field values to SQLite cells and back.
 
-  Writing is by the field's type: `Int` as itself, `Bool` as `0`/`1`,
+  Writing is by the field's type: `Int` and `Float` as themselves, `Bool` as `0`/`1`,
   `String` as itself, `Uuid` as its canonical text, `Option` of one of
   those as the inner value or `NULL`; anything else as canonical JSON text
   (`Nobi.Lang.Rt.Json`), an `Option` of it `None` as `NULL`. A JSON cell
@@ -30,7 +30,7 @@ defmodule Nobi.Data.Codec do
   alias Nobi.Lang.Format
   alias Nobi.Lang.Rt.Json
 
-  @scalars ["Int", "Bool", "String", "Uuid"]
+  @scalars ["Int", "Float", "Bool", "String", "Uuid"]
   @none {:var, "Option", "None", []}
   @i64_min -9_223_372_036_854_775_808
   @i64_max 9_223_372_036_854_775_807
@@ -101,6 +101,7 @@ defmodule Nobi.Data.Codec do
   def encode({:named, "Int"}, n, _models) when is_integer(n) and n >= @i64_min and n <= @i64_max,
     do: {:ok, n}
 
+  def encode({:named, "Float"}, f, _models) when is_float(f), do: {:ok, f}
   def encode({:named, "Bool"}, true, _models), do: {:ok, 1}
   def encode({:named, "Bool"}, false, _models), do: {:ok, 0}
 
@@ -195,6 +196,9 @@ defmodule Nobi.Data.Codec do
   defp absent(_type, :none), do: {:error, "the stored value is NULL and the field has no default"}
 
   defp decode({:named, "Int"}, n, _models) when is_integer(n), do: {:ok, n}
+  defp decode({:named, "Float"}, f, _models) when is_float(f), do: {:ok, Nobi.Lang.Rt.fnorm(f)}
+  # SQLite may hand a whole REAL back as an integer.
+  defp decode({:named, "Float"}, n, _models) when is_integer(n), do: {:ok, n * 1.0}
   defp decode({:named, "Bool"}, 1, _models), do: {:ok, true}
   defp decode({:named, "Bool"}, 0, _models), do: {:ok, false}
 

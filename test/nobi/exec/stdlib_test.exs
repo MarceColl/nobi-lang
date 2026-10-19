@@ -65,7 +65,7 @@ defmodule Nobi.Exec.StdlibTest do
             do: "#{name}: `#{example}` gave #{inspect(r)}"
 
       assert failures == []
-      assert {length(rows), length(results)} == {36, 94}
+      assert {length(rows), length(results)} == {43, 110}
 
       [divergent] = @divergent
       assert value(divergent) == false
@@ -86,6 +86,27 @@ defmodule Nobi.Exec.StdlibTest do
           not exempt?.(name),
           do: assert(name in rows, "#{name}: a stdlib def without examples")
     end
+  end
+
+  test "Float rows: errors where a result has no value" do
+    u = Lang.snapshot(Lang.new())
+    error = fn expr -> Exec.eval(u, expr) end
+
+    for {expr, why} <- [
+          {"Float.round(1.0e300)", "integer overflow"},
+          {"Float.floor(-1.0e19)", "integer overflow"},
+          {"Float.ceil(9.3e18)", "integer overflow"},
+          {"Float.sqrt(-1.0)", "Float.sqrt of a negative number"},
+          {"Float.to_string(1.5, 16)", "Float.to_string: decimals must be 0..15, got 16"},
+          {"Float.to_string(1.5, -1)", "Float.to_string: decimals must be 0..15, got -1"},
+          {"1.0e308 * 10.0", "float overflow"},
+          {"1.5 / 0.0", "division by zero"}
+        ] do
+      assert {:error, %{code: "runtime", message: ^why}} = error.(expr), expr
+    end
+
+    assert value("Float.to_string(Float.from_int(7) / 2.0, 2)") == "3.50"
+    assert value("List.map([0.5, 1.5, -2.5], Float.round)") == [1, 2, -3]
   end
 
   test "a stdlib def applied as a value is the same function" do

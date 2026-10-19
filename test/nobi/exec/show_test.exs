@@ -38,6 +38,9 @@ defmodule Nobi.Exec.ShowTest do
 
     cases = [
       {-3, "-3"},
+      {1.5, "1.5"},
+      {-0.25, "-0.25"},
+      {1000.0, "1000.0"},
       {"say \"hi\"\n", ~S("say \"hi\"\n")},
       {true, "true"},
       {{:uuid, @id}, "<uuid #{@id}>"},
@@ -254,6 +257,7 @@ defmodule Nobi.Exec.ShowTest do
             {:cmd, {:batch, [:none, {:batch, [:none]}]}},
             %{[1, 2] => {true, "a"}, [] => {false, "\u{1F44B}\t"}},
             {:rec, "M.P", %{"x" => -9_223_372_036_854_775_807}},
+            [1.5, -0.25, 1.0e300, 1.0e-7, 0.0],
             element("p", [{"on-click", var("M.Msg", "Go")}, {"class", "a b"}], [
               text("hi there"),
               text("a<b"),

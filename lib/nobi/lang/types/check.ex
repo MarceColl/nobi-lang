@@ -326,6 +326,7 @@ defmodule Nobi.Lang.Types.Check do
   end
 
   defp synth_form(ctx, {:int, _, _} = e), do: {put_ann(e, named("Int"), nil), ctx}
+  defp synth_form(ctx, {:float, _, _} = e), do: {put_ann(e, named("Float"), nil), ctx}
   defp synth_form(ctx, {:str, _, _} = e), do: {put_ann(e, named("String"), nil), ctx}
   defp synth_form(ctx, {:bool, _, _} = e), do: {put_ann(e, named("Bool"), nil), ctx}
 
@@ -384,16 +385,24 @@ defmodule Nobi.Lang.Types.Check do
     {ls, ctx} = synth(ctx, l)
     {rs, ctx} = synth(ctx, r)
 
-    ctx =
+    {t, ctx} =
       case operand(op) do
         # Polymorphic, but both sides alike.
-        nil -> Ctx.unify!(ctx, ty(rs), ty(ls), r)
-        t -> ctx |> Ctx.unify!(ty(ls), named(t), l) |> Ctx.unify!(ty(rs), named(t), r)
+        nil ->
+          {nil, unify_operands(ctx, ty(rs), ty(ls), r)}
+
+        # `Int`, or `Float` when a side already is one: never a mix.
+        :number ->
+          t = number(ctx, [ty(ls), ty(rs)])
+          {t, ctx |> unify_operands(ty(ls), named(t), l) |> unify_operands(ty(rs), named(t), r)}
+
+        t ->
+          {t, ctx |> Ctx.unify!(ty(ls), named(t), l) |> Ctx.unify!(ty(rs), named(t), r)}
       end
 
     result =
       cond do
-        op in [:+, :-, :*, :/] -> "Int"
+        op in [:+, :-, :*, :/] -> t
         op == :++ -> "String"
         true -> "Bool"
       end
@@ -401,11 +410,17 @@ defmodule Nobi.Lang.Types.Check do
     {put_ann({:bin, m, [op, ls, rs]}, named(result), nil), ctx}
   end
 
-  defp synth_form(ctx, {kind, m, [x]}) when kind in [:not, :neg, :always, :sometimes] do
+  defp synth_form(ctx, {:neg, m, [x]}) do
+    {s, ctx} = synth(ctx, x)
+    t = number(ctx, [ty(s)])
+    ctx = Ctx.unify!(ctx, ty(s), named(t), x)
+    {put_ann({:neg, m, [s]}, named(t), nil), ctx}
+  end
+
+  defp synth_form(ctx, {kind, m, [x]}) when kind in [:not, :always, :sometimes] do
     {operand, result} =
       case kind do
         :not -> {"Bool", "Bool"}
-        :neg -> {"Int", "Int"}
         _ -> {"Bool", "Unit"}
       end
 
@@ -489,10 +504,33 @@ defmodule Nobi.Lang.Types.Check do
     {put_ann({:annot, m, [s, t]}, annotated, res(s)), ctx}
   end
 
-  defp operand(op) when op in [:+, :-, :*, :/, :<, :>, :<=, :>=], do: "Int"
+  defp operand(op) when op in [:+, :-, :*, :/, :<, :>, :<=, :>=], do: :number
   defp operand(:++), do: "String"
   defp operand(op) when op in [:and, :or], do: "Bool"
   defp operand(_), do: nil
+
+  # The type an arithmetic or ordering operator works in: `Float` when one
+  # of `types` already is, else `Int` (an operand not yet known defaults to
+  # `Int`, as before `Float`).
+  defp number(ctx, types) do
+    if Enum.any?(types, &(Ctx.shallow(ctx, &1) == {:named, "Float"})), do: "Float", else: "Int"
+  end
+
+  # `Ctx.unify!/4`, but an `Int` met with a `Float` says how to mix them.
+  defp unify_operands(ctx, got, expected, e) do
+    case {Ctx.shallow(ctx, got), Ctx.shallow(ctx, expected)} do
+      {{:named, a}, {:named, b}}
+      when a != b and a in ["Int", "Float"] and b in ["Int", "Float"] ->
+        Ctx.error(
+          ctx,
+          "mismatch",
+          "type mismatch: expected #{b}, got #{a} in `#{Quote.expr(e)}` — Int and Float don't mix; write `2.0` for a Float literal or `Float.from_int(x)`"
+        )
+
+      _ ->
+        Ctx.unify!(ctx, got, expected, e)
+    end
+  end
 
   # `id : Uuid` is identity, not data: the store mints it, so a
   # construction never supplies it.

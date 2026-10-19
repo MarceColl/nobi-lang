@@ -17,8 +17,10 @@ defmodule Nobi.Lang.Rt.Json do
   itself, any other key as its own compact JSON text. `parse` reads a key
   back the same way, by the map's declared key type.
 
-  A number is an `Int` when its exact value is a whole number within i64;
-  a lone surrogate escape is not JSON. Text or a value nested deeper than
+  A number is an `Int` when its exact value is a whole number within i64,
+  and a `Float` when it is within a double's range (`3` and `1e3` too);
+  a Float is written in its shortest form that reads back the same
+  (`Nobi.Lang.Rt.float_text/1`). A lone surrogate escape is not JSON. Text or a value nested deeper than
   100,000 levels is refused (text as an `Err`, a value as a runtime error).
 
   `models` is `%{model => [{field, type, default}]}` (the image's
@@ -346,6 +348,13 @@ defmodule Nobi.Lang.Rt.Json do
           _ -> expected!("Int", at)
         end
 
+      {:named, "Float"} ->
+        with {:num, text} <- json, {f, ""} <- Float.parse(text) do
+          Rt.fnorm(f)
+        else
+          _ -> expected!("Float", at)
+        end
+
       {:named, "String"} ->
         case json do
           {:str, s} -> s
@@ -631,6 +640,9 @@ defmodule Nobi.Lang.Rt.Json do
     case v do
       n when is_integer(n) ->
         Integer.to_string(n)
+
+      f when is_float(f) ->
+        Rt.float_text(f)
 
       b when is_boolean(b) ->
         Atom.to_string(b)

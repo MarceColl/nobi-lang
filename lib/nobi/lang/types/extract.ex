@@ -23,7 +23,7 @@ defmodule Nobi.Lang.Types.Extract do
   """
   @type default :: :none | Ast.node_()
 
-  @builtin_named ~w(Int String Bool Uuid Unit Store Href)
+  @builtin_named ~w(Int Float String Bool Uuid Unit Store Href)
   @builtin_applied %{"List" => 1, "Map" => 2, "Cmd" => 1, "Html" => 1}
 
   @doc "Names that are never dependencies in type position."
@@ -126,7 +126,7 @@ defmodule Nobi.Lang.Types.Extract do
 
   defp exprs(list), do: Enum.flat_map(list, &expr/1)
 
-  defp expr({k, _, [_]}) when k in [:int, :str, :bool], do: []
+  defp expr({k, _, [_]}) when k in [:int, :float, :str, :bool], do: []
   defp expr({:name, _, [n]}), do: name_deps(n)
   defp expr({k, _, items}) when k in [:list, :tuple], do: exprs(items)
   defp expr({:map, _, entries}), do: Enum.flat_map(entries, fn {k, v} -> expr(k) ++ expr(v) end)

@@ -55,7 +55,7 @@ defmodule Nobi.Lang.Ast do
   @spec name(decl) :: String.t()
   def name({_kind, _meta, [name | _]}) when is_binary(name), do: name
 
-  @node_kinds ~w(int str bool name list map tuple bin not neg call field construct update case
+  @node_kinds ~w(int float str bool name list map tuple bin not neg call field construct update case
                  if fn block always sometimes jsx annot def defmodel deftype defapp deftest
                  defroutes)a
 

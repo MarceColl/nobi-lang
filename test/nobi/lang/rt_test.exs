@@ -43,6 +43,45 @@ defmodule Nobi.Lang.RtTest do
       assert catch_throw(Rt.div(1, 0)) == {:nobi_error, "division by zero"}
     end
 
+    test "Float arithmetic is plain, with no NaN, infinity or -0.0" do
+      assert Rt.add(1.5, 2.25) == 3.75
+      assert Rt.sub(1.0, 0.25) == 0.75
+      assert Rt.mul(1.5, 2.0) == 3.0
+      assert Rt.div(1.0, 4.0) == 0.25
+      assert Rt.neg(1.5) == -1.5
+      assert catch_throw(Rt.mul(1.0e308, 10.0)) == {:nobi_error, "float overflow"}
+      assert catch_throw(Rt.add(1.7e308, 1.7e308)) == {:nobi_error, "float overflow"}
+      assert catch_throw(Rt.div(1.0, 0.0)) == {:nobi_error, "division by zero"}
+      assert catch_throw(Rt.div(1.0, -0.0)) == {:nobi_error, "division by zero"}
+
+      for zero <- [
+            Rt.neg(0.0),
+            Rt.mul(-1.0, 0.0),
+            Rt.sub(-0.0, 0.0),
+            Rt.constant({:neg, [], [{:float, [], [0.0]}]})
+          ] do
+        assert zero === 0.0
+        assert Rt.eq(zero, 0.0)
+      end
+    end
+
+    test "a Float's canonical text" do
+      for {f, text} <- [
+            {1.0, "1.0"},
+            {1000.0, "1000.0"},
+            {0.1, "0.1"},
+            {-2.5e-3, "-0.0025"},
+            {1.0e-6, "0.000001"},
+            {1.0e-7, "1.0e-7"},
+            {1.0e20, "100000000000000000000.0"},
+            {1.0e21, "1.0e21"},
+            {1234.567, "1234.567"}
+          ] do
+        assert Rt.float_text(f) == text
+        assert String.to_float(text) == f
+      end
+    end
+
     test "concat joins strings" do
       assert Rt.concat("a", "bé") == "abé"
     end
@@ -92,7 +131,7 @@ defmodule Nobi.Lang.RtTest do
       end
     end
 
-    test "kinds order Int, Str, Bool, Uuid, List, Map, Tuple, Record, Variant, Fn, Cmd" do
+    test "kinds order Int, Str, Bool, Uuid, List, Map, Tuple, Record, Variant, Fn, Cmd, Float" do
       kinds = [
         1,
         "s",
@@ -104,7 +143,8 @@ defmodule Nobi.Lang.RtTest do
         rec("M.R", n: 1),
         some(1),
         fn -> 1 end,
-        Rt.cmd_none()
+        Rt.cmd_none(),
+        1.5
       ]
 
       for {a, i} <- Enum.with_index(kinds), {b, j} <- Enum.with_index(kinds) do

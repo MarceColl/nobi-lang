@@ -112,6 +112,17 @@ defmodule Nobi.Lang.ParserTest do
       assert expr!(~S|"a\"b\\c\nd\te"|) == s("a\"b\\c\nd\te")
       assert expr!("true") == b(true)
       assert expr!("false") == b(false)
+      assert expr!("1.5") == {:float, [1.5]}
+      assert expr!("-0.25") == {:neg, [{:float, [0.25]}]}
+      assert expr!("2.0e-3 * x") == bin(:*, {:float, [0.002]}, n("x"))
+    end
+
+    test "a Float is not a pattern" do
+      refused =
+        "a Float is not a pattern — bind it and compare in an `if` (`x -> if x < 1.5 do … end`)"
+
+      assert {_, _, ^refused} = err(:expr, "case x do\n  1.5 -> 1\n  _ -> 2\nend")
+      assert {_, _, ^refused} = err(:expr, "case x do\n  -1.5 -> 1\n  _ -> 2\nend")
     end
 
     test "lists, maps, tuples, grouping" do

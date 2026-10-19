@@ -97,6 +97,7 @@ defmodule NobiWeb.NobiHtmlTest do
       render(
         el("input", [
           {"rows", 3},
+          {"step", 0.25},
           {"value", {:uuid, "abc"}},
           {"checked", true},
           {"disabled", false},
@@ -105,6 +106,7 @@ defmodule NobiWeb.NobiHtmlTest do
       )
 
     assert attr(doc, "input", "rows") == ["3"]
+    assert attr(doc, "input", "step") == ["0.25"]
     assert attr(doc, "input", "value") == ["abc"]
     assert LazyHTML.query(doc, "input[checked]") |> Enum.count() == 1
     assert LazyHTML.query(doc, "input[disabled]") |> Enum.count() == 0
