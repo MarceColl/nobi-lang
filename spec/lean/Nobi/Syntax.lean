@@ -175,6 +175,7 @@ def Ty.mentions (x : String) : Ty → Bool
   | .map k v => Ty.mentions x k || Ty.mentions x v
   | .arrow ps r => Ty.mentionsList x ps || Ty.mentions x r
   | .named _ args => Ty.mentionsList x args
+  | .cmd m | .html m => Ty.mentions x m
   | _ => false
 
 def Ty.mentionsList (x : String) : List Ty → Bool

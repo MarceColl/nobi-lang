@@ -43,6 +43,7 @@ def insert : Expr :=
 #guard Value.cmp (.cmdBatch []) (.cmdEffect "Cmd.time.now" none []) == .lt
 -- A Cmd is not data: no map key holds one.
 #guard code (.map (.cmd msg) .int []) == "non-data-map-key"
+#guard code (.list (.cmd (.map (.arrow [.int] .int) .int)) []) == "non-data-map-key"
 
 -- [T-PrimRef] [E-PrimRef]
 #guard ty (.primRef "List.length" [.int]) == .ok (.arrow [.list .int] .int)

@@ -66,6 +66,7 @@ def reachesKey (R : KeyReach) (x : String) : Ty → Bool
   | .list t => reachesKey R x t
   | .arrow ps r => reachesKeyList R x [] ps || reachesKey R x r
   | .named m args => reachesKeyList R x (R.flags m args) args
+  | .cmd m | .html m => reachesKey R x m
   | _ => false
 
 /-- `reachesKey` over `ts`, where `fs` flags the ones passed to a parameter
@@ -96,6 +97,7 @@ def keysOk (R : KeyReach) : Ty → Bool
   | .arrow ps r => keysOkList R ps && keysOk R r
   | .named m args =>
     keysOkList R args && ((R.flags m args).zip args).all fun (f, a) => !f || !a.hasFn
+  | .cmd m | .html m => keysOk R m
   | _ => true
 
 def keysOkList (R : KeyReach) : List Ty → Bool
