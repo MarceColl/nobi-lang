@@ -18,10 +18,10 @@ Priority: **P0** blocks the spike (one sim run that shows its DPS). **P1** block
 
 | ID | Gap | Pri | Status |
 |---|---|---|---|
-| G01 | No foreign or WASM calls | P0 | open |
+| G01 | No foreign or WASM calls | P0 | closed (https://github.com/MarceColl/nobi-lang/pull/5) |
 | G02 | No `Float` type | P0 | closed (https://github.com/MarceColl/nobi-lang/pull/4) |
 | G03 | No timer `Cmd` | P0 | closed (https://github.com/MarceColl/nobi-lang/pull/3) |
-| G04 | 5 s call limit is fixed | P0 | open |
+| G04 | 5 s call limit is fixed | P0 | closed: superseded by G01 (https://github.com/MarceColl/nobi-lang/pull/5) |
 | G05 | Apps run only while a browser is connected | P1 | open |
 | G06 | Typed JSON only; no float or dynamic values | P1 | open |
 | G07 | Events carry no payload; no on-input | P1 | open |
@@ -226,3 +226,4 @@ Priority: **P0** blocks the spike (one sim run that shows its DPS). **P1** block
 Add a dated entry each time the port runs into something: what we tried, which gap it hit (or a new gap), and what we did.
 
 - **2026-10-18:** initial survey. G01–G17 recorded from reading the source. Nothing has been built yet.
+- **2026-10-19:** the P0 gaps are built, one stacked PR each: G03 `Cmd.time.after` (https://github.com/MarceColl/nobi-lang/pull/3), G02 `Float` (https://github.com/MarceColl/nobi-lang/pull/4), and G01 `Cmd.wasm.call` (https://github.com/MarceColl/nobi-lang/pull/5). The WASM call is an effect run outside `update` and `view`, bounded by fuel, memory, a pool and a deadline, so G04's need for longer pure steps is gone and the 5 s limit stays. Next: rebuild the simulator with the `alloc`/`free` C ABI and run `simulate` through `Cmd.wasm.call`.
