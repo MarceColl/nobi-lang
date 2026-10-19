@@ -33,7 +33,21 @@ jobs:
         with:
           persist-credentials: false
 
-      # Installs the toolchain in spec/lean/lean-toolchain through elan, caches
+      # The toolchain download from releases.lean-lang.org fails now and then
+      # (TLS connect errors), and lean-action does not retry it: install elan
+      # and the pinned toolchain here, with retries, so lean-action finds it.
+      - name: Install elan and the pinned Lean toolchain
+        run: |
+          curl -sSfL --retry 5 https://raw.githubusercontent.com/leanprover/elan/v4.2.4/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
+          sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          for attempt in 1 2 3 4 5; do
+            "$HOME/.elan/bin/elan" toolchain install "$(cat spec/lean/lean-toolchain)" && exit 0
+            sleep $((attempt * 15))
+          done
+          exit 1
+
+      # Uses the toolchain in spec/lean/lean-toolchain through elan, caches
       # .lake, then runs `lake build` and `lake test` (every #guard, the
       # VERSION check).
       - uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
