@@ -20,7 +20,7 @@ Priority: **P0** blocks the spike (one sim run that shows its DPS). **P1** block
 |---|---|---|---|
 | G01 | No foreign or WASM calls | P0 | open |
 | G02 | No `Float` type | P0 | open |
-| G03 | No timer `Cmd` | P0 | open |
+| G03 | No timer `Cmd` | P0 | closed (https://github.com/MarceColl/nobi-lang/pull/3) |
 | G04 | 5 s call limit is fixed | P0 | open |
 | G05 | Apps run only while a browser is connected | P1 | open |
 | G06 | Typed JSON only; no float or dynamic values | P1 | open |
