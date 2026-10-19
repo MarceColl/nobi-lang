@@ -1,0 +1,54 @@
+name: spec
+
+on:
+  pull_request:
+    paths:
+      - "spec/**"
+      - "lib/nobi/lang/**"
+      - "lib/nobi/exec/**"
+      - "test/support/spec/**"
+      - ".github/workflows/spec.yml"
+  push:
+    branches: [main]
+    paths:
+      - "spec/**"
+      - "lib/nobi/lang/**"
+      - "lib/nobi/exec/**"
+      - "test/support/spec/**"
+      - ".github/workflows/spec.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spec-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Installs the toolchain in spec/lean/lean-toolchain through elan, caches
+      # .lake, then runs `lake build` and `lake test` (every #guard, the
+      # VERSION check).
+      - uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        with:
+          lake-package-directory: spec/lean
+          build: true
+          test: true
+          use-mathlib-cache: false
+
+      - name: nobi-ref prints the spec version
+        working-directory: spec/lean
+        run: test "$(.lake/build/bin/nobi-ref version)" = "$(cat VERSION)"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nobi-ref
+          path: spec/lean/.lake/build/bin/nobi-ref
+          if-no-files-found: error

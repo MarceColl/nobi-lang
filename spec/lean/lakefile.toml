@@ -1,0 +1,23 @@
+# The executable Lean 4 specification of Nobi's core language.
+# No Lake dependencies: the toolchain in `lean-toolchain` is the only pin.
+name = "nobi_spec"
+defaultTargets = ["Nobi", "nobi_ref"]
+testDriver = "spec_tests"
+
+[[lean_lib]]
+name = "Nobi"
+
+# `#guard` examples per rule: building the library checks them.
+[[lean_lib]]
+name = "Tests"
+
+# `lake test`: builds `Tests` (so every `#guard` holds), then runs the
+# checks that read files: VERSION and the rule names.
+[[lean_exe]]
+name = "spec_tests"
+root = "TestMain"
+
+[[lean_exe]]
+name = "nobi_ref"
+exeName = "nobi-ref"
+root = "Main"

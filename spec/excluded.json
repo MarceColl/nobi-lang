@@ -1,0 +1,30 @@
+{
+  "format": "nobi-excluded/1",
+  "ast_kinds": {
+    "always": "records into test hooks; not a value",
+    "sometimes": "records into test hooks; not a value",
+    "deftest": "a test declaration; its body records into hooks",
+    "defroutes": "routing, outside the expression language",
+    "defapp": "its init, update and view are ordinary defs, called as defs"
+  },
+  "stdlib": {
+    "JSON.parse": "decoding depends on the target type; rt/json.ex is a later stage",
+    "JSON.stringify": "encoding depends on the static type; rt/json.ex is a later stage",
+    "Store.get": "needs the transaction coordinator",
+    "Store.list": "needs the transaction coordinator",
+    "Tx.Op": "transaction ops need the transaction coordinator",
+    "Tx.insert": "needs the transaction coordinator",
+    "Tx.update": "needs the transaction coordinator",
+    "Tx.delete": "a special form naming a stored model; needs the transaction coordinator",
+    "Cmd.store.tx": "its body takes a Store and returns Tx ops"
+  },
+  "special_forms": {
+    "Html.href": "resolved through defroutes",
+    "Cmd.navigate": "resolved through defroutes"
+  },
+  "ascii_only": {
+    "String.to_upper": "specified on ASCII input only: Lean's Char case functions are ASCII-only",
+    "String.to_lower": "specified on ASCII input only: Lean's Char case functions are ASCII-only",
+    "String.trim": "specified on ASCII whitespace only"
+  }
+}
