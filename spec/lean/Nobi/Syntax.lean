@@ -24,6 +24,10 @@ inductive Ty where
   | arrow (params : List Ty) (ret : Ty)
   | named (name : String) (args : List Ty)
   | var (name : String)
+  /-- `Cmd<m>`: an effect, as data, whose callbacks build an `m`. -/
+  | cmd (msg : Ty)
+  /-- `Html<m>`: markup whose events send an `m`. -/
+  | html (msg : Ty)
   deriving Repr, BEq, Inhabited
 
 /-- Case patterns. A variant pattern names its owner, as in `Option.Some(x)`. -/
@@ -56,6 +60,8 @@ inductive Expr where
   | seq (first rest : Expr)
   /-- An operator or stdlib function, with its type arguments. -/
   | prim (op : String) (targs : List Ty) (args : List Expr)
+  /-- A stdlib function taken as a value, with its type arguments. -/
+  | primRef (op : String) (targs : List Ty)
   | tuple (items : List Expr)
   | list (elem : Ty) (items : List Expr)
   | map (key val : Ty) (entries : List (Expr × Expr))
@@ -68,6 +74,10 @@ inductive Expr where
   | ctorRef (owner ctor : String) (targs : List Ty)
   /-- Arms are tried top-down. -/
   | case (scrut : Expr) (arms : List (Pat × Expr))
+  /-- A JSX element sending `msg`: attributes in order (an event is named
+  `on-<event>`, a text attribute is a string literal), then children (a text
+  child is a string literal, a nested element an `element`). -/
+  | element (msg : Ty) (tag : String) (attrs : List (String × Expr)) (children : List Expr)
   deriving Repr, BEq, Inhabited
 
 /-- A `deftype`: its parameters and its variants' argument types. -/
@@ -129,6 +139,8 @@ def Ty.subst (σ : List (String × Ty)) : Ty → Ty
   | .map k v => .map (Ty.subst σ k) (Ty.subst σ v)
   | .arrow ps r => .arrow (Ty.substList σ ps) (Ty.subst σ r)
   | .named n args => .named n (Ty.substList σ args)
+  | .cmd m => .cmd (Ty.subst σ m)
+  | .html m => .html (Ty.subst σ m)
   | t => t
 
 def Ty.substList (σ : List (String × Ty)) : List Ty → List Ty
@@ -137,11 +149,12 @@ def Ty.substList (σ : List (String × Ty)) : List Ty → List Ty
 end
 
 mutual
-/-- Whether a value of `t` can hold a function: a function type anywhere in
-it. Models and deftypes hold none of their own (their fields and variant
-arguments are data), so only their type arguments count. -/
+/-- Whether a value of `t` can hold something that is not data: a function,
+a `Cmd` or `Html`, anywhere in it. Models and deftypes hold none of their own
+(their fields and variant arguments are data), so only their type arguments
+count. -/
 def Ty.hasFn : Ty → Bool
-  | .arrow _ _ => true
+  | .arrow _ _ | .cmd _ | .html _ => true
   | .tuple ts => Ty.hasFnList ts
   | .list t => Ty.hasFn t
   | .map k v => Ty.hasFn k || Ty.hasFn v

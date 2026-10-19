@@ -70,3 +70,12 @@ follow, or leaves something unspecified. Each needs a verdict.
 4. **Unit.** Surface Nobi has no Unit literal; Unit values come only from
    `always`/`sometimes`, which are outside core. Core keeps `unit` so the
    type has a value.
+5. **Case functions and Unicode.** `String.to_upper`/`to_lower` are
+   specified on ASCII letters only; the BEAM applies Unicode's mappings and
+   a final-sigma rule (`rt/stdlib.ex` L213-258). `spec/excluded.json` lists
+   the gap; a generated Unicode table could close it.
+6. **Nested forms.** The surface checker refuses `on-submit` on a form
+   inside another form; the spec does not state that rule yet.
+7. **Store forms as values.** A `Cmd.store.*` function taken as a value is
+   a closure on the BEAM, so it equals nothing; the spec says the same,
+   while every other stdlib function equals itself.

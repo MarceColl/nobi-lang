@@ -28,12 +28,20 @@ inductive Value where
   | closure (env : List (String × Value)) (params : List (String × Ty)) (body : Expr)
   | defRef (g : String)
   | ctorRef (owner ctor : String) (arity : Nat)
+  /-- A stdlib function taken as a value. -/
+  | primRef (op : String) (targs : List Ty)
+  /-- `Cmd` values: data, nothing runs. A batch holds Cmd values; an effect
+  names its stdlib function, the stored model a store effect works on, and
+  its arguments, callbacks as the functions they are. -/
+  | cmdNone
+  | cmdBatch (cmds : List Value)
+  | cmdEffect (name : String) (model : Option String) (args : List Value)
   deriving Repr, BEq, Inhabited
 
 namespace Value
 
 def isFn : Value → Bool
-  | .closure .. | .defRef _ | .ctorRef .. => true
+  | .closure .. | .defRef _ | .ctorRef .. | .primRef .. => true
   | _ => false
 
 /-! ## Weight
@@ -41,7 +49,7 @@ def isFn : Value → Bool
 A value's weight is what walking it whole costs (`rt.ex` `weight/2`): one
 step per node, a string one more per 64 bytes. Record field names and
 variant names cost nothing. A closure is one step: its environment is never
-walked. -/
+walked. A `Cmd` is one step plus its effects' arguments. -/
 
 /-- The most steps one walk may take. -/
 def budget : Nat := 1000000
@@ -58,7 +66,19 @@ def weightAcc (cap : Nat) : Value → Nat → Nat
     | .map es => weightPairs cap es (acc + 1)
     | .record _ fs => weightFields cap fs (acc + 1)
     | .variant _ _ xs => weightList cap xs (acc + 1)
+    | .cmdBatch cs => weightBareList cap cs (acc + 1)
+    | .cmdEffect _ _ xs => weightList cap xs (acc + 1)
     | _ => acc + 1
+
+/-- A command inside a batch is held bare: it costs only its arguments. -/
+def weightBare (cap : Nat) : Value → Nat → Nat
+  | .cmdBatch cs, acc => weightBareList cap cs acc
+  | .cmdEffect _ _ xs, acc => weightList cap xs acc
+  | _, acc => acc
+
+def weightBareList (cap : Nat) : List Value → Nat → Nat
+  | [], acc => acc
+  | c :: cs, acc => weightBareList cap cs (weightBare cap c acc)
 
 def weightList (cap : Nat) : List Value → Nat → Nat
   | [], acc => acc
@@ -79,7 +99,14 @@ def weight (v : Value) : Nat := min (weightAcc (budget + 1) v 0) (budget + 1)
 /-! ## Equality
 
 Structural. A closure equals nothing, itself included; a def taken as a
-value equals only the same def; a constructor only the same constructor. -/
+value equals only the same def; a constructor only the same constructor; a
+stdlib function only the same function, except a store form, which is
+built as a closure (`codegen/expr.ex` `store_value/3`) and equals nothing. -/
+
+/-- The stdlib functions that work on a stored model. -/
+def isStoreForm (op : String) : Bool :=
+  ["Cmd.store.insert", "Cmd.store.list", "Cmd.store.get", "Cmd.store.update",
+    "Cmd.store.delete"].contains op
 
 mutual
 def same : Value → Value → Bool
@@ -95,6 +122,10 @@ def same : Value → Value → Bool
   | .variant o c xs, .variant p d ys => o == p && c == d && sameList xs ys
   | .defRef f, .defRef g => f == g
   | .ctorRef o c k, .ctorRef p d j => o == p && c == d && k == j
+  | .primRef o _, .primRef p _ => o == p && !isStoreForm o
+  | .cmdNone, .cmdNone => true
+  | .cmdBatch xs, .cmdBatch ys => sameList xs ys
+  | .cmdEffect n m xs, .cmdEffect o p ys => n == o && m == p && sameList xs ys
   | _, _ => false
 
 def sameList : List Value → List Value → Bool
@@ -133,7 +164,7 @@ ever compared, and keys hold no functions, so the order among functions is
 unspecified beyond their kind: closures, then defs, then constructors. -/
 
 /-- Kind ranks: Int < String < Bool < Uuid < List < Map < tuple < record <
-variant < function. Unit is the empty tuple. -/
+variant < function < Cmd. Unit is the empty tuple. -/
 def rank : Value → Nat
   | .int _ => 0
   | .str _ => 1
@@ -144,12 +175,22 @@ def rank : Value → Nat
   | .tuple _ | .unit => 6
   | .record .. => 7
   | .variant .. => 8
-  | .closure .. | .defRef _ | .ctorRef .. => 9
+  | .closure .. | .defRef _ | .ctorRef .. | .primRef .. => 9
+  | .cmdNone | .cmdBatch _ | .cmdEffect .. => 10
 
-def fnRank : Value → Nat
-  | .defRef _ => 1
-  | .ctorRef .. => 2
+/-- Within functions: closures, then defs (the stdlib's among them), then
+constructors. Within Cmds: none, then batch, then effect. -/
+def subRank : Value → Nat
+  | .defRef _ | .primRef .. | .cmdBatch _ => 1
+  | .ctorRef .. | .cmdEffect .. => 2
   | _ => 0
+
+/-- A store effect's model: none before some. -/
+def cmpModel : Option String → Option String → Ordering
+  | none, none => .eq
+  | none, some _ => .lt
+  | some _, none => .gt
+  | some a, some b => compare a b
 
 mutual
 def cmp : Value → Value → Ordering
@@ -167,7 +208,11 @@ def cmp : Value → Value → Ordering
   | .variant o c xs, .variant p d ys => (compare o p).then ((compare c d).then (cmpList xs ys))
   | .defRef f, .defRef g => compare f g
   | .ctorRef o c k, .ctorRef p d j => (compare o p).then ((compare c d).then (compare k j))
-  | a, b => (compare a.rank b.rank).then (compare a.fnRank b.fnRank)
+  | .primRef o _, .primRef p _ => compare o p
+  | .cmdBatch xs, .cmdBatch ys => cmpList xs ys
+  | .cmdEffect n m xs, .cmdEffect o p ys =>
+    (compare n o).then ((cmpModel m p).then (cmpList xs ys))
+  | a, b => (compare a.rank b.rank).then (compare a.subRank b.subRank)
 
 def cmpList : List Value → List Value → Ordering
   | [], [] => .eq
@@ -228,76 +273,5 @@ def setField (f : String) (v : Value) : List (String × Value) → List (String 
     | .gt => (g, w) :: setField f v rest
 
 end Value
-
-/-! ## Conformance
-
-`Value.conforms P v τ`: `v` is a value of type `τ`. The runtime side of type
-soundness (G3): every result of a well-typed expression must conform to its
-static type. A function value conforms by its parameter types (and, for a
-def or a constructor, its whole signature); a closure's body is not
-re-checked here. -/
-
-/-- Whether `id : Uuid`, the one field a record may lack (the store mints it). -/
-def isIdentity (f : String) (t : Ty) : Bool := f == "id" && t == .uuid
-
-mutual
-def Value.conforms (P : Prog) : Value → Ty → Bool
-  | .int _, .int | .str _, .str | .bool _, .bool | .unit, .unit | .uuid _, .uuid => true
-  | .tuple vs, .tuple ts => Value.conformsAll P vs ts
-  | .list vs, .list t => Value.conformsEach P vs t
-  | .map es, .map k v => Value.conformsPairs P es k v
-  | .record m fs, .named n [] =>
-    m == n &&
-      match P.findModel m with
-      | some d =>
-        Value.conformsFields P fs d.fields &&
-          d.fields.all (fun (f, t) => fs.any (·.1 == f) || isIdentity f t)
-      | none => false
-  | .variant o c vs, .named n targs =>
-    o == n &&
-      match P.findType o with
-      | some d =>
-        d.params.length == targs.length &&
-          match d.variant? c with
-          | some args => Value.conformsAll P vs (Ty.substList (d.params.zip targs) args)
-          | none => false
-      | none => false
-  | .closure _ ps _, .arrow qs _ => ps.map (·.2) == qs
-  | .defRef g, .arrow qs r =>
-    match P.findDef g with
-    | some d => d.params.map (·.2) == qs && d.ret == r
-    | none => false
-  | .ctorRef o c k, .arrow qs (.named n targs) =>
-    o == n && k == qs.length &&
-      match P.findType o with
-      | some d =>
-        d.params.length == targs.length &&
-          match d.variant? c with
-          | some args => Ty.substList (d.params.zip targs) args == qs
-          | none => false
-      | none => false
-  | _, _ => false
-
-def Value.conformsAll (P : Prog) : List Value → List Ty → Bool
-  | [], [] => true
-  | v :: vs, t :: ts => Value.conforms P v t && Value.conformsAll P vs ts
-  | _, _ => false
-
-def Value.conformsEach (P : Prog) : List Value → Ty → Bool
-  | [], _ => true
-  | v :: vs, t => Value.conforms P v t && Value.conformsEach P vs t
-
-def Value.conformsPairs (P : Prog) : List (Value × Value) → Ty → Ty → Bool
-  | [], _, _ => true
-  | (k, v) :: es, tk, tv =>
-    Value.conforms P k tk && Value.conforms P v tv && Value.conformsPairs P es tk tv
-
-def Value.conformsFields (P : Prog) : List (String × Value) → List (String × Ty) → Bool
-  | [], _ => true
-  | (f, v) :: fs, decl =>
-    match decl.lookup f with
-    | some t => Value.conforms P v t && Value.conformsFields P fs decl
-    | none => false
-end
 
 end Nobi
