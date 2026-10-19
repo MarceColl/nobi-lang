@@ -151,7 +151,8 @@ defmodule Nobi.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
-      {:burrito, "~> 1.6", runtime: false}
+      {:burrito, "~> 1.6", runtime: false},
+      {:wasmex, "~> 0.15"}
     ]
   end
 

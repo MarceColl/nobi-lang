@@ -33,7 +33,10 @@ defmodule Nobi.Application do
         {DNSCluster, query: Application.get_env(:nobi, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Nobi.PubSub},
         # Owns the ETS table of Nobi.Universe.at/2's pinned views.
-        Nobi.Universe.AtCache
+        Nobi.Universe.AtCache,
+        # WASM: compiled modules (ETS) and the slots that bound concurrent calls.
+        Nobi.Wasm.Cache,
+        Nobi.Wasm.Pool
         # One-shot: makes sure the `main` universe row exists. A DB outage is
         # logged, not fatal (the first Universe call retries ensure_main). Skipped
         # in test (`config :nobi, :ensure_main_at_boot, false`) because the SQL
