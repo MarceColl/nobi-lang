@@ -97,6 +97,16 @@ defmodule NobiWeb.DeploymentLive do
       but skips its writes, which the connected mount then runs once. So
       the first HTML never reflects init's own writes (nor what a callback
       of one would do): those appear once the page connects.
+    * `Cmd.wasm.call(hash, export, input, cb)`: `Fx.wasm/4`, which the
+      Elm runtime runs in its own task (`Nobi.Wasm.call/4`) and never
+      inline, so neither render runs WASM: the static render drops it and
+      the connected mount starts it. `cb` is applied to `Result.Ok(output)`
+      or `Result.Err(reason)` in that task, and the answer,
+      `{:wasm_done, gen, result}`, queues as a callback that is never
+      dropped for being past the queue cap (at most #{4} are outstanding:
+      a call past that many in flight gets `Err("too many wasm calls in
+      flight")` and nothing runs). A replaced mount's answer is dropped.
+      The page stays responsive while a call runs.
     * Anything else (`Cmd.blob.*`, `Cmd.ai.*`): a notice, "`<effect>` is
       not available yet".
 
@@ -157,6 +167,8 @@ defmodule NobiWeb.DeploymentLive do
   # Renders whose handlers stay resolvable, and the waiting events cap.
   @kept_renders 4
   @queue_cap 32
+  # WASM calls in flight per page; a call past it gets Err at once.
+  @max_wasm 4
 
   @type_name ~r/[A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*/
 
@@ -201,6 +213,8 @@ defmodule NobiWeb.DeploymentLive do
        inflight: nil,
        # Store tasks started and not yet answered (busy while any run).
        storing: 0,
+       # WASM calls started and not yet answered (at most @max_wasm).
+       wasm: 0,
        queue: :queue.new(),
        queued: 0
      }), Fx.none()}
@@ -235,6 +249,9 @@ defmodule NobiWeb.DeploymentLive do
 
   def update({:stored, gen, result}, m),
     do: enqueue(%{m | storing: max(m.storing - 1, 0)}, {:callback, gen, result})
+
+  def update({:wasm_done, gen, result}, m),
+    do: enqueue(%{m | wasm: max(m.wasm - 1, 0)}, {:callback, gen, result, :keep})
 
   def update(
         {:committed, universe, _info},
@@ -453,6 +470,24 @@ defmodule NobiWeb.DeploymentLive do
   defp lower_effect(m, {:random, lo, hi, cb}, _origin),
     do: {m, Fx.random(lo..hi//1, callback(m, cb))}
 
+  # Past @max_wasm in flight the callback gets Err at once and nothing runs.
+  defp lower_effect(%{wasm: n} = m, {:wasm, _hash, _export, _input, cb}, _origin)
+       when n >= @max_wasm do
+    reply = callback(m, cb)
+    err = Effects.result({:error, "too many wasm calls in flight"})
+    {m, Fx.task(fn -> reply.(err) end, &wasm_reply/1)}
+  end
+
+  defp lower_effect(m, {:wasm, hash, export, input, cb}, _origin) do
+    %{target: target, gen: gen} = m
+
+    to_msg = fn answer ->
+      {:wasm_done, gen, Universe.apply(target, cb, [Effects.result(answer)], [])}
+    end
+
+    {%{m | wasm: m.wasm + 1}, Fx.wasm(hash, export, input, to_msg)}
+  end
+
   defp lower_effect(m, {:navigate, app, args}, _origin) do
     case Effects.path(m.entries, app, args) do
       {:ok, path} ->
@@ -492,6 +527,10 @@ defmodule NobiWeb.DeploymentLive do
   defp lower_effect(m, {:error, message}, _origin), do: {fail(m, message), Fx.none()}
 
   defp swap({a, b}), do: {b, a}
+
+  # The over-the-cap Err's callback, kept like a WASM result.
+  defp wasm_reply({:ok, {:nobi_callback, gen, result}}), do: {:nobi_callback, gen, result, :keep}
+  defp wasm_reply({:error, crash}), do: {:effect_error, "Cmd.wasm.call", crash}
 
   # The effect's `to_msg`, run in its task. It closes over the target, the
   # mount and the callback only: they are bound here, so the closure never

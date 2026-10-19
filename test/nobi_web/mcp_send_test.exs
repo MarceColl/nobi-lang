@@ -325,6 +325,61 @@ defmodule NobiWeb.McpSendTest do
     end
   end
 
+  describe "WASM (Cmd.wasm.call)" do
+    setup do
+      w = fresh_universe("wasm")
+
+      assert {:promoted, _} =
+               Universe.stage(w, "w", Nobi.WasmFixture.app(Nobi.WasmFixture.put!()))
+
+      :ok = Deployment.create(w, w, "W.Routes", [])
+      %{w: w}
+    end
+
+    test "runs the real module; the loop decodes a Float and re-arms on virtual time", %{
+      conn: conn,
+      w: w
+    } do
+      text = send!(conn, w, "/", ["W.Msg.Start"])
+
+      assert text =~
+               ~r/\[init\]\n  Cmd.wasm.call\(sha256:[0-9a-f]{8}…, echo\) -> Result.Ok\("\{\\"dps\\": 7.25\}"\)/
+
+      assert text =~ ~s|Cmd.wasm.call(|
+      assert text =~ ~s|-> Result.Ok("{\\"dps\\": 1234.5}") => W.Msg.Got(Result.Ok(|
+      assert text =~ "Cmd.time.after(10) -> fired at 10ms => W.Msg.Start"
+      assert text =~ "final model: %W.Model{clicks: 0, dps: 1234.5,"
+      assert text =~ "runs: 4}\n\nview text"
+
+      text = send!(conn, w, "/", [~s|W.Msg.Call("spin")|])
+      assert text =~ ~s|-> Result.Err("out of fuel")|
+
+      # The next send still works.
+      assert send!(conn, w, "/", [~s|W.Msg.Call("upper")|]) =~ ~s|Result.Ok("{\\"DPS\\": 1.5}")|
+    end
+
+    test "a spent WASM time budget turns the calls left into Err(timeout)", %{conn: conn, w: w} do
+      env = Application.get_env(:nobi, Nobi.Wasm)
+      # Fuel that never runs out: the first `spin` takes the whole budget.
+      Application.put_env(
+        :nobi,
+        Nobi.Wasm,
+        Keyword.merge(env, send_budget_ms: 300, fuel: 1_000_000_000_000)
+      )
+
+      on_exit(fn -> Application.put_env(:nobi, Nobi.Wasm, env) end)
+
+      text = send!(conn, w, "/", ["W.Msg.Burst"])
+      [first | rest] = Regex.scan(~r/Cmd.wasm.call\(sha256:[0-9a-f]{8}…, spin\) -> .*/, text)
+      assert hd(first) =~ ~s|-> Result.Err("timeout") => W.Msg.Got(Result.Err("timeout"))|
+      refute hd(first) =~ "budget"
+      assert length(rest) == 4
+
+      for [line] <- rest,
+          do: assert(line =~ ~s|Result.Err("timeout")| and line =~ "WASM time budget is spent")
+    end
+  end
+
   describe "bounds" do
     test "at most 20 messages, and nothing runs past that", %{conn: conn, d: d, u: u} do
       text = send_err!(conn, d, "/", List.duplicate("B.Msg.Post", 21))

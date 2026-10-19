@@ -4,7 +4,8 @@ defmodule NobiWeb.Mcp.Tools do
   function and answers agent-readable text.
 
   Every tool but `guide`, `list_universes`, `create_universe`,
-  `list_deployments` and `send` takes an optional `universe` (default
+  `list_deployments`, `send` and `put_wasm` (WASM modules are global, by
+  hash: `Nobi.Wasm.put/1`) takes an optional `universe` (default
   `"main"`); `send` names a deployment, which names its universe and runs
   the app through `Nobi.Deployment.Runner` (its effects really run). `create_deployment` takes
   one too: a deployment serves one universe, and like every other tool it
@@ -131,10 +132,19 @@ defmodule NobiWeb.Mcp.Tools do
            "Nobi expressions, each of the opened app's Msg type, sent in order " <>
              "(e.g. Forum.Msg.Title(\"Hi\")), at most 20. Empty or absent: init only."
        }
-     }, ["deployment", "path"]}
+     }, ["deployment", "path"]},
+    {"put_wasm",
+     "Store a WASM module for Cmd.wasm.call. Answers its hash (`sha256:<hex>`, what code " <>
+       "names it by) and its callable exports. Modules are global and content-addressed: " <>
+       "the same bytes always have the same hash. The module imports nothing and exports " <>
+       "memory, alloc(len : i32) -> i32 and free(ptr : i32, len : i32); a callable export " <>
+       "is (ptr : i32, len : i32) -> i64 returning ptr << 32 | len of its UTF-8 output.",
+     %{bytes_base64: %{type: "string", description: "The .wasm file, base64-encoded."}},
+     ["bytes_base64"]}
   ]
 
-  @no_universe ["guide", "list_universes", "create_universe", "list_deployments", "send"]
+  @no_universe ["guide", "list_universes", "create_universe", "list_deployments", "send"] ++
+                 ["put_wasm"]
 
   @doc "Every tool, as `tools/list` gives it."
   @spec list() :: [map()]
@@ -172,6 +182,21 @@ defmodule NobiWeb.Mcp.Tools do
   ## The tools
 
   defp run("guide", _args), do: {:ok, NobiWeb.Mcp.Instructions.text()}
+
+  defp run("put_wasm", args) do
+    with {:ok, b64} <- string(args, "bytes_base64") do
+      case Base.decode64(b64, ignore: :whitespace) do
+        {:ok, bytes} ->
+          case Nobi.Wasm.put(bytes) do
+            {:ok, hash, exports} -> {:ok, "stored: #{hash}\nexports: #{Enum.join(exports, ", ")}"}
+            {:error, why} -> {:error, "not stored: " <> why}
+          end
+
+        :error ->
+          {:error, "bytes_base64 is not base64"}
+      end
+    end
+  end
 
   defp run("list_universes", _args) do
     case Universe.list() do
@@ -528,8 +553,11 @@ defmodule NobiWeb.Mcp.Tools do
   defp effect_text(%{error: error} = e) when is_binary(error),
     do: "#{e.effect} -> ERROR: #{error}"
 
+  defp effect_text(%{note: note, value: v} = e) when is_binary(note) and is_binary(v),
+    do: "#{e.effect} -> #{v}#{msg_text(e)} (#{note})"
+
   defp effect_text(%{note: note} = e) when is_binary(note),
-    do: "#{e.effect} -> #{e.value}#{msg_text(e)} (#{note})"
+    do: "#{e.effect} -> #{Runner.show(e.value, @value_max)}#{msg_text(e)} (#{note})"
 
   defp effect_text(e),
     do: "#{e.effect} -> #{Runner.show(e.value, @value_max)}#{msg_text(e)}"

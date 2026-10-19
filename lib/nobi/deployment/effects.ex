@@ -14,6 +14,10 @@ defmodule Nobi.Deployment.Effects do
     * `{:after, ms, msg}`: `Cmd.time.after(ms, msg)`, `msg` delivered to
       `update` after `ms` milliseconds, `ms` in `0..#{86_400_000}` (a day);
     * `{:random, lo, hi, cb}`: `Cmd.random.int(lo, hi, cb)`, `lo ≤ hi`;
+    * `{:wasm, hash, export, input, cb}`: `Cmd.wasm.call(hash, export,
+      input, cb)`, run by `Nobi.Wasm.call/4` outside `update` and `view`;
+      `cb` gets `result/1` of its answer, `Result.Ok(output)` or
+      `Result.Err(reason)` (a bad hash or input included);
     * `{:navigate, app, args}`: `Cmd.navigate(App, args…)`; `path/3` gives
       its URL in a route table;
     * `{:store, op, model, args}`: `Cmd.store.<op>` (`insert`, `list`,
@@ -45,6 +49,7 @@ defmodule Nobi.Deployment.Effects do
           {:now, term()}
           | {:after, non_neg_integer(), term()}
           | {:random, integer(), integer(), term()}
+          | {:wasm, String.t(), String.t(), String.t(), term()}
           | {:navigate, String.t(), [term()]}
           | {:store, String.t(), String.t() | nil, [term()]}
           | {:unavailable, String.t()}
@@ -76,6 +81,10 @@ defmodule Nobi.Deployment.Effects do
 
   defp bare({:effect, "Cmd.random.int", _, _}), do: [{:error, "Cmd.random.int needs lo ≤ hi"}]
 
+  defp bare({:effect, "Cmd.wasm.call", _, [hash, export, input, cb]})
+       when is_binary(hash) and is_binary(export) and is_binary(input),
+       do: [{:wasm, hash, export, input, cb}]
+
   defp bare({:effect, "Cmd.navigate", _, [app | args]}) when is_binary(app),
     do: [{:navigate, app, args}]
 
@@ -94,10 +103,19 @@ defmodule Nobi.Deployment.Effects do
   def describe({:after, ms, _}), do: "Cmd.time.after(#{ms})"
   def describe({:random, lo, hi, _}), do: "Cmd.random.int(#{lo}, #{hi})"
   def describe({:navigate, app, _}), do: "Cmd.navigate(#{app})"
+
+  def describe({:wasm, hash, export, _input, _}),
+    do: "Cmd.wasm.call(#{String.slice(hash, 0, 15)}…, #{export})"
+
   def describe({:store, "tx", _, _}), do: "Cmd.store.tx"
   def describe({:store, op, model, _}), do: "Cmd.store.#{op}(#{model})"
   def describe({:unavailable, name}), do: name
   def describe({:error, _}), do: "(an effect that cannot run)"
+
+  @doc "A WASM call's answer as the callback gets it: `Result.Ok(output)` or `Result.Err(reason)`."
+  @spec result({:ok, String.t()} | {:error, String.t()}) :: term()
+  def result({:ok, output}), do: {:var, "Result", "Ok", [output]}
+  def result({:error, reason}), do: {:var, "Result", "Err", [reason]}
 
   @doc "Now, in Unix milliseconds: what `Cmd.time.now`'s callback gets."
   @spec now() :: integer()

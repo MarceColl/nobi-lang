@@ -156,8 +156,8 @@ defmodule NobiWeb.Mcp.Instructions do
   declaration form, events and forms, stored data, and the whole stdlib.
 
   Code lives in UNIVERSES (named code databases). Every tool but
-  `list_universes`, `create_universe`, `list_deployments`, `send` and `guide`
-  takes an optional `universe` (default "main", which is shared).
+  `list_universes`, `create_universe`, `list_deployments`, `send`, `guide`
+  and `put_wasm` takes an optional `universe` (default "main", shared).
 
   Code is in the Nobi language: defmodel / deftype / def / deftest / defapp / defroutes.
   An app is one Elm-style loop: init() -> (Model, Cmd<Msg>), update(msg, model)
@@ -292,13 +292,28 @@ defmodule NobiWeb.Mcp.Instructions do
   - Cmd values (effects) are data to `eval`: it shows the Cmd a function
     returns and runs nothing. A deployment serving the app runs them
     (Cmd.store.*, Cmd.time.now in Unix milliseconds, Cmd.random.int,
-    Cmd.navigate, Cmd.time.after); Cmd.blob.*
+    Cmd.navigate, Cmd.time.after, Cmd.wasm.call); Cmd.blob.*
     and Cmd.ai.* are not available yet.
   - Cmd.time.after(ms, msg) delivers `msg` itself (a Msg value, not a
     callback: `Cmd.time.after(1000, App.Msg.Tick)`) to update after `ms`
     milliseconds, 0..86400000. update re-arms it for a loop:
     `App.Msg.Tick -> (%App.Model{model | n: model.n + 1}, Cmd.time.after(1000, App.Msg.Tick))`.
     A page drops a pending timer when it reopens the app; there is no cancel.
+  - Cmd.wasm.call(module, export, input, cb) runs a WASM module OUTSIDE
+    update and view; its answer comes back as cb's Msg, a
+    Result<String, String>. Store the module with `put_wasm`: code names it
+    by the hash it answers (`"sha256:<hex>"`), so a pinned commit always
+    calls the same bytes. Two Msgs make the loop:
+    `App.Msg.Run -> (model, Cmd.wasm.call(h, "simulate", req, App.Msg.Simulated))`
+    `App.Msg.Simulated(r) -> case r do Result.Ok(json) -> ... Result.Err(why) -> ... end`
+    Every failure is an Err to handle: "bad module hash", "unknown module",
+    "no export <name>", "trap: …", "out of fuel", "out of memory",
+    "input too large"/"output too large" (8 MiB), "timeout" (30 s),
+    "wasm busy", and "too many wasm calls in flight" (4 per page). The
+    module imports nothing (no WASI) and exports memory, alloc(len : i32)
+    -> i32 and free(ptr : i32, len : i32); a callable export takes
+    (ptr : i32, len : i32) of UTF-8 input and returns ptr << 32 | len of its
+    UTF-8 output as an i64. `send` runs the real module.
   - `send` (deployment, path, messages) runs them for real, as a page would:
     it opens `path` (its route's app, init with the URL's params), then sends
     each message, a Nobi expression of that app's Msg type

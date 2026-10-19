@@ -28,7 +28,9 @@ defmodule Nobi.Deployment.Runner do
   with or without a callback, a timer when it fires); a step that reaches
   it stops the run there, which is where a loop that re-arms its timer
   ends. A run
-  takes at most #{20} messages. `Cmd.navigate` is reported with its URL but not followed: the
+  takes at most #{20} messages. `Cmd.wasm.call` runs the real module,
+  one call at a time, and a run spends at most #{60} s in WASM calls in
+  all; once that is spent, each call left answers `Err("timeout")`. `Cmd.navigate` is reported with its URL but not followed: the
   run stays on its app. An `update` that fails stops the run.
 
   The report: the app, its arguments, one entry per step (`:init`, then
@@ -42,6 +44,9 @@ defmodule Nobi.Deployment.Runner do
   alias Nobi.Lang.{Format, Routes}
 
   @max_steps 50
+  # The WASM time one run may spend, in ms (`config :nobi, Nobi.Wasm,
+  # send_budget_ms:`).
+  @wasm_budget_ms 60_000
   @max_messages 20
   # Waiting effects named when the cap stops a step.
   @left_shown 5
@@ -90,6 +95,7 @@ defmodule Nobi.Deployment.Runner do
         model: nil,
         model_type: model_type(code, app),
         clock: 0,
+        wasm_ms: 0,
         stopped?: false
       }
 
@@ -307,20 +313,49 @@ defmodule Nobi.Deployment.Runner do
     drain(run, queue, before ++ [{due, effect} | later], entries, done)
   end
 
+  defp drain(run, [{:wasm, _, _, _, cb} = effect | queue], timers, entries, done) do
+    {run, value, note} = wasm(run, effect)
+    entry = %{entry(effect) | value: value, note: note}
+    called(run, cb, value, entry, queue, timers, entries, done)
+  end
+
   defp drain(run, [effect | queue], timers, entries, done) do
     case perform(run, effect) do
       {:value, value, cb, entry} ->
-        case apply_cb(run, cb, value) do
-          {:ok, msg} ->
-            deliver(run, msg, queue, timers, entry, entries, done)
-
-          {:error, e} ->
-            entry = %{entry | error: "its callback failed: #{error_text(e)}"}
-            drain(run, queue, timers, [entry | entries], done + 1)
-        end
+        called(run, cb, value, entry, queue, timers, entries, done)
 
       {:done, entry} ->
         drain(run, queue, timers, [entry | entries], done + 1)
+    end
+  end
+
+  # `cb` applied to `value`, and its msg delivered.
+  defp called(run, cb, value, entry, queue, timers, entries, done) do
+    case apply_cb(run, cb, value) do
+      {:ok, msg} ->
+        deliver(run, msg, queue, timers, entry, entries, done)
+
+      {:error, e} ->
+        entry = %{entry | error: "its callback failed: #{error_text(e)}"}
+        drain(run, queue, timers, [entry | entries], done + 1)
+    end
+  end
+
+  # A real WASM call, within what is left of the run's WASM time budget
+  # (`Nobi.Wasm`'s `:send_budget_ms`); once it is spent, each call left is
+  # `Err("timeout")` and runs nothing.
+  defp wasm(run, {:wasm, hash, export, input, _cb}) do
+    cfg = Nobi.Wasm.config()
+    left = Keyword.get(cfg, :send_budget_ms, @wasm_budget_ms) - run.wasm_ms
+
+    if left <= 0 do
+      {run, Effects.result({:error, "timeout"}),
+       "this send's WASM time budget is spent; nothing ran"}
+    else
+      t0 = System.monotonic_time(:millisecond)
+      answer = Nobi.Wasm.call(hash, export, input, deadline_ms: min(cfg[:deadline_ms], left))
+      took = System.monotonic_time(:millisecond) - t0
+      {%{run | wasm_ms: run.wasm_ms + took}, Effects.result(answer), nil}
     end
   end
 

@@ -27,4 +27,28 @@ defmodule Nobi.Deployment.EffectsTest do
       assert Effects.flatten(cmd) == {:ok, [{:after, 5, @tick}, {:now, :cb}]}
     end
   end
+
+  describe "Cmd.wasm.call" do
+    defp wasm(args), do: {:cmd, {:effect, "Cmd.wasm.call", nil, args}}
+
+    test "is the module, export and input, and the callback" do
+      h = "sha256:" <> String.duplicate("ab", 32)
+
+      assert Effects.flatten(wasm([h, "simulate", "{}", :cb])) ==
+               {:ok, [{:wasm, h, "simulate", "{}", :cb}]}
+
+      assert Effects.describe({:wasm, h, "simulate", "{}", :cb}) ==
+               "Cmd.wasm.call(sha256:abababab…, simulate)"
+    end
+
+    test "a bad hash still runs: its Err reaches the app" do
+      assert Effects.flatten(wasm(["nope", "f", "", :cb])) ==
+               {:ok, [{:wasm, "nope", "f", "", :cb}]}
+    end
+
+    test "its answer is a Result" do
+      assert Effects.result({:ok, "out"}) == {:var, "Result", "Ok", ["out"]}
+      assert Effects.result({:error, "out of fuel"}) == {:var, "Result", "Err", ["out of fuel"]}
+    end
+  end
 end

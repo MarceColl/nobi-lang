@@ -2,7 +2,7 @@ defmodule Nobi.Lang.Types.Stdlib do
   @moduledoc """
   Stdlib signatures (ported from `types/stdlib.rs`): the 59 rows the checker
   resolves calls against, in the Rust/TS declared order, then the `Map` rows
-  this port adds, then `Store.get`/`Store.list`, then `Uuid.to_string`/`Uuid.parse`, then `Cmd.time.after`, then the seven `Float` rows (80 in all). `Cmd.store.tx`
+  this port adds, then `Store.get`/`Store.list`, then `Uuid.to_string`/`Uuid.parse`, then `Cmd.time.after`, then the seven `Float` rows, then `Cmd.wasm.call` (81 in all). `Cmd.store.tx`
   takes a closure and `Tx.delete` a model and an id (a special form), where
   Rust's took a list of ops and a row. Generic positions use
   lowercase `{:var, "a"}` for defs and `{:var, "T"}` for the `Option`/`Result`
@@ -151,7 +151,12 @@ defmodule Nobi.Lang.Types.Stdlib do
             {"Float.ceil", def_.([float], int)},
             {"Float.sqrt", def_.([float], float)},
             {"Float.abs", def_.([float], float)},
-            {"Float.to_string", def_.([float, int], str)}
+            {"Float.to_string", def_.([float, int], str)},
+            # WASM (after the Float rows so every earlier row keeps its
+            # rank): a module by hash, an export, its input; the callback
+            # gets the output or why there is none.
+            {"Cmd.wasm.call",
+             def_.([str, str, str, arrow.([ap.("Result", [str, str])], a)], cmd.(a))}
           ]
         )
 
