@@ -21,7 +21,15 @@ def checkVersion (root : System.FilePath) : IO Bool := do
   IO.eprintln s!"FAIL: VERSION says {file}, Nobi.specVersion says {Nobi.specVersion}"
   return false
 
+/-- `scripts/rule-names.sh`: rule names in `spec/semantics.md` and the Lean tags agree. -/
+def checkRuleNames (root : System.FilePath) : IO Bool := do
+  let out ← IO.Process.output { cmd := (root / "scripts" / "rule-names.sh").toString }
+  IO.print out.stdout
+  IO.eprint out.stderr
+  return out.exitCode == 0
+
 def main : IO UInt32 := do
   let root ← packageRoot
-  let ok ← checkVersion root
-  return if ok then 0 else 1
+  let version ← checkVersion root
+  let rules ← checkRuleNames root
+  return if version && rules then 0 else 1
