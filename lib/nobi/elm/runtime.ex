@@ -76,7 +76,10 @@ defmodule Nobi.Elm.Runtime do
   already holds what its first steps fetch (e.g. a LiveView's static
   render, whose process is thrown away). Past `n`, async effects go back to
   their normal treatment; `stop_inline/1` ends it early. `update/2` stays
-  pure either way: only where the effect runs changes.
+  pure either way: only where the effect runs changes. A WASM request
+  (`Nobi.Elm.Effect.wasm/4`) never runs inline and does not count toward
+  `n`: it is dispatched to its own task, or dropped with `perform: false`,
+  so a render never runs WASM.
 
   `timeline_limit: n` keeps at most `n` timeline entries (default
   #{@timeline_limit}); each msg entry holds that step's whole state, so a
@@ -223,7 +226,9 @@ defmodule Nobi.Elm.Runtime do
           record(%{runtime | next_id: id + 1}, %{kind: :effect, id: id, effect: description})
 
         case effect do
-          {:async, request, to_msg} when runtime.inline > 0 ->
+          # WASM never runs inline: it would run in the render path.
+          {:async, request, to_msg}
+          when runtime.inline > 0 and (not is_tuple(request) or elem(request, 0) != :wasm) ->
             msg = result_msg(request, to_msg, description)
             {%{runtime | inline: runtime.inline - 1}, host, [{id, description, msg} | inline]}
 
@@ -324,6 +329,8 @@ defmodule Nobi.Elm.Runtime do
   defp execute(:now), do: DateTime.utc_now()
 
   defp execute({:random, range}), do: Enum.random(range)
+
+  defp execute({:wasm, hash, export, input}), do: Nobi.Wasm.call(hash, export, input)
 
   defp execute({:task, fun}) do
     {:ok, fun.()}

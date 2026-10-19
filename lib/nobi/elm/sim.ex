@@ -33,7 +33,13 @@ defmodule Nobi.Elm.Sim do
     * `:invariants` — `{name, fun}`; `fun.(state)` or `fun.(state, world)` where
       world is `%{pending: [description], outputs: [description], clock: ms}`
     * `:outcomes` — `fn request, clock -> [{label, result}] | nil` to override
-      how async effects can resolve (`nil` falls back to the defaults)
+      how async effects can resolve (`nil` falls back to the defaults).
+      A WASM request (`{:wasm, hash, export, input}`) defaults to the two
+      outcomes that depend on the host, `timeout` and `busy`; what a module
+      answers comes from a stub or a replay, `wasm_outcomes/2`:
+
+          outcomes: Sim.wasm_outcomes(%{{hash, "simulate", req} => {:ok, ~s({"dps": 1.5})}})
+          outcomes: Sim.wasm_outcomes(:run)   # calls Nobi.Wasm for real, once per request
     * `:max_depth` (12), `:max_nodes` (2000)
   """
 
@@ -280,6 +286,52 @@ defmodule Nobi.Elm.Sim do
   end
 
   def default_outcomes({:task, _fun}, _clock), do: [{"error", {:error, :simulated}}]
+
+  # Only what depends on the host: what a module answers depends on the
+  # module and input alone, so it comes from a stub or a replay.
+  def default_outcomes({:wasm, _hash, _export, _input}, _clock),
+    do: [{"timeout", {:error, "timeout"}}, {"busy", {:error, "wasm busy"}}]
+
+  @doc """
+  An `:outcomes` fun for WASM requests (`nil` for any other request, so its
+  defaults hold). `source` is a map of recorded results,
+  `%{{hash, export, input} => {:ok, text} | {:error, reason}}` (a request
+  it lacks resolves to `{:error, "not recorded"}`), or `:run`, which calls
+  `Nobi.Wasm.call/4` once per distinct request and remembers the answer for
+  the exploration. A real call is deterministic: no imports, a fresh
+  instance, and fuel that counts instructions. The host-dependent
+  `timeout` and `busy` branches are added unless `host_failures: false`.
+  """
+  @spec wasm_outcomes(map() | :run, keyword()) :: (term(), integer() -> list() | nil)
+  def wasm_outcomes(source, opts \\ []) do
+    host =
+      if Keyword.get(opts, :host_failures, true),
+        do: default_outcomes({:wasm, nil, nil, nil}, 0),
+        else: []
+
+    fn
+      {:wasm, hash, export, input}, _clock ->
+        [{"result", wasm_result(source, {hash, export, input})} | host]
+
+      _request, _clock ->
+        nil
+    end
+  end
+
+  defp wasm_result(recorded, key) when is_map(recorded),
+    do: Map.get(recorded, key, {:error, "not recorded"})
+
+  defp wasm_result(:run, {hash, export, input} = key) do
+    case Process.get({__MODULE__, :wasm, key}) do
+      nil ->
+        result = Nobi.Wasm.call(hash, export, input)
+        Process.put({__MODULE__, :wasm, key}, result)
+        result
+
+      result ->
+        result
+    end
+  end
 
   defp step(node, choice, spec, id) do
     child = %{
