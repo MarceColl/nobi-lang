@@ -84,7 +84,7 @@ def apply : Impl := fun _P call op _targs args =>
   | "List.sum", [.list xs] => -- [P-List.sum]
     some do
       let ns ← ints xs
-      .int <$> ns.foldlM (fun acc n => I64.add n acc) 0
+      pure (.int (ns.foldl (· + ·) 0))
   | "List.maximum", [.list xs] => -- [P-List.maximum]
     some do
       let ns ← ints xs

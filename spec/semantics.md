@@ -395,7 +395,7 @@ shape are `stuck`. Source: `types/stdlib.ex`, `rt/stdlib.ex`.
 
 [P-List.foldl] `∀a b. (List a, b, (a, b) -> b) -> b`: left to right, `f(item, acc)`. since: 1.0.0
 
-[P-List.sum] `(List Int) -> Int`: from 0, checked at each step (`overflow`). since: 1.0.0
+[P-List.sum] `(List Int) -> Int`: from 0, exact. since: 2.0.0
 
 [P-List.maximum] `(List Int) -> Option Int`: `None` when empty. since: 1.0.0
 
@@ -429,7 +429,7 @@ Strings are sequences of code points.
 
 [P-String.from_int] `(Int) -> String`: decimal, `-` for a negative. since: 1.0.0
 
-[P-String.to_int] `(String) -> Option Int`: an optional `-` then one or more ASCII digits, nothing else, within i64. since: 1.0.0
+[P-String.to_int] `(String) -> Option Int`: an optional `-` then one or more ASCII digits, nothing else, of at most 4300 significant digits. since: 2.0.0
 
 [P-String.is_empty] `(String) -> Bool`. since: 1.0.0
 

@@ -93,7 +93,7 @@ def holds (t : Ty) (lhs rhs : Expr) : Bool :=
 #guard holds (opt .int) (p "String.to_int" [] [s ""]) (none .int)
 #guard holds (opt .int) (p "String.to_int" [] [s "abc"]) (none .int)
 -- stdlib.json says `None` here, TS's answer (JS numbers lose the last digit).
--- The value fits an i64, and Nobi on the BEAM answers `Some`
+-- Nobi's Int holds it, and Nobi on the BEAM answers `Some`
 -- (`test/nobi/exec/stdlib_test.exs` `@divergent`); so does the spec.
 #guard holds (opt .int) (p "String.to_int" [] [s "9007199254740993"]) (some .int (i 9007199254740993))
 #guard holds .bool (p "String.is_empty" [] [s ""]) (.bool true)
@@ -131,12 +131,15 @@ def holds (t : Ty) (lhs rhs : Expr) : Bool :=
 
 /-! Beyond `stdlib.json`: the rules the plan names for each module. -/
 
--- `String.split` keeps empty pieces; `to_int` stays within i64.
+-- `String.split` keeps empty pieces; `to_int` reads up to 4300 digits.
 #guard holds (.list .str) (p "String.split" [] [s ",a,,b,", s ","]) (strs ["", "a", "", "b", ""])
 #guard holds (.list .str) (p "String.split" [] [s "", s ","]) (strs [""])
 #guard holds (.list .str) (p "String.split" [] [s "aaa", s "aa"]) (strs ["", "a"])
 #guard holds (opt .int) (p "String.to_int" [] [s "9223372036854775807"]) (some .int (i 9223372036854775807))
-#guard holds (opt .int) (p "String.to_int" [] [s "9223372036854775808"]) (none .int)
+#guard holds (opt .int) (p "String.to_int" [] [s "9223372036854775808"]) (some .int (i 9223372036854775808))
+#guard Prim.Str.toInt (String.ofList (List.replicate 4300 '9')) == Option.some ((10 : Int) ^ 4300 - 1)
+#guard Prim.Str.toInt (String.ofList (List.replicate 4301 '9')) == Option.none
+#guard Prim.Str.toInt ("-" ++ String.ofList (List.replicate 5000 '0') ++ "7") == Option.some (-7 : Int)
 #guard holds (opt .int) (p "String.to_int" [] [s "-9223372036854775808"]) (some .int (p "-" [] [neg 9223372036854775807, i 1]))
 #guard holds (opt .int) (p "String.to_int" [] [s "00000000000000000000001"]) (some .int (i 1))
 #guard holds (opt .int) (p "String.to_int" [] [s "+1"]) (none .int)
@@ -146,8 +149,9 @@ def holds (t : Ty) (lhs rhs : Expr) : Bool :=
 -- `String.trim` strips Unicode white space; case functions are ASCII-only.
 #guard holds .str (p "String.trim" [] [s "　a "]) (s "a")
 #guard holds .str (p "String.to_upper" [] [s "é"]) (s "é")
--- `List.sum` is checked; `sort_by` is stable; `foldl` calls f(x, acc).
-#guard Eval.eval {} 100 [] (p "List.sum" [] [ints [9223372036854775807, 1, -1]]) == .error .overflow
+-- `List.sum` is exact; `sort_by` is stable; `foldl` calls f(x, acc).
+#guard holds .int (p "List.sum" [] [ints [9223372036854775807, 1, -1]]) (i 9223372036854775807)
+#guard holds .int (p "List.sum" [] [ints [9223372036854775807, 1]]) (i 9223372036854775808)
 #guard holds (.list .str) (p "List.sort_by" [.str] [strs ["b", "a", "c", "d"], fn [("x", .str)] (i 0)]) (strs ["b", "a", "c", "d"])
 #guard holds (.list .str) (p "List.foldl" [.str, .list .str] [strs ["a", "b"], .list .str [], fn [("x", .str), ("acc", .list .str)] (p "List.append" [.str] [v "acc", v "x"])]) (strs ["a", "b"])
 -- `List.take`/`drop` clamp the count.

@@ -26,8 +26,12 @@ def sigs : List (String × Sig) :=
     ("String.join", { params := [.list .str, .str], ret := .str }),
     ("String.slice", { params := [.str, .int, .int], ret := .str }) ]
 
-/-- Strict decimal: an optional `-`, then one or more ASCII digits, within
-i64. Past 19 significant digits nothing fits. -/
+/-- The most significant digits `String.to_int` reads (`Rt.max_int_digits/0`):
+parsing costs more than linear time, so a longer text could stall a request. -/
+def maxIntDigits : Nat := 4300
+
+/-- Strict decimal: an optional `-`, then one or more ASCII digits, of at most
+`maxIntDigits` significant digits. -/
 def toInt (s : String) : Option Int :=
   let cs := s.toList
   let (neg, ds) := match cs with
@@ -36,11 +40,10 @@ def toInt (s : String) : Option Int :=
   if ds.isEmpty || !ds.all Char.isDigit then none
   else
     let sig := ds.dropWhile (· == '0')
-    if sig.length > 19 then none
+    if sig.length > maxIntDigits then none
     else
       let n : Int := sig.foldl (fun acc c => acc * 10 + (c.toNat - '0'.toNat)) 0
-      let v := if neg then -n else n
-      if I64.inRange v then some v else none
+      some (if neg then -n else n)
 
 /-- Unicode's White_Space property, as `String.trim` strips it. -/
 def whitespace : List Nat :=
