@@ -694,17 +694,6 @@ defmodule Nobi.Lang.Types.Check do
         do: Ctx.error(ctx, "bad-name", "`#{name}` is already bound in this block"),
         else: ctx
 
-    # Functions are second-class: inlined at the call site, never named.
-    ctx =
-      case Ctx.shallow(ctx, ty(s)) do
-        {:arrow, _, _} ->
-          message = "`#{name}` cannot be bound to a function — inline it at the call site"
-          Ctx.error(ctx, "bad-name", message)
-
-        _ ->
-          ctx
-      end
-
     {{:bind, name, s}, Ctx.bind_local(ctx, name, ty(s))}
   end
 

@@ -11,6 +11,13 @@ Each entry names its spec version and its class:
 Triaged disagreements between the spec and the implementation are recorded
 here too, each with its verdict.
 
+## 1.1.0
+
+Class: minor. A `let` may bind a function: a lambda, a def or a
+constructor taken as a value. 1.0.0 refused such a binding with
+`bad-name`, a rule the checker took from the Yabu reference and nothing in
+Nobi relied on. Every program 1.0.0 accepts types and runs as before.
+
 ## 1.0.0 (initial)
 
 Class: initial. The language as on main at

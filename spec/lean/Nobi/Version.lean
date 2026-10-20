@@ -9,6 +9,6 @@ read.
 namespace Nobi
 
 /-- The spec version, as in `VERSION`. -/
-def specVersion : String := "1.0.0"
+def specVersion : String := "1.1.0"
 
 end Nobi

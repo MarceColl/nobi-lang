@@ -262,8 +262,6 @@ def typeOf (P : Prog) (Γ : Ctx) : Expr → TyM Ty
     pure (.arrow (ps.map (·.2)) r)
   | .letIn x e body => do -- [T-Let]
     let t ← typeOf P Γ e
-    if let .arrow .. := t then
-      fail "bad-name" s!"`{x}` cannot be bound to a function — inline it at the call site"
     typeOf P ((x, t) :: Γ) body
   | .seq a b => do -- [T-Seq]
     let _ ← typeOf P Γ a

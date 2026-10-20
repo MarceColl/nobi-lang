@@ -79,10 +79,11 @@ def incFn : Expr := .lam [("n", .int)] (.prim "+" [] [.var "n", .int 1])
 -- A closure captures its environment.
 #guard ev (.letIn "k" (.int 10) (.app (.lam [("n", .int)] (.prim "+" [] [.var "n", .var "k"])) [.int 1])) == .ok (.int 11)
 
--- [T-Let] [E-Let]: shadowing, and no local holds a function.
+-- [T-Let] [E-Let]: shadowing, and a local may hold a function.
 #guard ev (.letIn "x" (.int 1) (.letIn "x" (.int 2) (.var "x"))) == .ok (.int 2)
 #guard ty (.letIn "x" (.int 1) (.var "x")) == .ok .int
-#guard code (ty (.letIn "f" incFn (.int 1))) == "bad-name"
+#guard ty (.letIn "f" incFn (.app (.var "f") [.int 1])) == .ok .int
+#guard ev (.letIn "f" incFn (.app (.var "f") [.int 1])) == .ok (.int 2)
 
 -- [T-Seq] [E-Seq]: the first value is dropped, its error is not.
 #guard ty (.seq (.str "a") (.int 1)) == .ok .int

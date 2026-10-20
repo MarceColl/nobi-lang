@@ -402,6 +402,30 @@ defmodule Nobi.Lang.CodegenTest do
       assert call(image, "F.words", ["hello"]) == 2
     end
 
+    test "a let binds a closure, a def and a constructor, and calls them" do
+      src = """
+      deftype L.Box do
+        Box(Int) | Empty
+      end
+
+      def L.inc(x : Int) : Int do
+        x + 1
+      end
+
+      def L.go(x : Int) : (Int, List<Int>, L.Box) do
+        k = 10
+        add = fn (y : Int) -> y + k end
+        inc = L.inc
+        box = L.Box.Box
+        (inc(add(x)), List.map([x], add), box(x))
+      end
+      """
+
+      image = image!(src)
+      load(image)
+      assert call(image, "L.go", [1]) == {12, [11], {:var, "L.Box", "Box", [1]}}
+    end
+
     test "maps, records, updates, JSON with the model's field order, store reads" do
       src = """
       defmodel J.Row do

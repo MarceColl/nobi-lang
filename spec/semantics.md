@@ -142,20 +142,9 @@ Source: `codegen/expr.ex` L403-404.
 
 ## Functions
 
-Functions are second-class in one way: a `let` never binds one (see the
-`let` rule). They are passed as arguments, returned, and held in tuples,
-lists, map values and deftype arguments (`Option<(Int) -> Int>`), but not
-in model fields or variant arguments.
-
-The `let` restriction is the checker's (`types/check.ex` L697-704: "inlined
-at the call site, never named"), kept so that the spec accepts the same
-programs. The checker is a port of the Rust/TS Yabu reference
-(`docs/superpowers/specs/2026-10-14-nobi-language-core-design.md`) and took
-the rule from it; nothing in Nobi depends on it. It refuses only a binding
-whose type is a function: `p = (fn (x : Int) -> x end, 1)` and
-`p = [fn (x : Int) -> x end]` bind fine. Evaluation does not need it: [E-Let] would
-bind a closure like any other value, and the BEAM compiles a lambda to an
-ordinary fun. Lifting it is a minor change.
+Functions are values. They are bound by `let`, passed as arguments,
+returned, and held in tuples, lists, map values and deftype arguments
+(`Option<(Int) -> Int>`), but not in model fields or variant arguments.
 
 [T-Lam] Each parameter's type is well-formed, no name twice (`bad-name`), and `Γ, x₁ : τ₁ … ⊢ e : τ ⟹ Γ ⊢ fn (x₁ : τ₁ …) -> e : (τ₁ …) -> τ`. since: 1.0.0
 Source: `types/check.ex` L461-472.
@@ -168,8 +157,8 @@ Source: `codegen/expr.ex` L247-251.
 A block's statements lower to nested `let` and `;`; a rebinding in an inner
 block shadows.
 
-[T-Let] `Γ ⊢ e₁ : τ₁`, `τ₁` not a function type (else `bad-name`), `Γ, x : τ₁ ⊢ e₂ : τ ⟹ Γ ⊢ let x = e₁ in e₂ : τ`. since: 1.0.0
-Source: `types/check.ex` L688-709.
+[T-Let] `Γ ⊢ e₁ : τ₁`, `Γ, x : τ₁ ⊢ e₂ : τ ⟹ Γ ⊢ let x = e₁ in e₂ : τ`. since: 1.1.0
+Source: `types/check.ex` L688-709, less the function check (L697-706) that 1.1.0 drops.
 
 [T-Seq] `Γ ⊢ e₁ : τ₁`, `Γ ⊢ e₂ : τ ⟹ Γ ⊢ e₁; e₂ : τ`. since: 1.0.0
 Source: `types/check.ex` L683-686.
