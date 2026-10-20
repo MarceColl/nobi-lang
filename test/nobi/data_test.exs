@@ -350,7 +350,34 @@ defmodule Nobi.DataTest do
       sql!(repo, ~s(UPDATE a__flag SET "on" = 2))
       assert {:error, %{code: "store"}} = Data.list(repo, "A.Flag", sig)
     end
+
+    test "an Int past 64 bits is a BLOB of its digits, never a lossy REAL", %{dir: dir} do
+      repo = open!(dir)
+      sig = [{"id", @uuid, :none}, {"n", @int, :none}, {"m", option(@int), :none}]
+      big = 2 ** 64 + 1
+      row = fn n, m -> {:rec, "A.Big", %{"n" => n, "m" => m}} end
+
+      {:ok, a} = Data.insert(repo, "A.Big", sig, row.(big, some(-big)))
+      {:ok, b} = Data.insert(repo, "A.Big", sig, row.(2 ** 63 - 1, some(-(2 ** 63))))
+
+      assert sql!(repo, "SELECT typeof(n), typeof(m) FROM a__big ORDER BY _seq") ==
+               [["blob", "blob"], ["integer", "integer"]]
+
+      assert Data.get(repo, "A.Big", sig, a) == {:ok, row.(big, some(-big)) |> put_id(a)}
+
+      assert Data.get(repo, "A.Big", sig, b) ==
+               {:ok, row.(2 ** 63 - 1, some(-(2 ** 63))) |> put_id(b)}
+
+      {:ok, _} = Data.update(repo, "A.Big", sig, a, row.(big * big, @none))
+      assert {:ok, {:rec, _, %{"n" => n, "m" => @none}}} = Data.get(repo, "A.Big", sig, a)
+      assert n == big * big
+
+      sql!(repo, "UPDATE a__big SET n = CAST('0042' AS BLOB)")
+      assert {:error, %{code: "store"}} = Data.list(repo, "A.Big", sig)
+    end
   end
+
+  defp put_id({:rec, m, fields}, id), do: {:rec, m, Map.put(fields, "id", id)}
 
   describe "compound values" do
     @models %{
@@ -373,7 +400,7 @@ defmodule Nobi.DataTest do
     defp item(maybe) do
       {:rec, "Shop.Item",
        %{
-         "nums" => [1, -2, 3],
+         "nums" => [1, -2, 3, -(2 ** 70)],
          "counts" => %{"a" => 1, "b" => 2},
          "pair" => {7, "seven"},
          "addr" => {:rec, "Shop.Addr", %{"street" => "Main", "zip" => 9, "unit" => some("4B")}},

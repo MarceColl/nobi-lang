@@ -494,8 +494,8 @@ defmodule Nobi.Lang.ParserTest do
     end
 
     test "lexing errors surface through the parser" do
-      assert {1, 5, m} = err(:expr, "1 + 99999999999999999999")
-      assert m =~ "too large"
+      assert {1, 5, m} = err(:expr, "1 + " <> String.duplicate("9", 4301))
+      assert m =~ "too long"
       assert {1, 1, "unterminated string"} = err(:expr, ~S|"abc|)
       assert {1, 1, "newline in string literal"} = err(:expr, "\"a\nb\"")
     end
@@ -509,9 +509,8 @@ defmodule Nobi.Lang.ParserTest do
       assert {1, 3, "unexpected ')' after expression"} = err(:expr, "1 )")
     end
 
-    test "an int past i64 is a parse error" do
-      assert {:error, %{code: "parse"}} = Parser.expr("9223372036854775808")
-      assert {:ok, _} = Parser.expr("9223372036854775807")
+    test "an int past i64 parses" do
+      assert {:ok, _} = Parser.expr("9223372036854775808")
     end
   end
 

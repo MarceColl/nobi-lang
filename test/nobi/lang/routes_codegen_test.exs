@@ -77,14 +77,14 @@ defmodule Nobi.Lang.RoutesCodegenTest do
       assert {:ok, "Shadowed", ["abc"]} = Routes.match(@table, "/n/abc")
     end
 
-    test "Int rejects overflow, signs, leading zeros, non-digits" do
-      assert {:ok, "Num", [9_223_372_036_854_775_807]} =
-               Routes.match(@table, "/n/9223372036854775807")
+    test "Int rejects past 4300 digits, signs, leading zeros, non-digits" do
+      assert {:ok, "Num", [9_223_372_036_854_775_808]} =
+               Routes.match(@table, "/n/9223372036854775808")
 
-      assert {:ok, "Num", [-9_223_372_036_854_775_808]} =
-               Routes.match(@table, "/n/-9223372036854775808")
+      assert Routes.match(@table, "/n/-" <> String.duplicate("9", 4300)) ==
+               {:ok, "Num", [-(10 ** 4300 - 1)]}
 
-      for bad <- ["9223372036854775808", "+1", "007", "-0", "1.0", ""] do
+      for bad <- [String.duplicate("9", 4301), "+1", "007", "-0", "1.0", ""] do
         refute match?({:ok, "Num", _}, Routes.match(@table, "/n/" <> bad)), bad
       end
 
@@ -164,6 +164,7 @@ defmodule Nobi.Lang.RoutesCodegenTest do
         {"Num", [0]},
         {"Num", [9_223_372_036_854_775_807]},
         {"Num", [-9_223_372_036_854_775_808]},
+        {"Num", [2 ** 64]},
         {"Post", [{:uuid, @uuid}]},
         {"Str", ["a b/c?é%#"]},
         {"Two", [12, "q/r"]}

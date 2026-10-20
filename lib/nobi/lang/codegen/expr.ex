@@ -47,8 +47,6 @@ defmodule Nobi.Lang.Codegen.Expr do
   @json Nobi.Lang.Rt.Json
   @hooks Nobi.Exec.Hooks
   @data_hooks Nobi.Data.Hooks
-  @i64_min -9_223_372_036_854_775_808
-  @i64_max 9_223_372_036_854_775_807
   @max_vars 10_000
 
   # The forms that work on one stored model (`Nobi.Lang.Types.Store`), by
@@ -148,8 +146,7 @@ defmodule Nobi.Lang.Codegen.Expr do
 
   @doc "The form of one expression."
   @spec expr(Nobi.Lang.Ast.node_(), ctx) :: {tuple(), ctx}
-  def expr({:int, _, [n]}, ctx) when n >= @i64_min and n <= @i64_max, do: {lit(n), ctx}
-  def expr({:int, _, [n]}, ctx), do: {rt(:checked, [lit(n)]), ctx}
+  def expr({:int, _, [n]}, ctx), do: {lit(n), ctx}
   def expr({:str, _, [s]}, ctx), do: {lit(s), ctx}
   def expr({:bool, _, [b]}, ctx), do: {lit(b), ctx}
 

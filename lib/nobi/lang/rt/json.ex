@@ -17,9 +17,10 @@ defmodule Nobi.Lang.Rt.Json do
   itself, any other key as its own compact JSON text. `parse` reads a key
   back the same way, by the map's declared key type.
 
-  A number is an `Int` when its exact value is a whole number within i64;
-  a lone surrogate escape is not JSON. Text or a value nested deeper than
-  100,000 levels is refused (text as an `Err`, a value as a runtime error).
+  A number is an `Int` when its exact value is a whole number of at most
+  `Rt.max_int_digits/0` digits; a lone surrogate escape is not JSON. Text
+  or a value nested deeper than 100,000 levels is refused (text as an
+  `Err`, a value as a runtime error).
 
   `models` is `%{model => [{field, type, default}]}` (the image's
   `__nobi__(:models)`): what decoding a record needs, and its field order
@@ -550,9 +551,9 @@ defmodule Nobi.Lang.Rt.Json do
   defp uuid?(s),
     do: Regex.match?(~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/, s)
 
-  # The number `text` (JSON's grammar) as an i64, if its exact value is a
-  # whole number in range: `1.0`, `1e3` and `-0` are, `1.5`, `1e-400` and
-  # `1e19` are not.
+  # The number `text` (JSON's grammar) as an Int, if its exact value is a
+  # whole number of at most `Rt.max_int_digits/0` digits: `1.0`, `1e3` and
+  # `-0` are, `1.5`, `1e-400` and `1e4300` are not.
   defp integer(text) do
     {negative, unsigned} =
       case text do
@@ -581,12 +582,11 @@ defmodule Nobi.Lang.Rt.Json do
       zeros = byte_size(digits) - byte_size(significant)
       scale = power(exponent) - byte_size(fraction) + zeros
 
-      if scale < 0 or scale > 19 - byte_size(significant) do
+      if scale < 0 or scale > Rt.max_int_digits() - byte_size(significant) do
         nil
       else
         magnitude = String.to_integer(significant) * Integer.pow(10, scale)
-        n = if negative, do: -magnitude, else: magnitude
-        if n >= -9_223_372_036_854_775_808 and n <= 9_223_372_036_854_775_807, do: n
+        if negative, do: -magnitude, else: magnitude
       end
     end
   end
@@ -600,7 +600,7 @@ defmodule Nobi.Lang.Rt.Json do
         d -> {1, d}
       end
 
-    # Past 25 digits, an exponent is past any that leaves an i64 whole.
+    # Past 25 digits, an exponent is past any that leaves an Int readable.
     case String.trim_leading(digits, "0") do
       "" -> 0
       d when byte_size(d) > 25 -> sign * 9_999_999_999_999_999_999_999_999

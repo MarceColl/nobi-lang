@@ -2,7 +2,9 @@ defmodule Nobi.Data.Codec do
   @moduledoc """
   Field values to SQLite cells and back.
 
-  Writing is by the field's type: `Int` as itself, `Bool` as `0`/`1`,
+  Writing is by the field's type: `Int` as itself within 64 bits, past them
+  as a BLOB of its decimal digits (SQLite turns a larger integer into a
+  lossy REAL, but keeps a BLOB as it is), `Bool` as `0`/`1`,
   `String` as itself, `Uuid` as its canonical text, `Option` of one of
   those as the inner value or `NULL`; anything else as canonical JSON text
   (`Nobi.Lang.Rt.Json`), an `Option` of it `None` as `NULL`. A JSON cell
@@ -101,6 +103,9 @@ defmodule Nobi.Data.Codec do
   def encode({:named, "Int"}, n, _models) when is_integer(n) and n >= @i64_min and n <= @i64_max,
     do: {:ok, n}
 
+  def encode({:named, "Int"}, n, _models) when is_integer(n),
+    do: {:ok, {:blob, Integer.to_string(n)}}
+
   def encode({:named, "Bool"}, true, _models), do: {:ok, 1}
   def encode({:named, "Bool"}, false, _models), do: {:ok, 0}
 
@@ -195,6 +200,14 @@ defmodule Nobi.Data.Codec do
   defp absent(_type, :none), do: {:error, "the stored value is NULL and the field has no default"}
 
   defp decode({:named, "Int"}, n, _models) when is_integer(n), do: {:ok, n}
+
+  defp decode({:named, "Int"}, digits, _models) when is_binary(digits) do
+    case Integer.parse(digits) do
+      {n, ""} -> if Integer.to_string(n) == digits, do: {:ok, n}, else: bad("Int", digits)
+      _ -> bad("Int", digits)
+    end
+  end
+
   defp decode({:named, "Bool"}, 1, _models), do: {:ok, true}
   defp decode({:named, "Bool"}, 0, _models), do: {:ok, false}
 

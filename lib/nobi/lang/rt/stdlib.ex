@@ -162,7 +162,10 @@ defmodule Nobi.Lang.Rt.Stdlib do
   def string_concat(a, b) when is_binary(a) and is_binary(b), do: a <> b
   def string_from_int(n) when is_integer(n), do: Integer.to_string(n)
 
-  @doc "Strict decimal: an optional `-` and ASCII digits, nothing else, as an i64."
+  @doc """
+  Strict decimal: an optional `-` and ASCII digits, nothing else, of at
+  most `Rt.max_int_digits/0` significant digits.
+  """
   def string_to_int(s) when is_binary(s) do
     {sign, digits} =
       case s do
@@ -170,14 +173,10 @@ defmodule Nobi.Lang.Rt.Stdlib do
         _ -> {1, s}
       end
 
-    # Past 19 significant digits no i64 fits: refused before parsing, so a
-    # huge digit string costs no bignum (nor `String.to_integer`'s limit).
     with true <- digits != "" and ascii_digits?(digits),
          significant = without_leading_zeros(digits),
-         true <- byte_size(significant) <= 19,
-         n when n >= -9_223_372_036_854_775_808 and n <= 9_223_372_036_854_775_807 <-
-           sign * parse_digits(significant) do
-      some(n)
+         true <- byte_size(significant) <= Rt.max_int_digits() do
+      some(sign * parse_digits(significant))
     else
       _ -> none()
     end

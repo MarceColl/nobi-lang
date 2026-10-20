@@ -227,7 +227,7 @@ defmodule Nobi.ExecTest do
       assert call(u, "E.same", [read.("E.A"), read.(nil)]) == {:ok, false}
     end
 
-    test "division truncates toward zero; by zero and overflow are errors" do
+    test "division truncates toward zero; by zero is an error; no overflow" do
       u = universe("def N.half(x : Int) : Int do x / 2 end")
       assert call(u, "N.half", [5]) == {:ok, 2}
       assert call(u, "N.half", [-5]) == {:ok, -2}
@@ -245,14 +245,14 @@ defmodule Nobi.ExecTest do
       min = -max - 1
       assert call(u, "N.div", [5, 0]) == {:error, "division by zero"}
 
-      for {name, args} <- [
-            {"N.add", [max, 1]},
-            {"N.sub", [min, 1]},
-            {"N.mul", [max, 2]},
-            {"N.div", [min, -1]},
-            {"N.neg", [min]}
+      for {name, args, v} <- [
+            {"N.add", [max, 1], max + 1},
+            {"N.sub", [min, 1], min - 1},
+            {"N.mul", [max, 2], max * 2},
+            {"N.div", [min, -1], -min},
+            {"N.neg", [min], -min}
           ] do
-        assert call(u, name, args) == {:error, "integer overflow"}, name
+        assert call(u, name, args) == {:ok, v}, name
       end
 
       assert call(u, "N.neg", [max]) == {:ok, -max}

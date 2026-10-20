@@ -21,13 +21,13 @@ defmodule Nobi.Lang.RtTest do
 
   # ---------- arithmetic ----------
 
-  describe "checked arithmetic" do
-    test "i64 overflow is a runtime error" do
-      assert catch_throw(Rt.add(@max, 1)) == {:nobi_error, "integer overflow"}
-      assert {:nobi_error, "integer overflow"} = catch_throw(Rt.mul(@min, -1))
-      assert {:nobi_error, "integer overflow"} = catch_throw(Rt.sub(@min, 1))
-      assert {:nobi_error, "integer overflow"} = catch_throw(Rt.div(@min, -1))
-      assert {:nobi_error, "integer overflow"} = catch_throw(Rt.neg(@min))
+  describe "arithmetic" do
+    test "is exact past i64" do
+      assert Rt.add(@max, 1) == @max + 1
+      assert Rt.mul(@min, -1) == -@min
+      assert Rt.sub(@min, 1) == @min - 1
+      assert Rt.div(@min, -1) == -@min
+      assert Rt.neg(@min) == -@min
     end
 
     test "in range it is plain arithmetic, division truncating toward zero" do
@@ -245,9 +245,8 @@ defmodule Nobi.Lang.RtTest do
       assert Stdlib.list_head([7, 8]) == some(7)
     end
 
-    test "sum overflow is an error" do
-      assert error(fn -> Stdlib.list_sum([@max, 1]) end) == {:nobi_error, "integer overflow"}
-      assert error(fn -> Stdlib.list_sum([@max, 1, -1]) end) == {:nobi_error, "integer overflow"}
+    test "sum is exact past i64" do
+      assert Stdlib.list_sum([@max, 1]) == @max + 1
       assert Stdlib.list_sum([@min, @max]) == -1
     end
 
@@ -306,11 +305,11 @@ defmodule Nobi.Lang.RtTest do
   # ---------- String ----------
 
   describe "String" do
-    test "to_int reads every i64, strictly" do
+    test "to_int reads up to 4300 digits, strictly" do
       assert Stdlib.string_to_int("9007199254740993") == some(9_007_199_254_740_993)
-      assert Stdlib.string_to_int("9223372036854775807") == some(@max)
-      assert Stdlib.string_to_int("-9223372036854775808") == some(@min)
-      assert Stdlib.string_to_int("9223372036854775808") == none()
+      assert Stdlib.string_to_int("-9223372036854775809") == some(@min - 1)
+      assert Stdlib.string_to_int(String.duplicate("9", 4300)) == some(10 ** 4300 - 1)
+      assert Stdlib.string_to_int(String.duplicate("9", 4301)) == none()
       assert Stdlib.string_to_int("-0") == some(0)
       assert Stdlib.string_to_int("007") == some(7)
 

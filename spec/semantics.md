@@ -51,13 +51,13 @@ recursive deftypes need no positivity check.
 ## Values
 
 ```
-v ::= int n (−2⁶³ ≤ n < 2⁶³) | str s | bool b | unit | uuid s
+v ::= int n | str s | bool b | unit | uuid s
     | tuple v* | list v* | map (v × v)*        entries sorted by key, keys unique
     | record M (f × v)*                         fields sorted by name
     | variant Owner C v*
     | closure ρ (x : τ)* e | defRef g | ctorRef Owner C arity
 r ::= ok v | err c
-c ::= overflow | divZero | noField | noArm | weight | fuel | stuck
+c ::= divZero | noField | noArm | weight | fuel | stuck
 ```
 
 `stuck` is the result wherever a value has the wrong shape for its rule
@@ -70,28 +70,29 @@ value of type `τ`.
 
 ## Numbers
 
-Int only (Float arrives in spec 1.2.0).
+Int only (Float arrives in spec 2.1.0).
 
-- **Domain:** the mathematical integers in `[−2⁶³, 2⁶³)`, as Lean `Int` with
-  an explicit range check.
-- **`+ − *` and negation:** the exact result, then the range check, else
-  `overflow`.
+- **Domain:** every integer, as Lean `Int`. There is no range check and no
+  overflow.
+- **`+ − *` and negation:** the exact result.
 - **`/`:** truncates toward zero (`Int.tdiv`, Erlang `div`). A zero divisor is
-  `divZero`; `−2⁶³ / −1` is `overflow`.
+  `divZero`, the only Int error.
 - **Comparison:** numeric.
 - **No coercions.** Every operator is homogeneous; mixing types is the type
   error `mismatch`.
-- **Literals:** non-negative (a minus is `neg`). The lexer refuses one above
-  `2⁶³ − 1`; core evaluates an out-of-range literal to `overflow`.
-- **On the BEAM:** integers are unbounded bignums, so `+ − *`, negation and
-  `div` never wrap or trap, whatever the build or emulator flags. The i64
-  range is Nobi's own: `Rt.checked/1` runs after every Int operation and
-  throws `integer overflow`. Word size moves only the internal small/bignum
-  boundary (2⁵⁹ on 64-bit), which no Int operation observes. Stage 2 adds
-  probes for both facts (`B-int-bignum`, `B-int-div` in
-  `beam-assumptions.md`).
+- **Literals:** non-negative (a minus is `neg`). Core takes any size; the
+  lexer refuses one of more than 4300 digits (`Rt.max_int_digits/0`).
+- **On the BEAM:** integers are bignums on every build, so the operators are
+  Erlang's `+ − * div` as they are. Word size moves only the internal
+  small/bignum boundary (2⁵⁹ on 64-bit), which no Int operation observes.
+  The emulator refuses an integer wider than 4,194,240 bits (about 1.26
+  million digits) with `system_limit`. That is a resource limit, like the
+  worker's deadline and heap cap, not a result of the program. Stage 2 adds
+  probes for these facts
+  (`B-int-bignum`, `B-int-div` in `beam-assumptions.md`).
 
-Source: `rt.ex` L137-155, `lexer.ex` L116-117, `codegen/expr.ex` L151-152.
+Source: `rt.ex` L137-155, less the `checked/1` range check that 2.0.0
+drops; `lexer.ex` L112-121, less its literal limit.
 
 ## Literals
 
@@ -104,8 +105,8 @@ Source: `rt.ex` L137-155, `lexer.ex` L116-117, `codegen/expr.ex` L151-152.
 [T-Unit] `Γ ⊢ unit : Unit`. since: 1.0.0
 Source: `types/check.ex` L328-330, L409.
 
-[E-Int] `ρ ⊢ n ⇓ int n` when n is in range, else `err overflow`. since: 1.0.0
-Source: `codegen/expr.ex` L151-152.
+[E-Int] `ρ ⊢ n ⇓ int n`. since: 2.0.0
+Source: `codegen/expr.ex` L151, for every literal.
 
 [E-Str] `ρ ⊢ s ⇓ str s`. since: 1.0.0
 
@@ -186,15 +187,15 @@ Source: `codegen/expr.ex` L191-203, L295-307.
 
 The operators' signatures and behaviour:
 
-[P-add] `+ : (Int, Int) -> Int`, checked (§ Numbers). since: 1.0.0
+[P-add] `+ : (Int, Int) -> Int`, exact (§ Numbers). since: 2.0.0
 
-[P-sub] `- : (Int, Int) -> Int`, checked. since: 1.0.0
+[P-sub] `- : (Int, Int) -> Int`, exact. since: 2.0.0
 
-[P-mul] `* : (Int, Int) -> Int`, checked. since: 1.0.0
+[P-mul] `* : (Int, Int) -> Int`, exact. since: 2.0.0
 
-[P-div] `/ : (Int, Int) -> Int`, truncating; `divZero`; `−2⁶³ / −1` is `overflow`. since: 1.0.0
+[P-div] `/ : (Int, Int) -> Int`, truncating; `divZero`. since: 2.0.0
 
-[P-neg] `neg : (Int) -> Int`, checked: `neg(−2⁶³)` is `overflow`. since: 1.0.0
+[P-neg] `neg : (Int) -> Int`, exact. since: 2.0.0
 
 [P-lt] `< : (Int, Int) -> Bool`. since: 1.0.0
 

@@ -4,7 +4,7 @@ import Nobi.Value
 # Operators
 
 `spec/semantics.md`, § Operators and § Equality and order. Surface operators
-lower to `prim` with these names: `+ - * /` and `neg` on Int (checked i64,
+lower to `prim` with these names: `+ - * /` and `neg` on Int (exact,
 § Numbers), `< > <= >=` on Int, `++` on String, `not` on Bool, and `==` at
 any type. `!=`, `and` and `or` are not primitives: `!=` lowers to
 `not (== …)`, `and`/`or` to a `case` (they short-circuit).
@@ -36,11 +36,12 @@ def opSigs : List (String × Sig) :=
 /-- An operator applied to its evaluated arguments; `none` for a name that is
 no operator. A value of the wrong shape is `stuck`. -/
 def applyOp : String → List Value → Option (Except RtErr Value)
-  | "+", [.int a, .int b] => some (.int <$> I64.add a b) -- [P-add]
-  | "-", [.int a, .int b] => some (.int <$> I64.sub a b) -- [P-sub]
-  | "*", [.int a, .int b] => some (.int <$> I64.mul a b) -- [P-mul]
-  | "/", [.int a, .int b] => some (.int <$> I64.div a b) -- [P-div]
-  | "neg", [.int a] => some (.int <$> I64.neg a) -- [P-neg]
+  | "+", [.int a, .int b] => some (.ok (.int (a + b))) -- [P-add]
+  | "-", [.int a, .int b] => some (.ok (.int (a - b))) -- [P-sub]
+  | "*", [.int a, .int b] => some (.ok (.int (a * b))) -- [P-mul]
+  | "/", [.int a, .int b] => -- [P-div]
+    some (if b == 0 then .error .divZero else .ok (.int (Int.tdiv a b)))
+  | "neg", [.int a] => some (.ok (.int (-a))) -- [P-neg]
   | "<", [.int a, .int b] => some (.ok (.bool (decide (a < b)))) -- [P-lt]
   | ">", [.int a, .int b] => some (.ok (.bool (decide (a > b)))) -- [P-gt]
   | "<=", [.int a, .int b] => some (.ok (.bool (decide (a ≤ b)))) -- [P-le]

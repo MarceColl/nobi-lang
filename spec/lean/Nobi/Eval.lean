@@ -75,7 +75,7 @@ def eval (P : Prog) : Nat → Env Value → Expr → RtM Value
   | 0, _, _ => .error .fuel
   | n + 1, ρ, e =>
     match e with
-    | .int k => .int <$> I64.checked k -- [E-Int]
+    | .int k => pure (.int k) -- [E-Int]
     | .str s => pure (.str s) -- [E-Str]
     | .bool b => pure (.bool b) -- [E-Bool]
     | .unit => pure .unit -- [E-Unit]

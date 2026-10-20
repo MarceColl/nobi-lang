@@ -1,5 +1,4 @@
 import Nobi.Syntax
-import Nobi.Num.Int
 
 /-!
 # Values, equality and order

@@ -174,7 +174,6 @@ wrong shape for its rule; `noArm` a `case` no arm matched. Both are
 unreachable from a well-typed program. `fuel` is running out of fuel, which
 counts as inconclusive. -/
 inductive RtErr where
-  | overflow
   | divZero
   | noField
   | noArm

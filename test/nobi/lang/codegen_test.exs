@@ -337,8 +337,7 @@ defmodule Nobi.Lang.CodegenTest do
       assert call(image, "E.div", [7, -2]) == -3
       assert catch_throw(call(image, "E.div", [1, 0])) == {:nobi_error, "division by zero"}
 
-      assert catch_throw(call(image, "E.big", [4_000_000_000])) ==
-               {:nobi_error, "integer overflow"}
+      assert call(image, "E.big", [2 ** 63]) == 2 ** 126
     end
 
     test "arguments are evaluated left to right" do

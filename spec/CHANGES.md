@@ -11,6 +11,32 @@ Each entry names its spec version and its class:
 Triaged disagreements between the spec and the implementation are recorded
 here too, each with its verdict.
 
+## 2.0.0
+
+Class: major. Int is arbitrary precision: every integer, as Lean `Int`.
+The `overflow` error is gone.
+
+Programs it breaks: what i64 refused now gives a value. An arithmetic
+result or literal outside i64 no longer stops with `integer overflow`;
+`String.to_int` and `JSON.parse` of such a number give `Some`/`Ok`; such
+an `Int` route segment matches instead of a 404. No checked-in sample or
+fixture reaches i64's edge, so none changes.
+
+What else moves with it:
+
+- **Storage.** An `Int` cell outside i64 is a BLOB of its decimal digits,
+  since SQLite would turn it into a lossy REAL. Cells within i64 stay
+  integers, so existing tables need no migration.
+- **Parsing.** An Int literal, `String.to_int`, `JSON.parse` and an `Int`
+  route segment read at most 4300 digits, CPython's limit for the same
+  reason: parsing costs more than linear time, so a longer text could stall
+  a request. A value past it still computes, and an `Int` field stores it;
+  only text refuses it. So does a JSON cell (a `List<Int>` field, say),
+  whose write is refused rather than stored lossily.
+
+Signed off by Marce on 2026-10-20, after the proposal on
+[PR 7](https://github.com/MarceColl/nobi-lang/pull/7#discussion_r4324835967).
+
 ## 1.1.0
 
 Class: minor. A `let` may bind a function: a lambda, a def or a
