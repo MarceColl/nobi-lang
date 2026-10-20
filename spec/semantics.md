@@ -149,9 +149,13 @@ in model fields or variant arguments.
 
 The `let` restriction is the checker's (`types/check.ex` L697-704: "inlined
 at the call site, never named"), kept so that the spec accepts the same
-programs. Evaluation does not need it: [E-Let] would bind a closure like any
-other value, and the BEAM compiles a lambda to an ordinary fun. Lifting it
-is a minor change.
+programs. The checker is a port of the Rust/TS Yabu reference
+(`docs/superpowers/specs/2026-10-14-nobi-language-core-design.md`) and took
+the rule from it; nothing in Nobi depends on it. It refuses only a binding
+whose type is a function: `p = (fn (x : Int) -> x end, 1)` and
+`p = [fn (x : Int) -> x end]` bind fine. Evaluation does not need it: [E-Let] would
+bind a closure like any other value, and the BEAM compiles a lambda to an
+ordinary fun. Lifting it is a minor change.
 
 [T-Lam] Each parameter's type is well-formed, no name twice (`bad-name`), and `Γ, x₁ : τ₁ … ⊢ e : τ ⟹ Γ ⊢ fn (x₁ : τ₁ …) -> e : (τ₁ …) -> τ`. since: 1.0.0
 Source: `types/check.ex` L461-472.
