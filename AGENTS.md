@@ -8,6 +8,7 @@ Nobi is an Elixir/Phoenix project and an agent-oriented language/runtime. The ma
 - `mix test` runs the test suite. `mix test test/site` checks the site samples and is the Pages workflow gate.
 - `mix site.build` builds the static site into `site/dist`.
 - `mix precommit` compiles with warnings as errors, unlocks unused dependencies, formats, and runs tests.
+- `cd spec/lean && lake build && lake test` builds and checks the Lean spec of the core language (needs elan; see `spec/README.md`).
 - SQLite is the only database. Tests use `.nobi/test.db`; don't mark database-writing tests `async: true`.
 </important>
 
