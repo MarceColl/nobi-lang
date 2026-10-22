@@ -1,4 +1,4 @@
-import Nobi.Prim
+import Nobi.Conforms
 
 /-!
 # Typing
@@ -32,6 +32,7 @@ def wf (P : Prog) (tps : List String) : Ty → TyM Unit
   | .list t => wf P tps t
   | .map k v => do wf P tps k; wf P tps v
   | .arrow ps r => do wfList P tps ps; wf P tps r
+  | .cmd m | .html m => wf P tps m
   | .named n args => do
     match P.findType n, P.findModel n with
     | some d, _ =>
@@ -65,6 +66,7 @@ def reachesKey (R : KeyReach) (x : String) : Ty → Bool
   | .list t => reachesKey R x t
   | .arrow ps r => reachesKeyList R x [] ps || reachesKey R x r
   | .named m args => reachesKeyList R x (R.flags m args) args
+  | .cmd m | .html m => reachesKey R x m
   | _ => false
 
 /-- `reachesKey` over `ts`, where `fs` flags the ones passed to a parameter
@@ -95,6 +97,7 @@ def keysOk (R : KeyReach) : Ty → Bool
   | .arrow ps r => keysOkList R ps && keysOk R r
   | .named m args =>
     keysOkList R args && ((R.flags m args).zip args).all fun (f, a) => !f || !a.hasFn
+  | .cmd m | .html m => keysOk R m
   | _ => true
 
 def keysOkList (R : KeyReach) : List Ty → Bool
@@ -138,6 +141,47 @@ def checkFieldNames (m : String) (d : ModelDecl) (names : List String) : TyM Uni
   for f in names do
     unless (d.fields.lookup f).isSome do fail "extra-field" s!"model `{m}` has no field `{f}`"
   distinct "extra-field" s!"`%{m}\{…}`" names
+
+/-- A primitive's signature, given as many well-formed type arguments as it
+takes; a store form's first one must be a model. -/
+def primSig (P : Prog) (op : String) (targs : List Ty) : TyM Prim.Sig := do
+  let some s := Prim.sig? op | fail "unbound" s!"`{op}` is no primitive"
+  unless s.tparams.length == targs.length do
+    fail "arity" s!"`{op}` takes {s.tparams.length} type argument(s), got {targs.length}"
+  for t in targs do annot P [] t
+  if s.store then
+    match targs with
+    | .named m [] :: _ =>
+      if (P.findModel m).isNone then fail "not-a-model" s!"`{op}` works on a model, got `{m}`"
+    | t :: _ => fail "not-a-model" s!"`{op}` works on a model, got {show' t}"
+    | [] => pure ()
+  pure s
+
+/-- A JSX attribute `name = e`, `e : t`, on a `tag` element sending `m`
+(`types/jsx_app.ex`): an event's value is a message of type `m` (a deftype
+value); `on-change`'s is a constructor of one String building an `m`; any
+other attribute's is a scalar. -/
+def checkAttr (P : Prog) (m : Ty) (tag name : String) (e : Expr) (t : Ty) : TyM Unit := do
+  if name.startsWith "on-" then
+    let event := String.ofList (name.toList.drop 3)
+    match Prim.Html.events.lookup event with
+    | none => fail "bad-event" s!"on-{event} is not an event Nobi wires"
+    | some (some tags) =>
+      unless tags.contains tag do fail "bad-event" s!"on-{event} does not work on a <{tag}>"
+    | some none => pure ()
+    if event == "change" then
+      match e, t with
+      | .ctorRef .., .arrow [.str] r => expect "on-change" m r
+      | _, _ => fail "bad-event" "on-change needs an unapplied 1-argument String constructor"
+    else
+      match t with
+      | .named n _ =>
+        if (P.findType n).isNone then fail "bad-event" s!"on-{event} needs a message value"
+        expect s!"on-{event}" m t
+      | _ => fail "bad-event" s!"on-{event} needs a message value (a variant), got {show' t}"
+  else
+    unless t == .int || t == .str || t == .bool || t == .uuid do
+      fail "mismatch" s!"attribute `{name}` must be a scalar, got {show' t}"
 
 /-! ## Patterns -/
 
@@ -267,14 +311,15 @@ def typeOf (P : Prog) (Γ : Ctx) : Expr → TyM Ty
     let _ ← typeOf P Γ a
     typeOf P Γ b
   | .prim op targs args => do -- [T-Prim]
-    let some s := Prim.sig? op | fail "unbound" s!"`{op}` is no primitive"
-    unless s.tparams.length == targs.length do
-      fail "arity" s!"`{op}` takes {s.tparams.length} type argument(s), got {targs.length}"
-    for t in targs do annot P [] t
+    let s ← primSig P op targs
     let ts ← args.mapM (typeOf P Γ)
     let σ := s.tparams.zip targs
     expectArgs op (Ty.substList σ s.params) ts
     pure (s.ret.subst σ)
+  | .primRef op targs => do -- [T-PrimRef]
+    let s ← primSig P op targs
+    let σ := s.tparams.zip targs
+    pure (.arrow (Ty.substList σ s.params) (s.ret.subst σ))
   | .tuple items => do -- [T-Tuple]
     unless items.length ≥ 2 do fail "mismatch" "a tuple has two or more items"
     let ts ← items.mapM (typeOf P Γ)
@@ -352,6 +397,15 @@ def typeOf (P : Prog) (Γ : Ctx) : Expr → TyM Ty
     | t :: rest => do
       for u in rest do expect "case arm" t u
       pure t
+  | .element m tag attrs children => do -- [T-Element]
+    annot P [] m
+    let ats ← attrs.mapM fun a => do pure (a.1, a.2, ← typeOf P Γ a.2)
+    for (name, e, t) in ats do checkAttr P m tag name e t
+    let cts ← children.mapM (typeOf P Γ)
+    for t in cts do
+      unless t == .str || t == .int || t == .html m || t == .list (.html m) do
+        fail "mismatch" s!"a JSX child must be Html, String, Int or a List of Html, got {show' t}"
+    pure (.html m)
 decreasing_by
   all_goals first
     | decreasing_tactic

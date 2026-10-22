@@ -1,4 +1,4 @@
-import Nobi.Prim
+import Nobi.Conforms
 
 /-!
 # Evaluation
@@ -9,6 +9,8 @@ arguments, items, entries (key, then value) and fields in the order written
 (`codegen/expr.ex` "Order of evaluation"). Each nested evaluation takes one
 unit of fuel, so fuel bounds the depth of evaluation; running out is `fuel`,
 an inconclusive result rather than an error of the program.
+
+Calling a function takes one more unit (`applyFn`).
 
 A value of the wrong shape for its rule (adding a Bool, reading a field of
 an Int, calling an Int) is `stuck`, never a default value. The typing rules
@@ -49,27 +51,31 @@ def firstArm (v : Value) : List (Pat × Expr) → Option (Env Value × Expr)
     | some b => some (b, body)
     | none => firstArm v rest
 
-/-- Applies a function value to evaluated arguments; `ev` evaluates a body
-in an environment (the evaluator, with the fuel left). -/
-def applyWith (P : Prog) (ev : Env Value → Expr → RtM Value) (f : Value) (args : List Value) :
-    RtM Value :=
-  match f with
-  | .closure ρ ps body =>
-    if ps.length == args.length then ev ((ps.map (·.1)).zip args ++ ρ) body
-    else .error .stuck
-  | .defRef g =>
-    match P.findDef g with
-    | some d =>
-      if d.params.length == args.length then ev ((d.params.map (·.1)).zip args) d.body
-      else .error .stuck
-    | none => .error .stuck
-  | .ctorRef o c k => if k == args.length then pure (.variant o c args) else .error .stuck
-  | _ => .error .stuck
-
 /-- Sets each field in turn: a later one replaces an earlier one. -/
 def setFields (fs : List (String × Value)) (set : List (String × Value)) :
     List (String × Value) :=
   set.foldl (fun acc (f, v) => Value.setField f v acc) fs
+
+mutual
+/-- Applies a function value to evaluated arguments (a body runs with the
+fuel left): a closure in its captured environment, a def, a constructor, or
+a stdlib function. A wrong arity or a value that is no function is `stuck`. -/
+def applyFn (P : Prog) : Nat → Value → List Value → RtM Value
+  | 0, _, _ => .error .fuel
+  | n + 1, f, args =>
+    match f with
+    | .closure ρ ps body =>
+      if ps.length == args.length then eval P n ((ps.map (·.1)).zip args ++ ρ) body
+      else .error .stuck
+    | .defRef g =>
+      match P.findDef g with
+      | some d =>
+        if d.params.length == args.length then eval P n ((d.params.map (·.1)).zip args) d.body
+        else .error .stuck
+      | none => .error .stuck
+    | .ctorRef o c k => if k == args.length then pure (.variant o c args) else .error .stuck
+    | .primRef op targs => Prim.apply P (applyFn P n) op targs args
+    | _ => .error .stuck
 
 def eval (P : Prog) : Nat → Env Value → Expr → RtM Value
   | 0, _, _ => .error .fuel
@@ -86,11 +92,11 @@ def eval (P : Prog) : Nat → Env Value → Expr → RtM Value
     | .global g => if (P.findDef g).isSome then pure (.defRef g) else .error .stuck -- [E-Global]
     | .callDef g args => do -- [E-CallDef]
       let vs ← args.mapM (eval P n ρ)
-      applyWith P (eval P n) (.defRef g) vs
+      applyFn P n (.defRef g) vs
     | .app f args => do -- [E-App]
       let vf ← eval P n ρ f
       let vs ← args.mapM (eval P n ρ)
-      applyWith P (eval P n) vf vs
+      applyFn P n vf vs
     | .lam ps body => pure (.closure ρ ps body) -- [E-Lam]
     | .letIn x bound body => do -- [E-Let]
       let v ← eval P n ρ bound
@@ -100,7 +106,9 @@ def eval (P : Prog) : Nat → Env Value → Expr → RtM Value
       eval P n ρ b
     | .prim op targs args => do -- [E-Prim]
       let vs ← args.mapM (eval P n ρ)
-      Prim.apply P (applyWith P (eval P n)) op targs vs
+      Prim.apply P (applyFn P n) op targs vs
+    | .primRef op targs => -- [E-PrimRef]
+      if (Prim.sig? op).isSome then pure (.primRef op targs) else .error .stuck
     | .tuple items => .tuple <$> items.mapM (eval P n ρ) -- [E-Tuple]
     | .list _ items => .list <$> items.mapM (eval P n ρ) -- [E-List]
     | .map _ _ entries => do -- [E-Map]
@@ -135,6 +143,11 @@ def eval (P : Prog) : Nat → Env Value → Expr → RtM Value
       match firstArm v arms with
       | some (b, body) => eval P n (b ++ ρ) body
       | none => .error .noArm
+    | .element _ tag attrs children => do -- [E-Element]
+      let avs ← attrs.mapM fun a => do pure (a.1, ← eval P n ρ a.2)
+      let cvs ← children.mapM (eval P n ρ)
+      Prim.Html.element tag avs cvs
+end
 
 /-- The fuel `nobi-ref` and the tests run with. -/
 def defaultFuel : Nat := 10000

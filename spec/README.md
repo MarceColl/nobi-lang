@@ -20,6 +20,7 @@ cd spec/lean
 lake build                         # the spec and nobi-ref
 lake test                          # every #guard, the VERSION check and scripts/rule-names.sh
 .lake/build/bin/nobi-ref version   # the spec version
+.lake/build/bin/nobi-ref prims     # every stdlib primitive and its signature, as JSON
 ```
 
 CI runs the same through `.github/workflows/spec.yml` on every pull request

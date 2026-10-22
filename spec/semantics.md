@@ -23,6 +23,7 @@ listed in `spec/excluded.json`.
     | List τ | Map τ τ
     | (τ₁, …, τₙ) -> τ
     | T τ*                    a deftype or a model; Option and Result are stdlib deftypes
+    | Cmd τ | Html τ          an effect as data / markup, sending τ
     | a                       a deftype's parameter, only inside its variants
 ```
 
@@ -36,7 +37,7 @@ item types. A lowering from surface Nobi reads them from the checker's
 A type written in a program is **well-formed** when every name in it resolves
 to a builtin, a deftype with as many arguments as it declares parameters, or
 a model with none (`unbound`, `arity`). Its map keys must be **data**: no
-function type anywhere in a key type, including through a deftype parameter
+function type, `Cmd` or `Html` anywhere in a key type, including through a deftype parameter
 that reaches a map key (`non-data-map-key`, `types/keys.ex`).
 
 Those are the only constraints on a type itself (`types/check.ex`
@@ -55,7 +56,8 @@ v ::= int n | str s | bool b | unit | uuid s
     | tuple v* | list v* | map (v × v)*        entries sorted by key, keys unique
     | record M (f × v)*                         fields sorted by name
     | variant Owner C v*
-    | closure ρ (x : τ)* e | defRef g | ctorRef Owner C arity
+    | closure ρ (x : τ)* e | defRef g | ctorRef Owner C arity | primRef p τ*
+    | cmdNone | cmdBatch v* | cmdEffect name model? v*
 r ::= ok v | err c
 c ::= divZero | noField | noArm | weight | fuel | stuck
 ```
@@ -212,25 +214,34 @@ The operators' signatures and behaviour:
 [P-eq] `== : ∀a. (a, a) -> Bool`: `Value.eq` (§ Equality and order). since: 1.0.0
 Source: `rt.ex` L137-158, L169-183; `codegen/expr.ex` L297-307.
 
+[T-PrimRef] A stdlib function taken as a value, with its type arguments, has its signature's function type, as in [T-Prim]. since: 1.0.0
+Source: `types/check.ex` L288-306, `codegen/expr.ex` L380-397.
+
+[E-PrimRef] `ρ ⊢ p[τ̄] ⇓ primRef p τ̄`; applying it applies the primitive. since: 1.0.0
+Source: `codegen/expr.ex` L393-395.
+
 ## Equality and order
 
 **Equality** (`Value.eq`, `rt.ex` L169-244) is structural, with one rule for
 functions: a closure equals nothing, itself included; a def taken as a value
 equals only the same def; a constructor taken as a value equals only the same
-constructor. Map equality ignores insertion order (core maps are sorted).
+constructor; a stdlib function only itself, except a store form
+(`Cmd.store.*`), which is built as a closure and so equals nothing. Map equality ignores insertion order (core maps are sorted).
 
 **Order** (`Value.cmp`, `rt.ex` L270-304, L416-507) is first by kind, Int <
 String < Bool < Uuid < List < Map < tuple (Unit is the empty tuple) < record
-< variant < function, then structurally: Int numerically; String and Uuid by
+< variant < function < Cmd, then structurally: Int numerically; String and Uuid by
 code point; `false < true`; lists, tuples and maps lexicographically (a map
 as its sorted entries, an entry by key then value); a record by model name,
 then its fields as sorted pairs; a variant by owner, then name, then
-arguments. Only map keys are compared, and keys hold no functions, so the
+arguments; a Cmd none < batch < effect, a batch by its commands, an effect
+by name, then model (none first), then arguments. Only map keys are compared, and keys hold no functions, so the
 order among functions is unspecified beyond their kind.
 
 **The walk budget.** A value's weight is one step per node and one more per
 64 bytes of a string; field and variant names cost nothing, and a closure is
-one step (its environment is never walked). `==` on two values is `weight`
+one step (its environment is never walked); a Cmd is one step plus its
+effects' arguments. `==` on two values is `weight`
 when both weigh more than 1,000,000 steps, unless one side is an Int or a
 Bool, or both are strings, Uuids or functions. Inserting a key that is not an
 Int or a Bool into a map of `n` keys is `weight` when its weight times
@@ -345,6 +356,150 @@ Matching a value:
 [E-PVariant] `O.C(p₁ … pₙ)` matches `variant O C v₁ … vₙ`, each `pᵢ` its argument. since: 1.0.0
 Source: `codegen/expr.ex` L546-573.
 
+## Html
+
+JSX is the one way to build `Html`. An element lowers to
+`element m tag attrs children`: `m` is the message type, attributes are
+`(name, e)` pairs in order (a text attribute a string literal, an event
+`on-<event>`), children are expressions in order (a text child a string
+literal, a nested element an `element`). The value is the variant
+`Html.Element(tag, [(name, v)…], children)`; text is `Html.Text(s)`.
+
+[T-Element] `m` well-formed; each attribute: an event among click, blur, focus, keydown, keyup (any tag), submit (on `form`) and change (on `input`, `textarea`, `select`), else `bad-event`; `on-change`'s value a constructor taken as a value of type `(String) -> m`, any other event's a deftype value of type `m` (else `bad-event` or `mismatch`); any other attribute's an Int, String, Bool or Uuid (else `mismatch`); each child a String, an Int, `Html m` or `List (Html m)` (else `mismatch`) ⟹ `Γ ⊢ element m tag attrs children : Html m`. The nested-form rule for `on-submit` is not specified yet. since: 1.0.0
+Source: `types/jsx_app.ex` L17-255.
+
+[E-Element] Attribute values, then children, left to right; then the children are spliced: an `Html` as itself, a list's items in its place (at any depth), a String as `Html.Text`, an Int, a Bool or a Uuid as its text; anything else is `stuck`. since: 1.0.0
+Source: `codegen/expr.ex` L510-540, `rt.ex` L585-609.
+
+## Stdlib
+
+Every stdlib function outside `spec/excluded.json` is a primitive with a
+signature (`nobi-ref prims` lists them) and these rules. `[T-Prim]` types a
+call, `[E-Prim]` evaluates its arguments first. A function argument is called
+on items in order, and its first error is the result. Arguments of the wrong
+shape are `stuck`. Source: `types/stdlib.ex`, `rt/stdlib.ex`.
+
+### List
+
+[P-List.map] `∀a b. (List a, (a) -> b) -> List b`: `f` on each item. since: 1.0.0
+
+[P-List.filter] `∀a. (List a, (a) -> Bool) -> List a`: the items `f` keeps. since: 1.0.0
+
+[P-List.append] `∀a. (List a, a) -> List a`: one item at the end. since: 1.0.0
+
+[P-List.concat] `∀a. (List a, List a) -> List a`. since: 1.0.0
+
+[P-List.length] `∀a. (List a) -> Int`. since: 1.0.0
+
+[P-List.is_empty] `∀a. (List a) -> Bool`. since: 1.0.0
+
+[P-List.foldl] `∀a b. (List a, b, (a, b) -> b) -> b`: left to right, `f(item, acc)`. since: 1.0.0
+
+[P-List.sum] `(List Int) -> Int`: from 0, exact. since: 2.0.0
+
+[P-List.maximum] `(List Int) -> Option Int`: `None` when empty. since: 1.0.0
+
+[P-List.minimum] `(List Int) -> Option Int`: `None` when empty. since: 1.0.0
+
+[P-List.reverse] `∀a. (List a) -> List a`. since: 1.0.0
+
+[P-List.member] `∀a. (List a, a) -> Bool`: by `==`, stopping at the first equal item. since: 1.0.0
+
+[P-List.all] `∀a. (List a, (a) -> Bool) -> Bool`: stops at the first `false`. since: 1.0.0
+
+[P-List.any] `∀a. (List a, (a) -> Bool) -> Bool`: stops at the first `true`. since: 1.0.0
+
+[P-List.head] `∀a. (List a) -> Option a`. since: 1.0.0
+
+[P-List.take] `∀a. (List a, Int) -> List a`: the count clamped to `0..length`. since: 1.0.0
+
+[P-List.drop] `∀a. (List a, Int) -> List a`: the count clamped to `0..length`. since: 1.0.0
+
+[P-List.filter_map] `∀a b. (List a, (a) -> Option b) -> List b`: the `Some` values. since: 1.0.0
+
+[P-List.sort_by] `∀a. (List a, (a) -> Int) -> List a`: each key computed once, in order; ascending and stable. since: 1.0.0
+
+### String
+
+Strings are sequences of code points.
+
+[P-String.length] `(String) -> Int`: code points. since: 1.0.0
+
+[P-String.concat] `(String, String) -> String`. since: 1.0.0
+
+[P-String.from_int] `(Int) -> String`: decimal, `-` for a negative. since: 1.0.0
+
+[P-String.to_int] `(String) -> Option Int`: an optional `-` then one or more ASCII digits, nothing else, of at most 4300 significant digits. since: 2.0.0
+
+[P-String.is_empty] `(String) -> Bool`. since: 1.0.0
+
+[P-String.reverse] `(String) -> String`: by code point. since: 1.0.0
+
+[P-String.trim] `(String) -> String`: strips Unicode White_Space from both ends. since: 1.0.0
+
+[P-String.to_upper] `(String) -> String`: specified on ASCII letters only (the BEAM follows Unicode; `spec/excluded.json`). since: 1.0.0
+
+[P-String.to_lower] `(String) -> String`: specified on ASCII letters only (as above; the BEAM's final-sigma rule is outside it). since: 1.0.0
+
+[P-String.contains] `(String, String) -> Bool`: the empty string occurs in every string. since: 1.0.0
+
+[P-String.starts_with] `(String, String) -> Bool`. since: 1.0.0
+
+[P-String.split] `(String, String) -> List String`: the pieces between non-overlapping separators, left to right, empty pieces kept; an empty separator splits into code points. since: 1.0.0
+
+[P-String.join] `(List String, String) -> String`. since: 1.0.0
+
+[P-String.slice] `(String, Int, Int) -> String`: code points from `from` up to `to`; a negative start is 0, a negative end counts back from the end, both clamp to the ends, and an empty range is `""`. since: 1.0.0
+
+### Option
+
+[P-Option.with_default] `∀a. (Option a, a) -> a`. since: 1.0.0
+
+[P-Option.map] `∀a b. (Option a, (a) -> b) -> Option b`. since: 1.0.0
+
+[P-Option.and_then] `∀a b. (Option a, (a) -> Option b) -> Option b`. since: 1.0.0
+
+### Map
+
+Keys and entries come out in `Value.cmp` order. `get`, `put`, `delete` and
+`has_key` charge the key against the map (§ Equality and order).
+
+[P-Map.get] `∀k v. (Map k v, k) -> Option v`. since: 1.0.0
+
+[P-Map.put] `∀k v. (Map k v, k, v) -> Map k v`. since: 1.0.0
+
+[P-Map.delete] `∀k v. (Map k v, k) -> Map k v`. since: 1.0.0
+
+[P-Map.has_key] `∀k v. (Map k v, k) -> Bool`. since: 1.0.0
+
+[P-Map.size] `∀k v. (Map k v) -> Int`. since: 1.0.0
+
+[P-Map.keys] `∀k v. (Map k v) -> List k`. since: 1.0.0
+
+[P-Map.values] `∀k v. (Map k v) -> List v`. since: 1.0.0
+
+[P-Map.to_list] `∀k v. (Map k v) -> List (k, v)`. since: 1.0.0
+
+[P-Map.from_list] `∀k v. (List (k, v)) -> Map k v`: inserted in order, each key charged, a later key's value winning. since: 1.0.0
+
+### Uuid
+
+[P-Uuid.to_string] `(Uuid) -> String`: its lowercase text. since: 1.0.0
+
+[P-Uuid.parse] `(String) -> Option Uuid`: `8-4-4-4-12` hex digits in any case, kept lowercase; anything else `None`. since: 1.0.0
+
+### Cmd
+
+A `Cmd` is data; nothing runs. A store form (`Cmd.store.*`) takes the stored
+model as its first type argument, which must be a model (`not-a-model`).
+
+[P-Cmd.none] `∀a. () -> Cmd a`. since: 1.0.0
+
+[P-Cmd.batch] `∀a. (List (Cmd a)) -> Cmd a`: the commands as given. since: 1.0.0
+
+[P-Cmd.effect] Each other `Cmd.*` function is `cmdEffect name model args`: its stdlib name, the stored model for a store form (else none), and its arguments in order, callbacks as the functions they are. The signatures are `types/stdlib.ex`'s (`Cmd.store.insert/list/get/update/delete`, `Cmd.time.now`, `Cmd.random.int`, `Cmd.blob.put/get/list/delete`, `Cmd.ai.generate`). since: 1.0.0
+Source: `rt.ex` L564-583, `rt/stdlib.ex` L357-374, `codegen/expr.ex` L474-499.
+
 ## Programs
 
 [T-Program] A program checks when: each deftype's parameters are distinct and its variant arguments are well-formed over them and hold data; each model's fields are well-formed and hold data; each def's parameter and return types are well-formed, its parameter names distinct, and its body has its return type with only its parameters in scope. since: 1.0.0
@@ -367,6 +522,9 @@ What surface forms become (done by the lowering in a later phase):
 | `not e`, `-e`, binary operators | `prim not`, `prim neg`, `prim +` … |
 | a constructor used as a value | `ctorRef` |
 | a lowercase dotted name `x.a.b` | nested `field` |
+| a stdlib function used as a value | `primRef` |
+| a JSX element | `element` |
+| `Cmd.none()`, `Cmd.batch(…)`, `Cmd.store.*`, `Cmd.time.*`, … | `prim`, building `Cmd` data |
 
 ## Implementation limits
 

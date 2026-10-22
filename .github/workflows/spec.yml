@@ -61,6 +61,10 @@ jobs:
         working-directory: spec/lean
         run: test "$(.lake/build/bin/nobi-ref version)" = "$(cat VERSION)"
 
+      - name: nobi-ref lists the stdlib primitives
+        working-directory: spec/lean
+        run: .lake/build/bin/nobi-ref prims | jq -e 'length >= 47'
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: nobi-ref

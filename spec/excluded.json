@@ -24,7 +24,6 @@
   },
   "ascii_only": {
     "String.to_upper": "specified on ASCII input only: Lean's Char case functions are ASCII-only",
-    "String.to_lower": "specified on ASCII input only: Lean's Char case functions are ASCII-only",
-    "String.trim": "specified on ASCII whitespace only"
+    "String.to_lower": "specified on ASCII input only: Lean's Char case functions are ASCII-only"
   }
 }
