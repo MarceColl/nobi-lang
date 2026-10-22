@@ -337,8 +337,7 @@ defmodule Nobi.Lang.CodegenTest do
       assert call(image, "E.div", [7, -2]) == -3
       assert catch_throw(call(image, "E.div", [1, 0])) == {:nobi_error, "division by zero"}
 
-      assert catch_throw(call(image, "E.big", [4_000_000_000])) ==
-               {:nobi_error, "integer overflow"}
+      assert call(image, "E.big", [2 ** 63]) == 2 ** 126
     end
 
     test "arguments are evaluated left to right" do
@@ -400,6 +399,30 @@ defmodule Nobi.Lang.CodegenTest do
       assert call(image, "F.go", [[]]) == {[], [], 0}
       assert call(image, "F.words", ["héllo"]) == 1
       assert call(image, "F.words", ["hello"]) == 2
+    end
+
+    test "a let binds a closure, a def and a constructor, and calls them" do
+      src = """
+      deftype L.Box do
+        Box(Int) | Empty
+      end
+
+      def L.inc(x : Int) : Int do
+        x + 1
+      end
+
+      def L.go(x : Int) : (Int, List<Int>, L.Box) do
+        k = 10
+        add = fn (y : Int) -> y + k end
+        inc = L.inc
+        box = L.Box.Box
+        (inc(add(x)), List.map([x], add), box(x))
+      end
+      """
+
+      image = image!(src)
+      load(image)
+      assert call(image, "L.go", [1]) == {12, [11], {:var, "L.Box", "Box", [1]}}
     end
 
     test "maps, records, updates, JSON with the model's field order, store reads" do

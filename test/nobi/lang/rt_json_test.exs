@@ -65,8 +65,9 @@ defmodule Nobi.Lang.RtJsonTest do
     assert decode("42", n("Int")) == {:ok, 42}
     assert decode("-7", n("Int")) == {:ok, -7}
     assert decode("0", n("Int")) == {:ok, 0}
+    assert decode("1e21", n("Int")) == {:ok, 10 ** 21}
 
-    for bad <- ~w(1.5 "1" "42" true false null {} [1] [] 1e21 1.0000000001 1e999) do
+    for bad <- ~w(1.5 "1" "42" true false null {} [1] [] 1.0000000001 1e4300) do
       assert {:error, _} = decode(bad, n("Int")), "Int must reject #{bad}"
     end
   end
@@ -150,6 +151,10 @@ defmodule Nobi.Lang.RtJsonTest do
           {"9007199254740993", 9_007_199_254_740_993},
           {"9223372036854775807", @max},
           {"-9223372036854775808", @min},
+          {"9223372036854775808", @max + 1},
+          {"-9223372036854775809", @min - 1},
+          {"1e19", 10 ** 19},
+          {"1e4299", 10 ** 4299},
           {"1.0", 1},
           {"1e3", 1000},
           {"1E+2", 100},
@@ -166,11 +171,9 @@ defmodule Nobi.Lang.RtJsonTest do
     end
 
     for bad <- [
-          "9223372036854775808",
-          "-9223372036854775809",
           "1e-400",
           "1.0000000000000000001",
-          "1e19",
+          "1e4300",
           "0.55e1",
           "1e9223372036854775807",
           "1e99999999999999999999",
@@ -193,10 +196,7 @@ defmodule Nobi.Lang.RtJsonTest do
       k = Enum.random(0..38)
       p = Integer.pow(10, k)
 
-      exact =
-        if x * p >= @min and x * p <= @max, do: {:ok, x * p}, else: {:error, "expected Int at $"}
-
-      assert decode("#{x}e#{k}", n("Int")) == exact
+      assert decode("#{x}e#{k}", n("Int")) == {:ok, x * p}
       assert decode("#{x}.#{String.duplicate("0", k + 1)}", n("Int")) == {:ok, x}
 
       if x != 0,

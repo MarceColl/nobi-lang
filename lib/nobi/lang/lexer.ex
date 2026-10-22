@@ -8,7 +8,7 @@ defmodule Nobi.Lang.Lexer do
       :name        value = identifier; a capitalised head absorbs following
                    `.ident` parts (`Counter.Msg.Add`). Keywords are plain names;
                    the parser decides which are keywords.
-      :int         value = integer (must fit i64)
+      :int         value = integer (at most `Rt.max_int_digits/0` digits)
       :str         value = decoded string
       :op          value = "==" "!=" "<=" ">=" "++" "<" ">" "+" "-" "*" "/"
       :lparen :rparen :lbracket :rbracket :lbrace :rbrace
@@ -30,8 +30,6 @@ defmodule Nobi.Lang.Lexer do
   @type t :: %__MODULE__{rest: binary, line: pos_integer, col: pos_integer}
   @type token :: {atom, term, pos_integer, pos_integer}
   @type error :: %{code: String.t(), message: String.t(), line: pos_integer, col: pos_integer}
-
-  @i64_max 9_223_372_036_854_775_807
 
   @doc "Tokenise a whole source. Ends with an `:eof` token."
   @spec tokens(String.t()) :: {:ok, [token]} | {:error, error}
@@ -111,12 +109,12 @@ defmodule Nobi.Lang.Lexer do
 
   defp int(%{line: l, col: c} = lx) do
     {digits, lx} = take_ascii(lx, :digit)
-    n = String.to_integer(digits)
+    max = Nobi.Lang.Rt.max_int_digits()
 
-    if n > @i64_max do
-      {:error, error(l, c, "integer literal is too large (limit #{@i64_max})")}
+    if byte_size(digits) > max do
+      {:error, error(l, c, "integer literal is too long (limit #{max} digits)")}
     else
-      {:ok, {:int, n, l, c}, lx}
+      {:ok, {:int, String.to_integer(digits), l, c}, lx}
     end
   end
 

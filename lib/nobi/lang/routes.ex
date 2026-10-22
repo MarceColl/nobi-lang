@@ -19,8 +19,8 @@ defmodule Nobi.Lang.Routes do
   - Segments are split before percent-decoding, so `%2F` stays inside a
     String param. A literal segment compares after decoding, so `/%6E/5`
     matches `/n/5`: a URL has several spellings, `path/3` gives one.
-  - Int: optional `-`, then digits without leading zeros (`0` alone), in
-    i64 range; `+1`, `007`, `-0`, `1.0` are 404s.
+  - Int: optional `-`, then digits without leading zeros (`0` alone), at
+    most `Rt.max_int_digits/0` of them; `+1`, `007`, `-0`, `1.0` are 404s.
   - Uuid: canonical lowercase 36 characters (`8-4-4-4-12` hex); uppercase
     is a 404.
   - String: any non-empty, valid UTF-8 text after percent-decoding, except
@@ -33,8 +33,8 @@ defmodule Nobi.Lang.Routes do
     `ArgumentError` (the checker prevents it).
   """
 
-  @i64_min -9_223_372_036_854_775_808
-  @i64_max 9_223_372_036_854_775_807
+  alias Nobi.Lang.Rt
+
   @uuid ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
 
   @type entry :: %{segments: [tuple()], app: String.t(), params: [{String.t(), String.t()}]}
@@ -127,9 +127,8 @@ defmodule Nobi.Lang.Routes do
   defp parse("Int", part) do
     with {:ok, s} <- decode(part),
          true <- Regex.match?(~r/\A(0|-?[1-9][0-9]*)\z/, s),
-         n = String.to_integer(s),
-         true <- n >= @i64_min and n <= @i64_max do
-      {:ok, n}
+         true <- byte_size(String.trim_leading(s, "-")) <= Rt.max_int_digits() do
+      {:ok, String.to_integer(s)}
     else
       _ -> :error
     end
@@ -205,8 +204,7 @@ defmodule Nobi.Lang.Routes do
     end
   end
 
-  defp segment("Int", n) when is_integer(n) and n >= @i64_min and n <= @i64_max,
-    do: {:ok, Integer.to_string(n)}
+  defp segment("Int", n) when is_integer(n), do: {:ok, Integer.to_string(n)}
 
   defp segment("Uuid", {:uuid, u}) when is_binary(u) do
     if Regex.match?(@uuid, u), do: {:ok, u}, else: :error

@@ -18,7 +18,7 @@ pinned in `lean/lean-toolchain`. No Mathlib and no other Lake dependencies.
 ```sh
 cd spec/lean
 lake build                         # the spec and nobi-ref
-lake test                          # every #guard, then the VERSION check
+lake test                          # every #guard, the VERSION check and scripts/rule-names.sh
 .lake/build/bin/nobi-ref version   # the spec version
 ```
 

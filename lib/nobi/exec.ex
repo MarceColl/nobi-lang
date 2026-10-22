@@ -88,9 +88,9 @@ defmodule Nobi.Exec do
   `%{code: code, message: message}`, with code:
 
   - `"runtime"`: the program's error, worded as Rust's `EvalError`
-    (`"division by zero"`, `"integer overflow"`, `"no case arm matched"`,
-    `"result too large"`, `"evaluation took more than 1000000 steps"` (a
-    comparison or map key too large to walk), `"no def named `X`"`, …);
+    (`"division by zero"`, `"no case arm matched"`, `"result too large"`,
+    `"evaluation took more than 1000000 steps"` (a comparison or map key
+    too large to walk), `"no def named `X`"`, …);
   - `"timeout"`, `"heap"`: the worker hit a limit and was killed;
   - `"unloaded"`: `unload/1` stopped the worker;
   - `"compile"`, `"internal"`: a fault of the codegen or the runtime;

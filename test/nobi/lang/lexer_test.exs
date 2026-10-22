@@ -32,15 +32,14 @@ defmodule Nobi.Lang.LexerTest do
            ]
   end
 
-  test "an int past i64 is a parse error" do
-    assert {:error, %{code: "parse"}} = Lexer.tokens("9223372036854775808")
-
-    assert err("9223372036854775808") ==
-             {"integer literal is too large (limit 9223372036854775807)", 1, 1}
+  test "an int of more than 4300 digits is a parse error" do
+    assert err(String.duplicate("9", 4301)) ==
+             {"integer literal is too long (limit 4300 digits)", 1, 1}
   end
 
-  test "i64 max lexes, leading zeros are digits" do
-    assert values("9223372036854775807") == [9_223_372_036_854_775_807, nil]
+  test "an int of any size up to 4300 digits lexes, leading zeros are digits" do
+    assert values("9223372036854775808") == [9_223_372_036_854_775_808, nil]
+    assert values(String.duplicate("9", 4300)) == [10 ** 4300 - 1, nil]
     assert values("0 42 007") == [0, 42, 7, nil]
   end
 

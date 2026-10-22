@@ -246,9 +246,8 @@ defmodule Nobi.Lang.CheckTest do
     assert first_error("def F.f() : Int do x = 1 \n x = 2 \n x end").code == "bad-name"
   end
 
-  test "binding a function to a name is rejected" do
-    assert first_error("def F.f() : Int do g = fn (x : Int) -> x end \n g(1) end").code ==
-             "bad-name"
+  test "a function may be bound to a name" do
+    assert ty(checks("def F.f() : Int do g = fn (x : Int) -> x end \n g(1) end")) == @int
   end
 
   # ---------- Rust-only ----------

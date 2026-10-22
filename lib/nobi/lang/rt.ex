@@ -9,7 +9,7 @@ defmodule Nobi.Lang.Rt do
 
   | Nobi | BEAM |
   |---|---|
-  | Int / String / Bool | integer (i64, checked) / UTF-8 binary / boolean |
+  | Int / String / Bool | integer (any size) / UTF-8 binary / boolean |
   | Unit, tuple | `{}` / tuple |
   | Uuid | `{:uuid, binary}` |
   | List / Map | list / Erlang map |
@@ -66,7 +66,7 @@ defmodule Nobi.Lang.Rt do
   ## Errors
 
   A runtime error is `throw({:nobi_error, message})`, worded as Rust's
-  `EvalError` words it: `"integer overflow"`, `"division by zero"`,
+  `EvalError` words it: `"division by zero"`,
   `"no case arm matched"`, ...
 
   ## Equality and order
@@ -89,16 +89,11 @@ defmodule Nobi.Lang.Rt do
 
   import Kernel, except: [div: 2]
 
-  @i64_min -9_223_372_036_854_775_808
-  @i64_max 9_223_372_036_854_775_807
-
   @type value :: term()
 
   # The walk budget (see "the walk budget" below).
   @budget 1_000_000
   @bytes_per_step 64
-
-  defguardp is_i64(n) when is_integer(n) and n >= @i64_min and n <= @i64_max
 
   # ---------- constants ----------
 
@@ -134,25 +129,23 @@ defmodule Nobi.Lang.Rt do
 
   # ---------- arithmetic ----------
 
-  @doc "Checked i64 `a + b`."
-  def add(a, b), do: checked(a + b)
+  @doc """
+  The most digits Nobi reads as an Int from text: a literal, `String.to_int`,
+  `JSON.parse`, a route segment. Parsing costs more than linear time, so a
+  longer text could stall a request; 4300 is CPython's limit for the same
+  reason.
+  """
+  def max_int_digits, do: 4300
 
-  @doc "Checked i64 `a - b`."
-  def sub(a, b), do: checked(a - b)
+  # Ints are bignums: `+ - *` and negation are exact (spec 2.0.0).
+  def add(a, b), do: a + b
+  def sub(a, b), do: a - b
+  def mul(a, b), do: a * b
+  def neg(a), do: -a
 
-  @doc "Checked i64 `a * b`."
-  def mul(a, b), do: checked(a * b)
-
-  @doc "Checked i64 `a / b`, truncating toward zero; `b == 0` is an error."
+  @doc "`a / b`, truncating toward zero; `b == 0` is an error."
   def div(_a, 0), do: error!("division by zero")
-  def div(a, b), do: checked(Kernel.div(a, b))
-
-  @doc "Checked i64 `-a`."
-  def neg(a), do: checked(-a)
-
-  @doc "`n` if it is an i64, else the overflow error (an Int literal's check)."
-  def checked(n) when is_i64(n), do: n
-  def checked(_), do: error!("integer overflow")
+  def div(a, b), do: Kernel.div(a, b)
 
   @doc "`a ++ b` on strings."
   def concat(a, b) when is_binary(a) and is_binary(b), do: a <> b
